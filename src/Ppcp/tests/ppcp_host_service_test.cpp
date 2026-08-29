@@ -441,6 +441,63 @@ TEST_F(HostServiceClock, TwoDevicesSharingOneMultiUseCodeAreStillTwoConnections)
         << "the second device collapsed onto the first because they share a pairing";
 }
 
+// ── §6.1's duplicate-link backstop ─────────────────────────────────────────
+//
+// One phone, one link, whatever route it took.  The wired takeover handles the
+// ordinary collision; this covers a phone that originates a second link anyway,
+// from a scanned code or an endpoint carried in one (RV 4.3d).
+//
+// ⛔ The cost of not having it is SILENT WRONG DATA — two Phone rows, two sets
+// of preview consumers, and one phone's Candidates entering the arbiter twice —
+// so it is worth a test that fails loudly if the rule is ever relaxed.
+TEST_F(HostServiceClock, OnePhoneDeclaringTwiceKeepsTheLinkItAlreadyHas)
+{
+    Phone shared(&m_svc, /*maxUses=*/2);
+    ASSERT_TRUE(shared.ok());
+    ASSERT_TRUE(shared.dial(m_svc.port(), 21));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_TRUE(shared.dial(m_svc.port(), 22));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 2; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 2) << "two links were needed to set the case up";
+
+    // The SAME phone behind both: one counterpart id, declared on each link.
+    ASSERT_TRUE(m_svc.declareForTest(0, QStringLiteral("peer:the-same-phone")));
+    ASSERT_TRUE(m_svc.declareForTest(1, QStringLiteral("peer:the-same-phone")));
+
+    // The close is deferred onto the event loop — we are inside the newcomer's
+    // own event drain when the duplicate is spotted — so let it run.
+    for (int i = 0; i < 200 && m_svc.connectedCount() > 1; ++i) spin(10);
+
+    EXPECT_EQ(m_svc.connectedCount(), 1)
+        << "one phone is holding two links; its Candidates will be arbitrated twice";
+}
+
+// ⛔ THE REGRESSION GUARD FOR THE MISTAKE THE DESIGN NAMES: keying the backstop
+// on the PAIRING rather than the counterpart.  A `mu > 1` code is two DEVICES
+// sharing one pairing — "pairing several devices from one displayed code is a
+// real workflow" — and collapsing them would take down the phone that arrived
+// first the moment the second one scanned the same code.  A pairing is not a
+// phone; a LINK is.
+TEST_F(HostServiceClock, TwoDevicesOnOnePairingSurviveTheDuplicateBackstop)
+{
+    Phone shared(&m_svc, /*maxUses=*/2);
+    ASSERT_TRUE(shared.ok());
+    ASSERT_TRUE(shared.dial(m_svc.port(), 23));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_TRUE(shared.dial(m_svc.port(), 24));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 2; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 2);
+
+    // One pairing, but two DIFFERENT phones — which is the whole point of mu>1.
+    ASSERT_TRUE(m_svc.declareForTest(0, QStringLiteral("peer:phone-one")));
+    ASSERT_TRUE(m_svc.declareForTest(1, QStringLiteral("peer:phone-two")));
+    for (int i = 0; i < 50; ++i) spin(10);
+
+    EXPECT_EQ(m_svc.connectedCount(), 2)
+        << "the backstop collapsed two genuine devices that share a pairing — "
+           "it is keyed on the pairing rather than the counterpart";
+}
+
 // 7.3a — and the use after that is refused, `mu` being 2.  The counterpart to
 // the test above: sharing a pairing must not mean sharing it for ever.
 TEST_F(HostServiceClock, AMultiUseCodeIsStillSpentOnceItsUsesAreGone)
@@ -1026,12 +1083,17 @@ TEST(WiredPresenceRecord, NothingResolvingIsSilenceAndNotAnError)
     EXPECT_TRUE(got.pairingId.empty());
 }
 
-// The gate is off unless somebody asks for it, and the code says so out loud.
-TEST(WiredPresenceRecord, TheWiredPathIsOffUnlessTheEnvironmentAsksForIt)
+// ⛔ WIRED IS ON BY DEFAULT as of 29 Aug 2026; the env var is an ESCAPE HATCH
+// and `=0` is the only value that closes it.
+//
+// ⚠ The asymmetry is the point and is worth a test of its own: a mistyped
+// variable must never silently disable a transport an operator is relying on,
+// so anything that is not exactly "0" leaves the cable enabled.
+TEST(WiredPresenceRecord, TheWiredPathIsOnUnlessTheEnvironmentTurnsItOff)
 {
-    const bool on = Ppcp::PpcpWiredLink::enabled();
     const char *v = std::getenv("PINPOINT_PPCP_WIRED");
-    EXPECT_EQ(on, v != nullptr && std::string(v) == "1");
+    const bool forcedOff = v != nullptr && std::string(v) == "0";
+    EXPECT_EQ(Ppcp::PpcpWiredLink::enabled(), !forcedOff);
 }
 
 // ── Contract C2 — a device the host DIALS, without a cable ─────────────────

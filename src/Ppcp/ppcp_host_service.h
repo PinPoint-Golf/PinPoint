@@ -281,6 +281,13 @@ public:
     void adoptLinkForTest(std::unique_ptr<Ppcp::PeerConnection> link,
                           const QString &resolvedPairingId);
 
+    // ⚠ TEST SEAM for §6.1's duplicate-link backstop, and it exists because the
+    // backstop is unreachable from the suite otherwise: `counterpartId` is only
+    // known at `onDeclare()`, which needs a `declare` off a real wire.  Drives
+    // the same function the engine drives, with a synthetic counterpart id.
+    // Returns false if `index` names no phone.
+    bool declareForTest(std::size_t index, const QString &counterpartId);
+
     // RV §4 — publish a code.  Fresh psk and sid per code (7.3d), every
     // reachable address in `ep` (4.3d), `mu: 1` (7.3a) and a short `exp`
     // (7.3c).  Displaces whatever code was showing, which 7.3b then invalidates.
@@ -759,10 +766,8 @@ private:
     // one — and the worker thread `stop()` joins in its destructor — go before
     // the object the closure points at.
     //
-    // ⚠ OFF UNLESS `PINPOINT_PPCP_WIRED=1`, and the gate is temporary: design
-    // §6.1's advertisement arbitration is Phase 2, and until it exists a phone
-    // that is both plugged in and on WiFi connects twice.  See
-    // `PpcpWiredLink::enabled()`.
+    // ⚠ ON BY DEFAULT; `PINPOINT_PPCP_WIRED=0` forces it off.  See
+    // `PpcpWiredLink::enabled()` for what made defaulting on safe.
     std::unique_ptr<Ppcp::PpcpWiredLink> m_wired;
     void startWired();
     void stopWired();

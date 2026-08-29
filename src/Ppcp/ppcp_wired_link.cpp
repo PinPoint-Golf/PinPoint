@@ -255,8 +255,12 @@ bool resolveFirstWiredPeer(const WiredPresence &record, const IdentityResolver &
 
 bool PpcpWiredLink::enabled()
 {
+    // Default ON.  `PINPOINT_PPCP_WIRED=0` is the escape hatch and the ONLY
+    // value that turns it off; anything else (unset, "1", nonsense) leaves the
+    // cable enabled, because a mistyped variable must not silently disable a
+    // transport an operator is relying on.
     const char *v = std::getenv("PINPOINT_PPCP_WIRED");
-    return v != nullptr && v[0] == '1' && v[1] == '\0';
+    return !(v != nullptr && v[0] == '0' && v[1] == '\0');
 }
 
 PpcpWiredLink::PpcpWiredLink(QObject *parent) : QObject(parent) {}
@@ -319,7 +323,7 @@ void PpcpWiredLink::start(Usbmux::Provider provider)
     }
     m_jobCv.notify_one();
 
-    ppWarn() << "[ppcp-usb] wired path armed (PINPOINT_PPCP_WIRED=1) —"
+    ppWarn() << "[ppcp-usb] wired path armed —"
              << m_provider.path.c_str();
 }
 
@@ -349,7 +353,7 @@ void PpcpWiredLink::stop()
 
 QString PpcpWiredLink::describe() const
 {
-    if (!enabled()) return QStringLiteral("wired: off (PINPOINT_PPCP_WIRED unset)");
+    if (!enabled()) return QStringLiteral("wired: off (PINPOINT_PPCP_WIRED=0)");
     if (!m_running) return QStringLiteral("wired: no usbmux provider");
     return QStringLiteral("wired: watching, %1 attached, %2 dialled, %3 adopted")
         .arg(m_attachedSeen)

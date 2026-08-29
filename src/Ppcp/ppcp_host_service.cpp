@@ -828,6 +828,18 @@ void PpcpHostService::adoptLinkForTest(std::unique_ptr<PeerConnection> link,
     adoptLink(std::move(link), resolvedPairingId);
 }
 
+bool PpcpHostService::declareForTest(std::size_t index, const QString &counterpartId)
+{
+    if (index >= m_phones.size()) return false;
+    ppcp_peer_desc desc{};
+    const QByteArray id = counterpartId.toUtf8();
+    if (ppcp_id_set(&desc.id, id.constData(), static_cast<std::size_t>(id.size())) != PPCP_OK)
+        return false;
+    ppcp_id_set_z(&desc.product.model, "test phone");
+    onDeclare(m_phones[index].get(), &desc);
+    return true;
+}
+
 void PpcpHostService::dropPhone(Phone *ph, const char *why)
 {
     if (!ph) return;
@@ -1029,13 +1041,72 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
 {
     if (!ph || !desc) return;
 
+    // ── §6.1's BACKSTOP — one phone, one link, whatever route it took ───────
+    //
+    // ⛔ THIS RUNS BEFORE `registerPpcpPeer()` AND BEFORE `counterpartId` IS
+    // ASSIGNED, AND BOTH ORDERINGS ARE LOAD-BEARING.  Everything downstream of
+    // a declaration is keyed on the COUNTERPART, not on the Phone — the camera
+    // registry, the timebase mappings, the offer list — and a duplicate link
+    // shares its counterpart id with the incumbent by definition.  Register the
+    // newcomer's cameras first and `dropPhone()` would then call
+    // `detachAll(counterpartId)` and tear out the INCUMBENT's cameras while
+    // closing the duplicate: the backstop would cause the outage it exists to
+    // prevent.  Leaving `ph->counterpartId` empty is what makes the close inert
+    // — every counterpart-keyed teardown in dropPhone() is guarded on it.
+    //
+    // The wired takeover handles the ordinary collision: the cable dials, the
+    // WiFi link is dropped, one link remains.  It does not cover the PHONE
+    // originating a second link anyway — from a scanned pairing code, or an
+    // endpoint carried in one (`RV` 4.3d).  Its own reconnect will not do that
+    // (it dials only when no link is up), so this takes a deliberate human
+    // action, which is exactly what someone troubleshooting a connection does.
+    //
+    // ⛔ The cost of missing it is silent wrong data rather than a visible
+    // error: two `Phone` rows, two sets of preview consumers, and ONE PHONE'S
+    // CANDIDATES ENTERING THE ARBITER TWICE.  `adoptLink()` deliberately does
+    // not deduplicate by pairing — with `mu > 1` several devices legitimately
+    // share one — so nothing upstream of here can catch it.
+    //
+    // ⛔ KEYED ON THE COUNTERPART, NEVER ON THE PAIRING.  `Peer.id` is the phone
+    // (`CORE` 5.1a, stable for the entity's lifetime); a pairing is not a phone.
+    //
+    // ⚠ IT CANNOT BE DONE EARLIER THAN THIS FUNCTION.  The counterpart id is
+    // only known here, from `desc->id` — after both TLS handshakes and the
+    // `hello` exchange.  Two wasted handshakes is the price of a backstop.
+    //
+    // ⚠ KEEP THE INCUMBENT, ALWAYS, whichever transport it is on: it holds the
+    // sync history, and a rule with no comparison in it cannot oscillate.
+    // ✅ It does not fight the wired takeover, which drops the WiFi phone BEFORE
+    // adopting the cable link — by the time the newcomer declares there is no
+    // incumbent left to keep.
+    const QString incomingId =
+        QString::fromUtf8(desc->id.v, static_cast<int>(desc->id.len));
+    for (const std::unique_ptr<Phone> &other : m_phones) {
+        if (other.get() == ph) continue;
+        if (other->counterpartId.isEmpty() || other->counterpartId != incomingId) continue;
+
+        ppWarn() << "[ppcp] this phone already has a link — keeping the one it has "
+                    "and closing the newcomer. One phone, one link (design §6.1)";
+        // ⚠ Deferred: we are inside this peer's own event drain
+        // (drainEvents() -> onDeclare), and destroying the Phone that owns the
+        // engine being drained would pull the ground from under the caller.
+        Phone *doomed = ph;
+        QMetaObject::invokeMethod(
+            this, [this, doomed] {
+                for (const std::unique_ptr<Phone> &p : m_phones)
+                    if (p.get() == doomed) { dropPhone(doomed, "duplicate link"); return; }
+            },
+            Qt::QueuedConnection);
+        return;   // ⛔ nothing below may run for a link we are closing
+    }
+
     // MSG 3.3 — a peer's cameras exist the moment it declares and at no other
     // moment.  There is no bus to walk and no scan to run: this is the whole of
     // PPCP camera discovery, and it is why `VideoInputFactory::enumerateDevices()`
     // has never had a PPCP branch.
     const int n = VideoInputFactory::registerPpcpPeer(desc);
 
-    ph->counterpartId = QString::fromUtf8(desc->id.v, static_cast<int>(desc->id.len));
+    ph->counterpartId = incomingId;
     // 4.4d's habit of mind, one layer in: a counterpart's product strings are
     // display text and are never an identifier or a trust signal.
     ph->name = QString::fromUtf8(desc->product.model.v,
@@ -1284,14 +1355,13 @@ void PpcpHostService::startDiscovery()
 // ordinary state, so none of it reaches `status`, `noteFailure()` or a banner.
 // One `ppWarn()` line each, for somebody who went looking.
 //
-// ⛔ THE GATE IS TEMPORARY AND ITS REPLACEMENT IS NAMED.  `PINPOINT_PPCP_WIRED`
-// is off by default because design §6.1's advertisement arbitration is Phase 2:
-// until a pairing's mDNS advertisement is suppressed before the wired dial, a
-// phone that is both plugged in and on WiFi produces TWO dials that both
-// succeed — two `Phone` rows, duplicated preview consumers, and one phone's
-// Candidates entering the arbiter twice, because `adoptLink()` deliberately
-// does not deduplicate by pairing.  The gate is what keeps Phase 1's M1
-// measurable; §6.1 is what removes it.
+// ✅ WIRED IS ON BY DEFAULT.  `PINPOINT_PPCP_WIRED=0` forces it off and is an
+// escape hatch rather than a feature flag.  Two mechanisms make that safe, and
+// neither is the advertisement suppression §6.1 first proposed: the cable takes
+// over from an idle WiFi link instead of racing it, and `onDeclare()` closes a
+// duplicate link keyed on the counterpart — without which one phone could hold
+// two links and enter the arbiter twice.  The old gate kept Phase 1's M1
+// measurable — the cable on and the radio quiet — and it has done that job.
 void PpcpHostService::startWired()
 {
     if (m_wired) return;
@@ -2203,7 +2273,7 @@ QString PpcpHostService::diagnosticExport() const
                .arg(m_advert ? QString::fromStdString(m_advert->describe())
                              : tr("no service advertisement on this platform"))
                .arg(m_wired ? m_wired->describe()
-                            : QStringLiteral("wired: off (PINPOINT_PPCP_WIRED unset)"));
+                            : QStringLiteral("wired: off (PINPOINT_PPCP_WIRED=0)"));
 }
 
 // ── What a failed arrival is allowed to say ─────────────────────────────────

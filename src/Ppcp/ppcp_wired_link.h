@@ -206,18 +206,17 @@ class PpcpWiredLink : public QObject
     Q_OBJECT
 
 public:
-    // ⚠ THE GATE IS TEMPORARY AND SAYS SO.  `PINPOINT_PPCP_WIRED=1` turns the
-    // whole wired path on; it is OFF by default.
+    // ⛔ WIRED IS ON BY DEFAULT AS OF 29 Aug 2026, and the env gate that used
+    // to hold it back is gone.  `PINPOINT_PPCP_WIRED=0` still forces it OFF —
+    // an escape hatch for a range that hits trouble, not a feature flag.
     //
-    // ⛔ WHAT REPLACES IT IS DESIGN §6.1, WHICH IS PHASE 2.  Until the
-    // per-pairing advertisement suppression of §6.1 exists, a phone that is
-    // both plugged in and on WiFi DOUBLE-CONNECTS: the two paths dial in
-    // opposite directions and fire independently, and `adoptLink()`
-    // deliberately does not deduplicate by pairing (with `mu > 1` several
-    // devices legitimately share one).  The result is two `Phone` rows,
-    // duplicated preview consumers and one phone's Candidates entering the
-    // arbiter twice.  This flag is what keeps Phase 1's M1 measurable — the
-    // wired path on and the WiFi path quiet — and it comes out when §6.1 lands.
+    // ⚠ WHAT MADE IT SAFE TO DEFAULT ON was not the advertisement suppression
+    // §6.1 originally proposed — that could never win the race (the host may
+    // suppress only once presence is PROVEN, and proof arrives the same instant
+    // the phone dials).  Two things replaced it: the cable TAKES OVER from an
+    // idle WiFi link rather than racing it, and `onDeclare()` closes a duplicate
+    // link keyed on the counterpart.  Without that second one a phone could hold
+    // two links and enter the arbiter twice, which is silent wrong data.
     static bool enabled();
 
     explicit PpcpWiredLink(QObject *parent = nullptr);
