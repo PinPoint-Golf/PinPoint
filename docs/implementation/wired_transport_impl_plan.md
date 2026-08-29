@@ -431,7 +431,7 @@ Phase 2 one. Waves 1–2 above; measurements are mine, not an agent's.
 | `[x]` | PPC | *(wave 1, PPC agent — contract C5)* Start `PpcpListener` on the wired path with `listener: true` in `DevicePeer`; publish `psk_identity` and the actual port. Record lists persisted pairings **plus any scanned, not-yet-connected code**, mirroring the host's resolver. |
 | `[x]` | PPC | *(wave 1, PPC agent)* `isIdleTimerDisabled` while a session is live — one line, owed to capture regardless, and load-bearing for USB Restricted Mode. |
 | `[x]` | — | ✅ **M12 — DISCHARGED 29 Aug, over a real cable. The device-side mux dials IPv4 loopback; no fallback needed.** `Connect(device, 50915)` → `Number=0`, and the presence record came back: **118 bytes, fully consumed, no framing**, `ENC` 4e key order (`dl, pv, role, peers`) in the *live* record and not merely the fixture, `dl` = "iPhone", **two held pairings → two listeners on ephemeral ports 57131/57132** exactly as contract C5 predicts, both identities 17 bytes starting `0x01` and neither valid UTF-8. `requiredInterfaceType = .loopback` is NOT required. ~~⛔ M12 — does the device-side mux connect to `127.0.0.1` or `::1`?~~ `NWParameters.requiredLocalEndpoint` **pins the address family**, so the presence listener is IPv4-loopback only. If usbmuxd on the device dials `::1`, the presence read fails and the phone simply looks un-wired — an indistinguishable, silent failure. ✅ Fallback if it bites: `requiredInterfaceType = .loopback`, which covers both families and keeps the LAN exclusion §5.3 needs. ⚠ Needs the cable; unanswerable in a simulator. **Check this FIRST if M1 cannot read a presence record.** |
-| `[~]` | — | **Mine, not an agent's.** ✅ M1a, M2, M12 done; ⛔ **M1b DISMISSED as circular (Mark, 29 Aug) — do not re-run.** **M1a/M1b** (`min_rtt` wired vs WiFi, Phase 0 fix in place), **M10** (sustained capture before thermal throttle, cabled vs not — ⚠ screen for issue #101's ~8.8 s gap signature first), **M3** (does bulk poison control), **M5** (does `Connect` need device trust — needs an *untrusted* device). |
+| `[~]` | — | **Mine, not an agent's.** ✅ M1a, M2, M12 done; ⛔ **M1b DISMISSED as circular (Mark, 29 Aug) — do not re-run.** **M1a/M1b** (`min_rtt` wired vs WiFi, Phase 0 fix in place), **M10** (sustained capture before thermal throttle, cabled vs not — ⚠ screen for issue #101's ~8.8 s gap signature first), ~~M3~~ ✅ done — bulk does NOT poison control, **M5** (does `Connect` need device trust — needs an *untrusted* device). |
 
 **Phase 1 done:** a phone on a cable reaches `session_open` with a published
 `TimebaseRelation`, and M1/M3/M10 are numbers in this tracker.
@@ -555,6 +555,54 @@ deferred, so no later session should re-open it: ⛔ **do not re-run this test.*
 M1a/M2 stand on their own, and §1.1's contention argument is accepted as an
 argument rather than carried as an open measurement.
 
+### Measurement — M3 (does bulk poison control?) · ✅ DISCHARGED — it does not
+
+**1750 MB pushed over the same USB pipe in 58.5 s (70 × 25 MB, all verified to
+succeed, 29.9 MB/s sustained) while the wired sync trace ran.**
+
+| window | n | `min_rtt` min/med/max | `offset_sigma` min/med/max |
+|---|---|---|---|
+| BEFORE (quiet) | 287 | 0.7645 / 0.7645 / 0.7645 ms | 0.349 / 0.602 / 155.131 ms |
+| **DURING (1750 MB)** | 58 | **0.7645 / 0.7645 / 0.7645 ms** | **0.347 / 0.348 / 0.357 ms** |
+| AFTER (quiet) | 35 | 0.7645 / 0.7645 / 0.7645 ms | 0.347 / 0.348 / 0.361 ms |
+
+- ⛔ **`min_rtt` did not move by one part in ten thousand** — 0.7645 ms in all
+  three windows. 1.75 GB of concurrent traffic across the same pipe changed it
+  by nothing at all.
+- **Zero probes lost** — `probes` issued equalled `observed` in every sample.
+- Worst `offset_sigma` under load 0.357 ms → **14.0× gate margin**.
+
+⚠ **Compare DURING against AFTER, not against BEFORE.** BEFORE's max of 155 ms
+is the startup convergence transient, so a naive reading would suggest load
+*improved* things. It did not: DURING and AFTER are indistinguishable
+(median 0.348 vs 0.348 ms, max 0.357 vs 0.361 ms).
+
+✅ **Verdict: bulk does not poison control over usbmux, so §8's head-of-line
+worry does not reproduce and PHASE 3 IS NOT JUSTIFIED on this evidence.** §8
+hoped min-RTT filtering would be *"robust to some of this"* and said *"'some' is
+a measurement, not an assertion"* — measured, it is robust to all of it.
+
+⚠ **Two limits on the claim, stated rather than buried.** The load went through
+usbmux's **file-copy service, not the app's own channel-1 tunnel** — the same
+daemon and the same physical pipe, which is exactly §8's stated concern, but not
+literally a PPCP bulk channel. And 29.9 MB/s is ~50% of the USB 2 raw ceiling;
+it is **~5× the 6.25 MB/s the encoder actually sustains** (§8), so it exceeds
+real demand, but the bus was not pinned at 100%.
+
+### Measurement — M4 (wired bulk throughput) · ✅ wired half done
+
+**29.9 MB/s sustained** (1750 MB / 58.5 s); individually timed 25 MB copies at
+0.85–0.89 s, i.e. 28.2–29.4 MB/s. §8 predicted *"roughly 30-40 MB/s through
+usbmux on USB 2"* — measured at the **low end but inside** the range, giving
+**4.8× headroom** over the encoder's 6.25 MB/s rather than §8's hoped 6×.
+
+⚠ **USB-C is a connector, not a speed, and three independent lines agree this
+phone is USB 2.** The model (`iPhone17,3`, non-Pro), the device's own
+`ConnectionSpeed = 480000000` from `ListDevices`, and the measured 29.9 MB/s at
+50% of the 60 MB/s raw ceiling. On USB 3 the same 1750 MB would have taken ~2 s
+rather than 58.5 s. ✅ This is precisely why §8 makes the split-transport
+decision **per device**: a Pro phone is a bulk win on the cable, this one is not.
+
 ### Measurement — M2 (time-to-target) · ✅ DISCHARGED, and it is the operator's number
 
 How long the cable takes to reach what WiFi needed **350 s** to reach:
@@ -650,4 +698,6 @@ iPhone 16), so the decision is per device, not global policy.
 | 2026-08-29 | 1 | ⛔ **I fixed the one defect the agent flagged and ran out of build budget for: a ~10 s hang on quit.** `stop()` joins the worker, which could be inside `Connector::connect()` at the default `handshakeTimeoutMs` of 10 s — quitting mid-dial froze the GUI thread with no window and no explanation, the classic "it hung on exit". Two changes: `kWiredHandshakeMs = 3000` on the wired path only (min_rtt over usbmux is ~1 ms, so a handshake still unfinished after 3 s is broken, not busy), and a `stopping()` check before **each** of the two phases that can block — the presence dial-and-read, and the TLS connect. Re-verified: `ppcp_host_service_test` passes, app links. |
 | 2026-08-29 | 1 | ⚠ **A coupling to watch, reported by the agent rather than hidden.** "We dialled" is derived from `!resolvedPairingId.isEmpty()`, because C2 fixes the signature and that is the only in-band signal. It decides **three** things at once: 7.3a spend accounting, the `listener` flag, and whether `hello` is sent. Documented at `ppcp_host_service.h:594`. ⛔ If a future non-dialling caller ever passes a resolved pairing, all three break together and none of them loudly. Worth a real `enum class Origin { Accepted, Dialled }` if a third caller ever appears. |
 | 2026-08-29 | 1 | ⚠ **Phase 1 is code-complete on both hosts and NOTHING HAS CROSSED A CABLE.** The stub usbmuxd's tunnel is a byte echo, not a PPCP listener, so `runJob()`'s dial→handshake steps are reached only on hardware. **M12 runs first** — if the device-side mux dials `::1` the presence read fails silently and every later measurement chases the wrong fault. Then M1a/M1b, M3, M10. Closing the last gap in the suite would need a "forward the tunnel to this local port" mode in the stub. |
+| 2026-08-29 | 1 | ⛔ **DEFECT FOUND WHILE SETTING UP M3, and it is worse than the measurement it interrupted: the wired path only ever fires on a usbmux `Attached` event, so in the MOST COMMON REAL SEQUENCE IT NEVER FIRES AT ALL.** Observed live: phone already on the cable, host started, one presence read at `t+3 s` refused with `Number=3` (the app was backgrounded), **and the host never looked again**. When the capture app was foregrounded a minute later and began serving presence, nothing retried — and the phone's own WiFi dial won the link (`transport=wifi`). Exactly one wired attempt was made in the whole run. ⚠ *"Phone left plugged in to charge, operator opens the app"* is the normal way this product will be used and it produces **no `Attached` event**, so wired would essentially never engage in the field. ✅ The fix is a periodic re-probe with backoff for devices that are attached but unresolved — §6.1 rule 4 says *"presence unreadable → change nothing"*, which forbids disturbing WiFi and does **not** say "never look again". **Fix before wired is enabled by default.** |
+| 2026-08-29 | 1 | ✅ The §6.2 diagnostics line earned its keep the moment it mattered: the refusal printed *"the capture app is not running or not in the foreground (or this computer is not trusted; M5 pending)"* — naming both causes of `Number=3` per the correction made earlier today, rather than guessing at one. That single line is what identified the defect above in one read instead of a debugging session. |
 | | | ⚠ **Next session starts here.** Read design doc §1, §1.1 and §7.1, then Findings above. Phase 1 proceeds; the accuracy argument alone no longer carries it, and ~~M1b is the measurement that matters~~ — **withdrawn; M1b was dismissed as circular**. |
