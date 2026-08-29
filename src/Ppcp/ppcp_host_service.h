@@ -60,6 +60,7 @@
 #include <vector>
 #include <thread>
 
+#include <QDateTime>
 #include <QObject>
 #include <QHash>
 #include <QSet>
@@ -734,6 +735,13 @@ private:
     // `codeChanged` once a second rather than fifty times.  -1 means "no code
     // has been counted yet"; 0 is a real reading and cannot stand in for it.
     int                 m_lastSecondsLeft = -1;
+
+    // 6.3 convergence trace, opt-in (PINPOINT_SYNC_TRACE=1).  Off by default:
+    // it prints once a second per related timebase, which is noise in an
+    // ordinary session and the only way to see a slow convergence in a real one.
+    const bool          m_syncTrace = !qEnvironmentVariableIsEmpty("PINPOINT_SYNC_TRACE");
+    std::int64_t        m_lastSyncTraceMs = 0;
+    const std::int64_t  m_syncTraceStartMs = QDateTime::currentMSecsSinceEpoch();
     Ppcp::QrCode        m_qr;
     QVariantList        m_qrRows;
     QStringList         m_codeEndpoints;

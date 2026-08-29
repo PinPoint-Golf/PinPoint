@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include <QDateTime>
+#include <cmath>
 #include <QDir>
 #include <QSocketNotifier>
 
@@ -1583,6 +1584,57 @@ void PpcpHostService::onTick()
     // 7.3b's periodic half, and 7.2d's: a code nobody used still holds a K_tls
     // until something removes it.
     if (m_rv.reap() > 0) emit codeChanged();
+
+    // ── 6.3 convergence trace (PINPOINT_SYNC_TRACE=1) ──────────────────────
+    // ⚠ THE TWO TERMS OF THE SIGMA ARE MEASURED APART, because only their
+    // RATIO says what a slow convergence is waiting for.  6.3's published
+    // sigma is sqrt(offset_sigma^2 + (elapsed * skew_sigma)^2), so evaluating
+    // the SAME relation at `observed_at` and again five seconds later
+    // separates them without libppcp having to expose either: the first is the
+    // offset term alone, and the second gives the skew term by subtraction.
+    // The offset term is floored by half the minimum RTT and cannot be tuned
+    // away; the skew term collapses as the retained window comes to span real
+    // time.  Which of the two is holding the estimate above the shot bridge's
+    // 5 ms gate decides whether the answer is a different schedule or a
+    // different method, and guessing between those is how two minutes stayed
+    // unexplained.
+    if (m_syncTrace) {
+        const std::int64_t nowMono = QDateTime::currentMSecsSinceEpoch();
+        if (nowMono - m_lastSyncTraceMs >= 1000) {
+            m_lastSyncTraceMs = nowMono;
+            for (const std::unique_ptr<Phone> &p : m_phones) {
+                const PpcpLiveSession &live = p->peer->liveSession();
+                for (const std::string &tb : live.relatedTimebases()) {
+                    std::int64_t atNs = 0;
+                    if (!live.observedAtNs(tb, &atNs)) continue;
+                    std::int64_t off = 0;
+                    double s0 = 0.0, s5 = 0.0;
+                    if (!live.offsetToRefNs(tb, atNs, &off, &s0)) continue;
+                    if (!live.offsetToRefNs(tb, atNs + 5'000'000'000LL, &off, &s5)) continue;
+                    // s5^2 = s0^2 + (5 s * skew)^2, so the skew term falls out.
+                    const double drift5 = (s5 > s0) ? std::sqrt(s5 * s5 - s0 * s0) : 0.0;
+                    const double skewPpm = drift5 / 5.0e9 * 1.0e6;
+                    ppWarn()
+                        << "[ppcp-sync] t+" << (nowMono - m_syncTraceStartMs) / 1000 << "s "
+                        << "probes=" << live.stats().probesQueued
+                        << "observed=" << [&]() -> qulonglong {
+                               // Exchanges actually FOLDED IN, against probes
+                               // sent.  The gap between the two is the whole
+                               // diagnosis: a probe nobody answers costs the
+                               // same as one that lands and teaches nothing.
+                               const ppcp_sync_estimator *e =
+                                   ppcp_peer_sync_estimator_at(live.peer(), 0);
+                               return e ? (qulonglong)ppcp_sync_estimator_count(e) : 0;
+                           }()
+                        << tb.c_str()
+                        << " offset_sigma=" << s0 / 1.0e6 << "ms"
+                        << " skew_sigma=" << skewPpm << "ppm"
+                        << " sigma@5s=" << s5 / 1.0e6 << "ms"
+                        << (s5 < 5.0e6 ? "  <-- UNDER THE 5ms GATE" : "");
+                }
+            }
+        }
+    }
 
     // RV-6 (H10) — drive the single attempt 11.3d1 allows, off the timer that
     // is already running.  `poll()` applies 11.3e's 30- and 60-second timers,
