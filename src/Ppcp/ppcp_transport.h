@@ -140,6 +140,12 @@ struct TlsOutcome {
     std::string kexMode;        // "psk_dhe_ke" | "psk_ke" | "ecdhe_psk" | "psk"
     std::string group;          // negotiated FFDHE/ECDHE group, empty if none
     bool forwardSecrecy = false;  // true iff the mode carries an ephemeral DH
+    // ⚠ A RESUMED HANDSHAKE NEVER CALLS THE PSK CALLBACK, so RV 5.3's identity
+    // resolution — the whole of the authentication decision, and the only place
+    // this host learns WHICH pairing it is talking to — does not run.  Recorded
+    // because a link that cannot be attributed to a pairing is a fact about the
+    // connection, not a detail of the TLS stack.
+    bool resumed = false;
 
     // One line, safe for a log or a diagnostic export.  No identity, no key.
     std::string describe() const;

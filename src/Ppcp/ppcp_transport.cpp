@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
@@ -434,6 +435,36 @@ SSL_CTX *makeContext(bool server, const TlsCapabilities &caps)
         // SSL_read_early_data, so there is no path that could accept it even if
         // this line were removed.  Tickets themselves stay permitted (7.5d).
         SSL_CTX_set_max_early_data(ctx, 0);
+
+        // ⛔ AND RESUMPTION GOES WITH IT, WHICH THE LINE ABOVE DID NOT COVER.
+        //
+        // 7.5d permits tickets; it does not require them, and permitting them
+        // here cost this host the one thing it must know about a link.  A
+        // RESUMED handshake does not call `pskFindSessionCb`/`psk12ServerCb`,
+        // so RV 5.3's identity resolution — which IS the authentication
+        // decision, and the only place `ResolvedPairing::pairingId` is ever
+        // set — never runs.  The link comes up on a valid session and is
+        // adopted with an EMPTY pairing id, which makes it invisible to
+        // `phoneByPairing()`, `noteLinkEstablished()` and `notePeerName()`
+        // alike: the home screen says connected, Settings -> Phones says
+        // disconnected, the pairing is never remembered, and nothing anywhere
+        // says why.
+        //
+        // ⚠ MEASURED, NOT REASONED: with the cache left at OpenSSL's server
+        // default, six consecutive dials from one iPhone produced three links
+        // with no pairing id.  Intermittent by construction — it depends on
+        // whether the client had a session to offer — which is exactly why it
+        // read as "works sometimes" for days.
+        //
+        // A full PSK handshake per connection is what this protocol is built
+        // for: there are three channels per link and a link is made once, so
+        // the cost is invisible, and every one of them then resolves its
+        // pairing the way 5.3 says it must.  `PINPOINT_PPCP_ALLOW_RESUME`
+        // restores the old behaviour for anyone who needs to see the fault.
+        if (std::getenv("PINPOINT_PPCP_ALLOW_RESUME") == nullptr) {
+            SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
+            SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET);
+        }
     } else {
         SSL_CTX_set_psk_use_session_callback(ctx, pskUseSessionCb);
         SSL_CTX_set_psk_client_callback(ctx, psk12ClientCb);
@@ -448,6 +479,7 @@ TlsOutcome outcomeOf(SSL *ssl)
 {
     TlsOutcome o;
     o.version = SSL_get_version(ssl);
+    o.resumed = SSL_session_reused(ssl) == 1;
 
     const SSL_CIPHER *c = SSL_get_current_cipher(ssl);
     if (c) {
@@ -1015,6 +1047,7 @@ std::string TlsOutcome::describe() const
     std::string s = version + " " + cipher + " " + kexMode;
     if (!group.empty()) s += " (" + group + ")";
     s += forwardSecrecy ? " [forward secrecy]" : " [no forward secrecy]";
+    if (resumed) s += " [resumed — no identity resolution]";
     return s;
 }
 
@@ -1405,8 +1438,23 @@ struct Listener::Impl {
     // stream binding one of those is parked here rather than mistaken for the
     // start of a new link.  `acceptChannelFor()` collects it whenever it asks,
     // which no longer has to be the instant it arrives.
+    //
+    // ⚠ AND A PARK IS NOT A HOME.  Nothing tells this listener that a link has
+    // gone; the owner of the PeerConnection knows, and it is on another thread.
+    // So a parked channel carries the moment it was parked and `expireParked()`
+    // sweeps it on the same `bindTimeoutMs` the other two sweeps use — freeing
+    // the socket and the SSL on the accept thread that created them, which is
+    // the whole reason this is a sweep and not an erase from the far side.
+    // Nothing live is lost by it: `PpcpHostService` polls `acceptChannelFor()`
+    // for every link it still holds on every pass of its accept loop, which is
+    // three orders of magnitude inside the timeout, so a channel that reaches
+    // the sweep is one nobody is coming for.
     std::set<LinkId> handedOut;
-    std::map<LinkId, std::vector<std::unique_ptr<TransportChannel>>> extra;
+    struct Parked {
+        double                            at;
+        std::unique_ptr<TransportChannel> channel;
+    };
+    std::map<LinkId, std::vector<Parked>> extra;
 #if defined(PP_PPCP_PLAINTEXT_HARNESS)
     // ⚠ HARNESS ONLY.  See Listener::setPlaintextHarness() in the header.
     bool plaintext = false;
@@ -1498,6 +1546,39 @@ struct Listener::Impl {
                 for (std::unique_ptr<TransportChannel> &c : it->second.channels)
                     detail::ChannelFactory::abandon(*c);
                 it = links.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    // ENC 2.1d — a channel parked for a link nobody asks about any more.  The
+    // link is gone (its phone dropped, or the PeerConnection was destroyed) and
+    // no `acceptChannelFor()` will ever name it again, so the park would hold
+    // the socket, the SSL and the buffer for the life of the process.
+    void expireParked()
+    {
+        const double now = nowMs();
+        for (auto it = extra.begin(); it != extra.end();) {
+            std::vector<Parked> &rows = it->second;
+            for (auto p = rows.begin(); p != rows.end();) {
+                if (now - p->at > options.bindTimeoutMs) {
+                    // 2.1c — closed, not answered, exactly as expireLinks()
+                    // disposes of the channels it sweeps.
+                    detail::ChannelFactory::abandon(*p->channel);
+                    p = rows.erase(p);
+                } else {
+                    ++p;
+                }
+            }
+            // The id stops being remembered with the last channel parked under
+            // it: `handedOut` exists to stop a later stream looking like a new
+            // link, and once nothing is arriving for this link there is nothing
+            // left to protect — which is also what stops the set growing for
+            // the life of the process.
+            if (rows.empty()) {
+                handedOut.erase(it->first);
+                it = extra.erase(it);
             } else {
                 ++it;
             }
@@ -1737,7 +1818,7 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
     if (want != nullptr && out_one != nullptr) {
         auto e = impl->extra.find(*want);
         if (e != impl->extra.end() && !e->second.empty()) {
-            *out_one = std::move(e->second.front());
+            *out_one = std::move(e->second.front().channel);
             e->second.erase(e->second.begin());
             if (e->second.empty()) impl->extra.erase(e);
             return nullptr;   // the caller reads *out_one
@@ -1758,6 +1839,7 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
     while (nowMs() < deadline) {
         impl->expirePending();
         impl->expireLinks();
+        impl->expireParked();
 
         // Anything the sweep (or a refusal on a previous pass) left behind is
         // the caller's now.  Returning here rather than carrying on is what
@@ -1892,7 +1974,8 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                         // rather than left to look like a new link with no
                         // control channel and be swept away as one.
                         if (impl->handedOut.count(id) > 0) {
-                            impl->extra[id].push_back(std::move(link.channels.back()));
+                            impl->extra[id].push_back(
+                                Impl::Parked{nowMs(), std::move(link.channels.back())});
                             link.channels.pop_back();
                             if (link.channels.empty()) impl->links.erase(id);
                             continue;
