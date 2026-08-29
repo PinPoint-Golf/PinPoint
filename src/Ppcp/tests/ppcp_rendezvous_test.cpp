@@ -675,7 +675,11 @@ TEST(PpcpRendezvous, RT7_TheBrowserReadsOnlyRnRidAndPvAndNeverDialsAnUnresolvedR
     // API surface is the assertion: RvBrowser has start/stop/fd/process and
     // nothing that publishes.
     std::unique_ptr<RvBrowser> b = makePlatformBrowser();
-#if defined(__APPLE__)
+    // ⚠ Widened from `__APPLE__` when Linux gained DNS-SD via Avahi's compat
+    // shim.  The condition is "a real backend is compiled in", which is what
+    // the assertion is actually about — leaving it Apple-only would have meant
+    // the Linux port had the capability and nothing asserted it.
+#if defined(__APPLE__) || defined(PP_HAVE_DNS_SD)
     ASSERT_TRUE(b);
     EXPECT_NE(b->describe().find("browse only"), std::string::npos);
 #endif

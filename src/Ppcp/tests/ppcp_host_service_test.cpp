@@ -621,9 +621,11 @@ TEST_F(HostServiceClock, DiscoveryIsWiredUpAndSaysWhatItIs)
 {
     const QString d = m_svc.discoveryDescription();
     EXPECT_FALSE(d.isEmpty());
-#if defined(__APPLE__)
+    // ⚠ Widened from `__APPLE__` for the Linux DNS-SD port.
+#if defined(__APPLE__) || defined(PP_HAVE_DNS_SD)
     // makePlatformBrowser() returns a BonjourBrowser here, and start() talks to
-    // the system mDNSResponder over its local IPC socket.
+    // the system responder over its local IPC socket — mDNSResponder on macOS,
+    // avahi-daemon through the compat shim on Linux.
     EXPECT_TRUE(d.contains(QStringLiteral("browse only"))) << d.toStdString();
 #endif
     // 3.6a — whatever discovery did or did not do, it is not an error and does

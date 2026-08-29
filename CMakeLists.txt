@@ -3208,6 +3208,58 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
             "${_openssl_libdir}/../bin/libcrypto-*.dll")
         pp_win_bundle_dll(core ${_openssl_dlls})
     endif()
+    # ── DNS-SD for RV §3 reconnection discovery ──────────────────────────
+    # ⚠ THE FIRST DISCOVERY-LIBRARY DEPENDENCY IN THIS TREE.  On macOS the
+    # `DNSService*` symbols come free from libSystem, so `ppcp_discovery.cpp`
+    # has never needed a link line and none exists above.  Everywhere else they
+    # have to come from somewhere.
+    #
+    # On Linux that somewhere is Avahi's Bonjour compatibility layer, which
+    # exposes the SAME `dns_sd.h` API — so this buys the whole of
+    # `BonjourBrowser` and `BonjourAdvertiser` with no second backend.  Measured
+    # 29 Aug 2026 against libavahi-compat-libdnssd1 0.8: `DNSServiceUpdateRecord`
+    # rotates the TXT record IN PLACE and the instance name does not move, which
+    # is what RV 3.2d requires and what `ppcp_discovery.h:302-308` feared might
+    # be missing.  See the Phase 2L log in the implementation plan.
+    #
+    # ⛔ ABSENCE IS NOT AN ERROR.  With no shim the define is not set, both
+    # factories keep returning null, and the host behaves exactly as it does
+    # today: no reconnection discovery, and RV 3.6b makes that silent because
+    # the pairing code carries its own endpoints.  A STATUS line, never a
+    # warning — this is a capability, not a prerequisite.
+    #
+    # ⚠ Windows (W4) gets no help from this.  There is no `dns_sd.h` there
+    # without Apple's Bonjour SDK, which is an installer rather than a header,
+    # so W4 remains a genuinely separate piece of work.
+    if(NOT APPLE)
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(DNSSD QUIET avahi-compat-libdns_sd)
+        endif()
+        if(NOT DNSSD_FOUND)
+            # No .pc file (or no pkg-config at all) — look for the pieces.
+            find_path(DNSSD_INCLUDE_DIR dns_sd.h
+                      PATH_SUFFIXES avahi-compat-libdns_sd)
+            find_library(DNSSD_LIBRARY dns_sd)
+            if(DNSSD_INCLUDE_DIR AND DNSSD_LIBRARY)
+                set(DNSSD_INCLUDE_DIRS "${DNSSD_INCLUDE_DIR}")
+                set(DNSSD_LIBRARIES    "${DNSSD_LIBRARY}")
+                set(DNSSD_FOUND TRUE)
+            endif()
+        endif()
+        if(DNSSD_FOUND)
+            target_include_directories(PinPointStudio PRIVATE ${DNSSD_INCLUDE_DIRS})
+            target_link_libraries(PinPointStudio PRIVATE ${DNSSD_LIBRARIES})
+            target_compile_definitions(PinPointStudio PRIVATE PP_HAVE_DNS_SD)
+            message(STATUS "PPCP discovery: DNS-SD via ${DNSSD_LIBRARIES}")
+        else()
+            message(STATUS
+                "PPCP discovery: no DNS-SD library — reconnection discovery is off. "
+                "Pairing by code still works (RV 3.6b). "
+                "Debian/Ubuntu: apt install libavahi-compat-libdnssd-dev.")
+        endif()
+    endif()
+
     target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP_TRANSPORT)
     message(STATUS "PPCP transport: OpenSSL ${PP_OPENSSL_VERSION}, libppcp ${PP_LIBPPCP_VERSION}")
 elseif(NOT PP_OPENSSL_FOUND)

@@ -23,6 +23,49 @@ endif()
 
 set(PPCP ${CMAKE_CURRENT_SOURCE_DIR}/..)   # src/Ppcp
 
+# ── DNS-SD, mirroring the app's own probe in the root CMakeLists ────────────
+# ⚠ THIS SUITE HAS ITS OWN BUILD AND INHERITS NOTHING FROM THE APP.  Four
+# targets below compile `ppcp_discovery.cpp`, whose two backends are gated on
+# `PP_HAVE_DNS_SD` off Apple.  Without this block the suite would compile them
+# out, `makePlatformBrowser()`/`makePlatformAdvertiser()` would return null, and
+# the two tests that exercise the REAL responder would quietly go on skipping —
+# so a Linux discovery port would look tested and not be.
+#
+# Directory scope on purpose: the definition is only ever read by
+# `ppcp_discovery.cpp`, and scoping it per-target would mean remembering to add
+# it to a fifth target later.
+if(NOT APPLE)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(DNSSD QUIET avahi-compat-libdns_sd)
+    endif()
+    if(NOT DNSSD_FOUND)
+        find_path(DNSSD_INCLUDE_DIR dns_sd.h PATH_SUFFIXES avahi-compat-libdns_sd)
+        find_library(DNSSD_LIBRARY dns_sd)
+        if(DNSSD_INCLUDE_DIR AND DNSSD_LIBRARY)
+            set(DNSSD_INCLUDE_DIRS "${DNSSD_INCLUDE_DIR}")
+            set(DNSSD_LIBRARIES    "${DNSSD_LIBRARY}")
+            set(DNSSD_FOUND TRUE)
+        endif()
+    endif()
+    if(DNSSD_FOUND)
+        include_directories(${DNSSD_INCLUDE_DIRS})
+        add_compile_definitions(PP_HAVE_DNS_SD)
+        # ⚠ DIRECTORY SCOPE, and it has to be.  FOUR targets compile
+        # `ppcp_discovery.cpp` and they do NOT share one link list —
+        # `ppcp_host_service_test` and `ppcp_bootstrap_test` carry their own,
+        # and adding the library to `_rv_link` alone left both with undefined
+        # references to `DNSServiceRefSockFD`.  Per-target linkage here means
+        # remembering a fifth target later; this cannot be forgotten.
+        link_libraries(${DNSSD_LIBRARIES})
+        message(STATUS "PPCP tests: DNS-SD via ${DNSSD_LIBRARIES}")
+    else()
+        message(STATUS
+            "PPCP tests: no DNS-SD library — the real-responder tests will SKIP. "
+            "Debian/Ubuntu: apt install libavahi-compat-libdnssd-dev.")
+    endif()
+endif()
+
 # ══════════════════════════════════════════════════════════════════════════
 # ⚠⚠⚠  THE PLAINTEXT HARNESS SOCKET, AND THE ONE PLACE IT IS TURNED ON  ⚠⚠⚠
 #
@@ -348,6 +391,10 @@ pp_add_test(ppcp_host_peer_test
 # ⛔ RV 7.2c became a SHOULD (libppcp erratum E56) and the store is now the
 # application's settings on every platform, so it IS exercised at runtime and on
 # every box.  `NO_QT` stays: these want Qt6::Core, not Qt6::Gui and not AUTOMOC.
+# ⚠ DNS-SD is NOT listed here: off Apple it is linked at directory scope above,
+# because four targets compile `ppcp_discovery.cpp` and only two of them use
+# this list.  On Apple it comes from libSystem, so the note above about needing
+# no framework remains true where it was written.
 set(_rv_link ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads Qt6::Core)
 
 pp_add_test(ppcp_rendezvous_test

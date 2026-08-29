@@ -28,9 +28,27 @@
 // ntohs() below is used only by BonjourBrowser, so arpa/inet.h — POSIX-only,
 // absent on Windows — travels with dns_sd.h under the same guard rather than
 // sitting unconditionally at the top of a file every platform compiles.
-#if defined(__APPLE__)
+// ── Where the DNSService* symbols come from ─────────────────────────────────
+// Apple ships them in libSystem, so `__APPLE__` alone has always been enough
+// there.  Elsewhere they come from a library CMake has to find — on Linux,
+// Avahi's Bonjour compatibility layer, which exposes this same `dns_sd.h` —
+// and CMake sets `PP_HAVE_DNS_SD` when it did.  ⚠ ONE derived macro rather
+// than repeating the disjunction at five sites: the two backends below are
+// either both compiled or both absent, and there is no configuration in which
+// that is untrue.
+#if defined(__APPLE__) || defined(PP_HAVE_DNS_SD)
+#define PP_DNS_SD_AVAILABLE 1
+#endif
+
+#if defined(PP_DNS_SD_AVAILABLE)
 #include <arpa/inet.h>
 #include <dns_sd.h>
+#include <poll.h>
+#include <chrono>
+#if !defined(__APPLE__)
+#include <sys/epoll.h>
+#include <unistd.h>
+#endif
 #endif
 
 namespace Ppcp {
@@ -223,8 +241,28 @@ DialDecision decideDial(const RvAdvertisement &ad, int wireMajor, const RidResol
 
 // ── The platform browser ────────────────────────────────────────────────────
 
-#if defined(__APPLE__)
+#if defined(PP_DNS_SD_AVAILABLE)
 namespace {
+
+// ⚠ TWO RESOLVE STRATEGIES, AND THE SPLIT IS MEASURED RATHER THAN STYLISTIC.
+//
+// macOS: mDNSResponder answers a local resolve in well under a millisecond, so
+// it is done inline with this as a backstop against a responder that will never
+// answer.  That is the behaviour this file has always had.
+//
+// Linux/Avahi: a resolve takes **650 ms** (measured 29 Aug 2026) and will not
+// complete AT ALL if called from inside a browse callback.  Inline is therefore
+// impossible twice over — it deadlocks, and even deferred it would block the
+// GUI thread, which is where `startDiscovery()` watches `fd()`.  So off Apple
+// the resolves are genuinely asynchronous and `fd()` returns an epoll set
+// holding the browse socket and every pending resolve socket.  One fd out, N
+// fds in — which is what lets the `RvBrowser` interface stay exactly as it was.
+constexpr int kResolveBudgetMs = 250;
+
+// How long an asynchronous resolve may stay armed before it is abandoned.
+// Generous against the measured 650 ms because the cost of waiting is nil —
+// nothing blocks on it — while giving up too early loses a real phone.
+constexpr int kResolveGiveUpS = 10;
 
 class BonjourBrowser final : public RvBrowser {
 public:
@@ -247,6 +285,18 @@ public:
             m_browse = nullptr;
             return false;   // 3.6a — not an error state, just no discovery
         }
+#if !defined(__APPLE__)
+        m_epoll = ::epoll_create1(0);
+        if (m_epoll < 0) {                  // 3.6a again: degrade, never fault
+            DNSServiceRefDeallocate(m_browse);
+            m_browse = nullptr;
+            return false;
+        }
+        struct epoll_event ev;
+        ev.events = EPOLLIN;
+        ev.data.fd = DNSServiceRefSockFD(m_browse);
+        ::epoll_ctl(m_epoll, EPOLL_CTL_ADD, ev.data.fd, &ev);
+#endif
         return true;
     }
 
@@ -255,6 +305,15 @@ public:
         for (auto &kv : m_resolves)
             if (kv.second) DNSServiceRefDeallocate(kv.second);
         m_resolves.clear();
+        m_discovered.clear();
+#if !defined(__APPLE__)
+        for (auto &kv : m_byFd) {
+            if (kv.second.first) DNSServiceRefDeallocate(kv.second.first);
+            delete kv.second.second;
+        }
+        m_byFd.clear();
+        if (m_epoll >= 0) { ::close(m_epoll); m_epoll = -1; }
+#endif
         if (m_browse) {
             DNSServiceRefDeallocate(m_browse);
             m_browse = nullptr;
@@ -263,20 +322,67 @@ public:
 
     int fd() const override
     {
+#if defined(__APPLE__)
         return m_browse ? DNSServiceRefSockFD(m_browse) : -1;
+#else
+        // The epoll set, not the browse socket: it goes readable when the
+        // browse OR any pending resolve has something, which is what makes the
+        // owner's single QSocketNotifier drive both.
+        return m_epoll;
+#endif
     }
 
     bool process() override
     {
         if (!m_browse) return false;
-        return DNSServiceProcessResult(m_browse) == kDNSServiceErr_NoError;
+#if defined(__APPLE__)
+        const bool ok = DNSServiceProcessResult(m_browse) == kDNSServiceErr_NoError;
+        drainDiscovered();
+        return ok;
+#else
+        // Non-blocking: whatever is ready right now and nothing else.  The
+        // owner is a QSocketNotifier on the GUI thread and must never wait here.
+        struct epoll_event evs[8];
+        const int n = ::epoll_wait(m_epoll, evs, 8, 0);
+        if (n < 0) return false;
+        bool ok = true;
+        const int bfd = DNSServiceRefSockFD(m_browse);
+        for (int i = 0; i < n; ++i) {
+            const int rfd = evs[i].data.fd;
+            if (rfd == bfd) {
+                ok = DNSServiceProcessResult(m_browse) == kDNSServiceErr_NoError;
+                continue;
+            }
+            auto it = m_byFd.find(rfd);
+            if (it == m_byFd.end()) continue;
+            DNSServiceProcessResult(it->second.first);
+            // ⛔ RETIRE ONLY ONCE IT HAS ANSWERED.  See Pending::done.
+            if (it->second.second->done)
+                retire(it);
+        }
+        // New instances from this pass become new pending resolves.  ⛔ AFTER
+        // the loop, so DNSServiceResolve is never called on the callback stack.
+        drainDiscovered();
+        sweepStaleResolves();
+        return ok;
+#endif
     }
 
     // A resolve carries its own socket; the owner polls them through here too.
     // Kept simple deliberately: a handful of instances on a range network is
     // the whole population, and 3.6a means being slow to discover costs
     // nothing that matters.
-    std::string describe() const override { return "DNS-SD via mDNSResponder (browse only)"; }
+    // ⚠ "browse only" is asserted by ppcp_rendezvous_test and
+    // ppcp_host_service_test — it says this object cannot publish, which is
+    // RV 2's querier-only role.  Keep the substring.
+    std::string describe() const override
+    {
+#if defined(__APPLE__)
+        return "DNS-SD via mDNSResponder (browse only)";
+#else
+        return "DNS-SD via Avahi compat (browse only)";
+#endif
+    }
 
 private:
     static void DNSSD_API onBrowse(DNSServiceRef, DNSServiceFlags flags,
@@ -290,25 +396,144 @@ private:
             if (self->m_lost) self->m_lost(name);
             return;
         }
-        DNSServiceRef ref = nullptr;
-        auto *pending = new Pending{self, name};
-        if (DNSServiceResolve(&ref, 0, ifIndex, name, type, domain,
-                              &BonjourBrowser::onResolve, pending) != kDNSServiceErr_NoError) {
-            delete pending;
-            return;
-        }
-        // Resolve synchronously: one blocking read on a local IPC socket, off
-        // the main thread by construction because process() is called from
-        // wherever the owner watches fd().
-        DNSServiceProcessResult(ref);
-        DNSServiceRefDeallocate(ref);
-        delete pending;
+        // ⛔ RECORD, DO NOT RESOLVE — WE ARE INSIDE A CALLBACK.
+        // Resolving here is what the first Linux port did and it DEADLOCKED:
+        // measured 29 Aug 2026, `ppcp_advertise_test` hung for its full 300 s
+        // with the main thread in `unix_stream_data_wait`.  A standalone probe
+        // isolated the cause — the identical resolve, deferred until after
+        // `DNSServiceProcessResult` returns, succeeds in milliseconds
+        // (`err=0 host=… port=…`), so Avahi's compat shim simply will not
+        // service a resolve re-entrantly.  macOS never showed it because
+        // mDNSResponder answers a local resolve immediately.
+        self->m_discovered.push_back(Discovered{name, type ? type : "",
+                                                domain ? domain : "", ifIndex});
     }
 
+    // An instance the browse reported, awaiting a resolve that must not run on
+    // the callback stack.  Owned by value: `name`/`type`/`domain` are borrowed
+    // pointers inside the callback and do not outlive it.
     struct Pending {
         BonjourBrowser *self;
         std::string     name;
+        // ⛔ A RESOLVE IS NOT DONE AFTER ONE ProcessResult, AND ASSUMING IT WAS
+        // COST AN AFTERNOON.  Avahi's compat shim wakes its socket several
+        // times before it delivers — the answer took 650 ms and a handful of
+        // wakeups when measured standalone.  Retiring the ref on the first
+        // wakeup destroys the resolve before it can answer, and the symptom is
+        // a browse that finds instances and resolves none of them.
+        bool            done = false;
+        std::chrono::steady_clock::time_point armed{};
     };
+
+    struct Discovered {
+        std::string name;
+        std::string type;
+        std::string domain;
+        std::uint32_t ifIndex;
+    };
+
+#if !defined(__APPLE__)
+    // Close one pending resolve and free everything it owns.
+    void retire(std::map<int, std::pair<DNSServiceRef, Pending *>>::iterator it)
+    {
+        ::epoll_ctl(m_epoll, EPOLL_CTL_DEL, it->first, nullptr);
+        DNSServiceRefDeallocate(it->second.first);
+        delete it->second.second;
+        m_byFd.erase(it);
+    }
+
+    // A resolve that will never answer must not sit in the set for ever — an
+    // instance that keeps being announced would otherwise arm a new one on
+    // every pass.  3.6a: dropping it is not an error, the next announcement
+    // simply tries again.
+    void sweepStaleResolves()
+    {
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = m_byFd.begin(); it != m_byFd.end(); ) {
+            const auto age = now - it->second.second->armed;
+            if (age > std::chrono::seconds(kResolveGiveUpS)) {
+                auto doomed = it++;
+                retire(doomed);
+            } else {
+                ++it;
+            }
+        }
+    }
+#endif
+
+    // Resolve everything the last browse callback told us about.  Called from
+    // process(), i.e. off the callback stack.
+    void drainDiscovered()
+    {
+        std::vector<Discovered> batch;
+        batch.swap(m_discovered);
+        for (const Discovered &d : batch)
+            resolveOne(d);
+    }
+
+    void resolveOne(const Discovered &d)
+    {
+        DNSServiceRef ref = nullptr;
+        auto *pending = new Pending{this, d.name};
+        if (DNSServiceResolve(&ref, 0, d.ifIndex, d.name.c_str(), d.type.c_str(),
+                              d.domain.c_str(), &BonjourBrowser::onResolve,
+                              pending) != kDNSServiceErr_NoError) {
+            delete pending;
+            return;
+        }
+        // ⛔ BOUNDED, NOT BLOCKING — AND THE COMMENT THIS REPLACES WAS WRONG.
+        // It read "one blocking read on a local IPC socket, off the main thread
+        // by construction because process() is called from wherever the owner
+        // watches fd()".  ⚠ THE OWNER IS THE GUI THREAD: `startDiscovery()`
+        // watches fd() with a QSocketNotifier on it, so an unbounded read here
+        // freezes the application.
+        //
+        // On macOS mDNSResponder answers a local resolve immediately and this
+        // was never observed.  On Linux, through Avahi's compat shim, it does
+        // NOT return — `ppcp_advertise_test` hung for the full 300 s timeout
+        // with the main thread in `unix_stream_data_wait` (measured 29 Aug
+        // 2026).  Plausibly re-entrancy: this runs INSIDE a browse callback,
+        // and the shim services each DNSServiceRef from its own thread.
+        //
+        // So: poll the resolve's own fd and give up on a deadline.  Losing a
+        // resolve is not an error — 3.4c drops an instance that cannot be
+        // resolved anyway, and 3.6a forbids treating discovery failure as a
+        // fault; the instance is announced again and the next pass retries.
+        // ⚠ A freeze, by contrast, is unrecoverable and blames the wrong
+        // subsystem when someone finally looks.
+        const int rfd = DNSServiceRefSockFD(ref);
+#if defined(__APPLE__)
+        if (rfd >= 0) {
+            struct pollfd pfd;
+            pfd.fd = rfd;
+            pfd.events = POLLIN;
+            pfd.revents = 0;
+            if (::poll(&pfd, 1, kResolveBudgetMs) > 0 && (pfd.revents & POLLIN))
+                DNSServiceProcessResult(ref);
+        }
+        DNSServiceRefDeallocate(ref);
+        delete pending;
+#else
+        // ⚠ `pending` deliberately OUTLIVES this function off Apple — the
+        // resolve is now asynchronous, so onResolve frees it.
+        if (rfd < 0 || m_epoll < 0) {
+            DNSServiceRefDeallocate(ref);
+            delete pending;
+            return;
+        }
+        struct epoll_event ev;
+        ev.events = EPOLLIN;
+        ev.data.fd = rfd;
+        if (::epoll_ctl(m_epoll, EPOLL_CTL_ADD, rfd, &ev) != 0) {
+            DNSServiceRefDeallocate(ref);
+            delete pending;
+            return;
+        }
+        pending->armed = std::chrono::steady_clock::now();
+        m_byFd[rfd] = { ref, pending };
+#endif
+    }
+
 
     static void DNSSD_API onResolve(DNSServiceRef, DNSServiceFlags, uint32_t,
                                     DNSServiceErrorType err, const char *,
@@ -316,7 +541,9 @@ private:
                                     uint16_t txtLen, const unsigned char *txt, void *ctx)
     {
         auto *p = static_cast<Pending *>(ctx);
-        if (!p || err != kDNSServiceErr_NoError) return;
+        if (!p) return;
+        p->done = true;            // answered — the ref may now be retired
+        if (err != kDNSServiceErr_NoError) return;
 
         RvAdvertisement ad;
         ad.instanceName = p->name;
@@ -328,19 +555,29 @@ private:
 
     DNSServiceRef m_browse = nullptr;
     std::map<std::string, DNSServiceRef> m_resolves;
+    // Instances the browse callback reported, waiting to be resolved off the
+    // callback stack — see drainDiscovered().
+    std::vector<Discovered> m_discovered;
+#if !defined(__APPLE__)
+    int m_epoll = -1;                          // the one fd the owner watches
+    // resolve socket -> {ref, its callback context}.  ⚠ BOTH are owned here:
+    // off Apple the resolve is asynchronous, so `Pending` outlives resolveOne()
+    // and this map is the only thing that can free it.
+    std::map<int, std::pair<DNSServiceRef, Pending *>> m_byFd;
+#endif
     FoundFn m_found;
     LostFn  m_lost;
 };
 
 }  // namespace
-#endif  // __APPLE__
+#endif  // PP_DNS_SD_AVAILABLE
 
 std::unique_ptr<RvBrowser> makePlatformBrowser()
 {
-#if defined(__APPLE__)
+#if defined(PP_DNS_SD_AVAILABLE)
     return std::unique_ptr<RvBrowser>(new BonjourBrowser);
 #else
-    // No DNS-SD client on this platform yet.  3.6b: failure to discover falls
+    // No DNS-SD client on this platform.  3.6b: failure to discover falls
     // back to the pairing code, without user-visible failure — so returning
     // null is the whole of the handling.
     return nullptr;
@@ -569,7 +806,7 @@ std::string RvReconnectionAdvertisement::describe() const
 
 // ── The platform advertiser ─────────────────────────────────────────────────
 
-#if defined(__APPLE__)
+#if defined(PP_DNS_SD_AVAILABLE)
 namespace {
 
 class BonjourAdvertiser final : public RvAdvertiser {
@@ -672,19 +909,24 @@ private:
 };
 
 }  // namespace
-#endif  // __APPLE__
+#endif  // PP_DNS_SD_AVAILABLE
 
 std::unique_ptr<RvAdvertiser> makePlatformAdvertiser()
 {
-#if defined(__APPLE__)
+#if defined(PP_DNS_SD_AVAILABLE)
     return std::unique_ptr<RvAdvertiser>(new BonjourAdvertiser);
 #else
     // CA5 — Windows is DEFERRED and this is where it is recorded.  There is no
-    // `dns_sd.h` outside Apple's Bonjour SDK, which is an installer and a
+    // `dns_sd.h` there outside Apple's Bonjour SDK, which is an installer and a
     // system service rather than a header, and taking that dependency is a
     // decision about what PinPointStudio ships rather than about the protocol.
-    // 3.6b makes the consequence silent: no advertisement, so a Windows host
-    // is reached by pairing code every session until somebody decides.
+    // 3.6b makes the consequence silent: no advertisement, so such a host is
+    // reached by pairing code every session until somebody decides.
+    //
+    // ⚠ LINUX IS NO LONGER IN THIS BRANCH.  Avahi's compat shim supplies the
+    // same API, so a Linux box with it installed advertises exactly as macOS
+    // does; a Linux box WITHOUT it lands here, which is why this stays a
+    // silent null rather than becoming an error.
     return nullptr;
 #endif
 }
