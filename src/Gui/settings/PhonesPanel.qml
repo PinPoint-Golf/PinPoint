@@ -104,6 +104,13 @@ Item {
         readonly property bool isRevoked:   phoneRow.phoneData.invalidated === true
         readonly property bool isRemembered: phoneRow.phoneData.persisted === true
 
+        // Design §6.1 — which path this phone is actually on: "cable", "wifi",
+        // or empty. ⛔ EMPTY IS "WE DO NOT KNOW", NOT "WI-FI". Transport is a
+        // property of a LIVE link, so a remembered-but-absent phone has none,
+        // and rendering that as Wi-Fi would assert something we never observed.
+        readonly property string transport: phoneRow.isConnected
+                                          ? (phoneRow.phoneData.transport || "") : ""
+
         // Cameras this phone is currently contributing, cross-referenced
         // against `cameraManager.cameraList` by peer id — `VideoInputPpcp`'s
         // `serialNumber` IS the PPCP peer id (see ResourceMonitorController) —
@@ -254,6 +261,39 @@ Item {
                     Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                 }
 
+                // ── Which path this phone is on (design §6.1) ───────────────
+                // "Surface which path a phone is on ... an operator who cannot
+                // see that the cable did nothing cannot act on it."  A cable
+                // that silently changed nothing is the failure this exists to
+                // make visible, and it is the same fact the app log carries as
+                // `transport=usb|wifi`.
+                //
+                // ⛔ HIDDEN when there is no live link rather than defaulting to
+                // Wi-Fi: "we do not know" and "on the radio" are different
+                // facts, and only one of them is ever observed.
+                Rectangle {
+                    visible: phoneRow.transport !== ""
+                    implicitWidth:  transportLabel.implicitWidth + Theme.sp(12)
+                    implicitHeight: transportLabel.implicitHeight + Theme.sp(4)
+                    radius: height / 2
+                    color: "transparent"
+                    border.width: 1
+                    border.color: phoneRow.transport === "cable" ? Theme.colorGood
+                                                                 : Theme.colorBorderMid
+                    opacity: Theme.borderOpacityNormal + 0.4
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Text {
+                        id: transportLabel
+                        anchors.centerIn: parent
+                        text: phoneRow.transport === "cable" ? qsTr("Cable") : qsTr("Wi-Fi")
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
+                        color: phoneRow.transport === "cable" ? Theme.colorGood
+                                                              : Theme.colorText3
+                    }
+                }
+
                 // 7.4d — honoured immediately by this side, which means the
                 // next handshake from that phone resolves nothing and fails
                 // like any stranger's (7.7c).  Shown only for a row that IS
@@ -349,6 +389,12 @@ Item {
                 // the toolbar's cross-phone aggregate. -1 while unconnected or
                 // while no relation has arrived yet (§6.3a not satisfied).
                 readonly property real   syncSigmaMs: phoneRow.isConnected ? (phoneRow.phoneData.syncSigmaMs === undefined ? -1 : phoneRow.phoneData.syncSigmaMs) : -1
+                // Design §6.1 — which path this phone is actually on. A
+                // property of the LINK, so a remembered-but-absent phone has
+                // none and shows the same "—" every other reading uses. ⛔ An
+                // empty value must never render as "Wi-Fi": "we don't know"
+                // and "on the radio" are different facts.
+                readonly property string transport:  phoneRow.transport
 
                 Repeater {
                     id: factsRepeater
@@ -358,7 +404,14 @@ Item {
                                                        :                          qsTr("Session only") },
                         { key: qsTr("Pairing ID"), val: (phoneRow.phoneData.pairingId || "—") },
                         { key: qsTr("Cameras"),    val: phoneRow.cameraCount > 0 ? String(phoneRow.cameraCount) : "—" },
-                        { key: qsTr("Transport"),  val: qsTr("PPCP") },
+                        // ⚠ This used to read a constant "PPCP", which told an
+                        // operator nothing they did not already know. Since the
+                        // wired transport there is a real answer here, and §6.1
+                        // needs it visible: a cable that silently did nothing is
+                        // the failure this line exists to make actionable.
+                        { key: qsTr("Transport"),  val: capsRow.transport === "cable" ? qsTr("Cable")
+                                                      : capsRow.transport === "wifi"  ? qsTr("Wi-Fi")
+                                                      :                                 "—" },
                         // Colour-coded the same way ImusPanel's battery chip is:
                         // ≤20% / thermal critical reads red, <50% / elevated-or-
                         // serious reads amber, otherwise the ordinary text colour.

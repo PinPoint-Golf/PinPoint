@@ -1683,6 +1683,15 @@ QVariantList PpcpHostService::phones() const
             ? QString::fromStdString(ppcp_thermal_level_str(health.thermal))
             : QString();
 
+        // Design §6.1 — "surface which path a phone is on ... an operator who
+        // cannot see that the cable did nothing cannot act on it."  ⚠ It is a
+        // property of the LINK, so a remembered-but-absent phone has none: the
+        // empty string is the same "no reading" sentinel as the battery's -1,
+        // and it must not read as "on WiFi".
+        dev[QStringLiteral("transport")] = isLive
+            ? (live->wired ? QStringLiteral("cable") : QStringLiteral("wifi"))
+            : QString();
+
         // 6.1f's clock agreement, THIS phone's own worst related-timebase
         // sigma — not the toolbar's cross-phone aggregate. -1 while nothing
         // has a relation yet, the same sentinel every other reading above uses.
