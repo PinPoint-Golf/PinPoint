@@ -682,6 +682,18 @@ Item {
                                 var d = parent.parent.d
                                 if (d.kind === "Camera")
                                     return d.status === "streaming" ? d.dataRateHz.toFixed(0) + " fps" : qsTr("idle")
+                                // ⛔ A PHONE HAS NO RATE OF ITS OWN, and this cell
+                                // used to claim "0 Hz" for one. `phones()` sets
+                                // dataRateHz to 0 deliberately — "a phone is not a
+                                // Source; its CAMERAS carry the bytes, and claiming
+                                // a rate here would be inventing a second number
+                                // for the same bytes". So the slot shows the one
+                                // fact about a phone that belongs on this row:
+                                // WHICH PATH it is on (design §6.1).
+                                if (d.kind === "Phone" && d.status === "connected")
+                                    return d.transport === "cable" ? qsTr("Cable")
+                                         : d.transport === "wifi"  ? qsTr("Wi-Fi")
+                                         :                            qsTr("connected")
                                 return d.status === "connected" ? d.dataRateHz.toFixed(0) + " Hz" : qsTr("disconnected")
                             }
                             font.family:         Theme.fontData
@@ -689,6 +701,12 @@ Item {
                             font.letterSpacing:  Theme.trackingData
                             color: {
                                 var d = parent.parent.d
+                                // The cable reads as the better path, not as an
+                                // alert: accent for cable, ordinary good for the
+                                // radio. ⚠ Wi-Fi is the normal case and must not
+                                // look like a fault.
+                                if (d.kind === "Phone" && d.status === "connected"
+                                    && d.transport === "cable") return Theme.colorAccent
                                 return (d.status === "streaming" || d.status === "connected")
                                            ? Theme.colorGood : Theme.colorText3
                             }
