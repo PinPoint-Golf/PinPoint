@@ -296,6 +296,14 @@ void PpcpWiredLink::start(Usbmux::Provider provider)
     }
     m_worker = std::thread([this] { workerLoop(); });
 
+    // ⛔ THE RETRY IS WHAT MAKES THE WIRED PATH WORK AT ALL IN THE FIELD — see
+    // kWiredRetryFirstSecs.  An attach-only trigger misses the ordinary case of
+    // a phone already on the cable when the app is opened.
+    m_retryTimer.setInterval(1000);
+    m_retryTimer.setTimerType(Qt::CoarseTimer);
+    connect(&m_retryTimer, &QTimer::timeout, this, &PpcpWiredLink::onRetryTick);
+    m_retryTimer.start();
+
     // ✅ No thread for the watch: usbmux `Listen` is a long-lived readable fd,
     // the same shape the DNS-SD browser has at ppcp_host_service.cpp:1187.
     m_notifier = std::make_unique<QSocketNotifier>(static_cast<int>(fd), QSocketNotifier::Read);
@@ -322,6 +330,8 @@ void PpcpWiredLink::stop()
     // QSocketNotifier left on a closed socket" fires for ever on some platforms
     // and asserts on others.
     m_notifier.reset();
+    m_retryTimer.stop();
+    m_retry.clear();
 
     {
         std::lock_guard<std::mutex> g(m_jobMutex);
@@ -391,6 +401,17 @@ void PpcpWiredLink::handleAttached(const Usbmux::Device &d)
     // dial with, never as the thing we key on.
     m_attached.emplace_back(d.deviceId, d.serialNumber);
 
+    // A NEW attachment is a clean slate: fresh backoff, and nothing logged yet.
+    // ⚠ Erase any stale entry first — an unplug/replug must not inherit the old
+    // attachment's DeviceID, which usbmuxd will have changed.
+    m_retry.erase(std::remove_if(m_retry.begin(), m_retry.end(),
+                                 [&](const Retry &r) { return r.udid == d.serialNumber; }),
+                  m_retry.end());
+    Retry fresh;
+    fresh.udid     = d.serialNumber;
+    fresh.deviceId = d.deviceId;
+    m_retry.push_back(fresh);
+
     if (std::find(m_dialling.begin(), m_dialling.end(), d.serialNumber) != m_dialling.end())
         return;   // a dial is already in flight for this phone
 
@@ -404,6 +425,85 @@ void PpcpWiredLink::handleAttached(const Usbmux::Device &d)
     m_jobCv.notify_one();
 }
 
+PpcpWiredLink::Retry *PpcpWiredLink::retryFor(const std::string &udid)
+{
+    for (Retry &r : m_retry)
+        if (r.udid == udid) return &r;
+    return nullptr;
+}
+
+// ── The retry, and the rule it must not break ──────────────────────────────
+//
+// ⛔ §6.1 rule 4: "presence unreadable → change nothing.  Plugging a phone in to
+// charge must never disturb WiFi."  Nothing here touches the advertisement, the
+// WiFi path or any live link — a due device gets one more presence read, and a
+// device that keeps refusing simply keeps being re-read at kWiredRetryMaxSecs.
+//
+// ⚠ THE LOG IS WHAT MAKES THAT AFFORDABLE.  A phone plugged in only to charge
+// refuses for ever, and a line per attempt would be a line every 30 s for the
+// life of the session — which is how a one-log-per-app rule turns into noise
+// nobody reads.  So a line is printed when the OUTCOME CHANGES and not when an
+// attempt is made.
+void PpcpWiredLink::onRetryTick()
+{
+    if (!m_running) return;
+
+    for (Retry &r : m_retry) {
+        if (r.linked) continue;   // §6.1 rule 1 — a link exists; do not open a second
+        if (std::find(m_dialling.begin(), m_dialling.end(), r.udid) != m_dialling.end())
+            continue;             // one already in flight
+        if (--r.dueInSecs > 0) continue;
+
+        // Flat — see kWiredRetrySecs.  A ramp loses the race against the
+        // phone's own WiFi dial, which fires on app foreground.
+        r.dueInSecs = kWiredRetrySecs;
+
+        m_dialling.push_back(r.udid);
+        ++m_dialled;
+        {
+            std::lock_guard<std::mutex> g(m_jobMutex);
+            if (m_stopping) return;
+            m_jobs.push_back(Job{r.deviceId, r.udid});
+        }
+        m_jobCv.notify_one();
+    }
+}
+
+void PpcpWiredLink::noteDialOutcome(const std::string &udid, DialOutcome o,
+                                    const QString &why)
+{
+    m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
+                     m_dialling.end());
+
+    Retry *r = retryFor(udid);
+    if (!r) return;   // detached while the dial was in flight
+
+    if (o == DialOutcome::Adopted) {
+        r->linked = true;
+        return;
+    }
+
+    // One line per state change, per the note above.
+    if (!r->everLogged || r->lastLogged != o) {
+        r->everLogged = true;
+        r->lastLogged = o;
+        ppWarn() << "[ppcp-usb]" << why.toUtf8().constData()
+                 << "— retrying every" << kWiredRetrySecs
+                 << "s while it stays plugged in";
+    }
+}
+
+void PpcpWiredLink::retryNow()
+{
+    for (Retry &r : m_retry) {
+        r.linked    = false;
+        r.dueInSecs = 1;
+        // ⚠ The outcome memory is deliberately NOT cleared: if the phone is
+        // still refusing for the same reason, that is not a state change and
+        // does not deserve a second identical line.
+    }
+}
+
 void PpcpWiredLink::handleDetached(Usbmux::DeviceId id)
 {
     // ⚠ A detach carries ONLY the DeviceID, so the udid has to come from what
@@ -414,6 +514,11 @@ void PpcpWiredLink::handleDetached(Usbmux::DeviceId id)
         m_attached.erase(it);
         m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
                          m_dialling.end());
+        // The retry is attachment-scoped, exactly like m_attached: a phone that
+        // is not plugged in is not re-probed, and a replug starts a clean ramp.
+        m_retry.erase(std::remove_if(m_retry.begin(), m_retry.end(),
+                                     [&](const Retry &r) { return r.udid == udid; }),
+                      m_retry.end());
         // ⛔ The LINK is not touched here.  Never switch a live link's transport
         // and never migrate one (design §7.3): a link whose cable is pulled dies
         // the ordinary way, through the channel going readable-and-closed and
@@ -469,6 +574,14 @@ void PpcpWiredLink::runJob(const Job &j)
         return;
     }
 
+    // Every exit below this point reports its outcome to the GUI thread — the
+    // one place that knows whether it is worth a log line and when to try again.
+    auto finish = [this, udid = j.udid](DialOutcome o, const QString &why) {
+        QMetaObject::invokeMethod(
+            this, [this, udid, o, why] { noteDialOutcome(udid, o, why); },
+            Qt::QueuedConnection);
+    };
+
     // ── 1. The presence record, over the tunnel ────────────────────────────
     //
     // ⚠ The first of two stop checks — one before each phase that can block,
@@ -485,43 +598,29 @@ void PpcpWiredLink::runJob(const Job &j)
         // measured 29 Aug 2026 — so this host names both possibilities and
         // diagnoses neither.  ⛔ Do not print "trust not granted": M5 has not
         // run and the only device tested is a trusted one.
-        ppWarn() << "[ppcp-usb] no presence record —" << diag.message().c_str()
-                 << "(the capture app is not running or not in the foreground,"
-                 << "or this host is not trusted by the device)";
-        QMetaObject::invokeMethod(
-            this, [this, udid = j.udid] {
-                m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
-                                 m_dialling.end());
-            },
-            Qt::QueuedConnection);
+        finish(DialOutcome::NoPresence,
+               QStringLiteral("no presence record — %1 (the capture app is not running "
+                              "or not in the foreground, or this host is not trusted by "
+                              "the device)")
+                   .arg(QString::fromStdString(diag.message())));
         return;
     }
 
     std::vector<unsigned char> bytes;
     std::string why;
     if (!readPresence(fd, &bytes, &why)) {
-        ppWarn() << "[ppcp-usb] presence record unreadable —" << why.c_str()
-                 << "— treating the device as not wired";
-        QMetaObject::invokeMethod(
-            this, [this, udid = j.udid] {
-                m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
-                                 m_dialling.end());
-            },
-            Qt::QueuedConnection);
+        finish(DialOutcome::Unreadable,
+               QStringLiteral("presence record unreadable — %1 — treating the device as "
+                              "not wired").arg(QString::fromStdString(why)));
         return;
     }
 
     // ── 2. Parse it (contract C3) ──────────────────────────────────────────
     WiredPresence rec;
     if (!parseWiredPresence(bytes.data(), bytes.size(), &rec, &why)) {
-        ppWarn() << "[ppcp-usb] presence record refused —" << why.c_str()
-                 << "— treating the device as not wired";
-        QMetaObject::invokeMethod(
-            this, [this, udid = j.udid] {
-                m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
-                                 m_dialling.end());
-            },
-            Qt::QueuedConnection);
+        finish(DialOutcome::Refused,
+               QStringLiteral("presence record refused — %1 — treating the device as "
+                              "not wired").arg(QString::fromStdString(why)));
         return;
     }
 
@@ -537,14 +636,10 @@ void PpcpWiredLink::runJob(const Job &j)
     if (!resolveFirstWiredPeer(rec, m_resolve, &which, &resolved)) {
         // RV 3.4c — a phone this host is not paired with.  Stay silent to the
         // device; one line for somebody who went looking.
-        ppWarn() << "[ppcp-usb] a cabled device published" << int(rec.peers.size())
-                 << "listener(s), none of which resolves to a pairing this host holds";
-        QMetaObject::invokeMethod(
-            this, [this, udid = j.udid] {
-                m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
-                                 m_dialling.end());
-            },
-            Qt::QueuedConnection);
+        finish(DialOutcome::NoMatch,
+               QStringLiteral("a cabled device published %1 listener(s), none of which "
+                              "resolves to a pairing this host holds")
+                   .arg(int(rec.peers.size())));
         return;
     }
 
@@ -594,14 +689,10 @@ void PpcpWiredLink::runJob(const Job &j)
     HandshakeFailure hf;
     std::unique_ptr<PeerConnection> link = Connector::connect(cfg, &hf);
     if (!link) {
-        ppWarn() << "[ppcp-usb] wired handshake did not complete —"
-                 << (hf.message.empty() ? "no link" : hf.message.c_str());
-        QMetaObject::invokeMethod(
-            this, [this, udid = j.udid] {
-                m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
-                                 m_dialling.end());
-            },
-            Qt::QueuedConnection);
+        finish(DialOutcome::HandshakeFailed,
+               QStringLiteral("wired handshake did not complete — %1")
+                   .arg(hf.message.empty() ? QStringLiteral("no link")
+                                           : QString::fromStdString(hf.message)));
         return;
     }
 
@@ -613,8 +704,7 @@ void PpcpWiredLink::runJob(const Job &j)
     PeerConnection *raw = link.release();
     QMetaObject::invokeMethod(
         this, [this, raw, pairingId, deviceId, udid = j.udid] {
-            m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
-                             m_dialling.end());
+            noteDialOutcome(udid, DialOutcome::Adopted, QString());
             onDialFinished(raw, pairingId, deviceId);
         },
         Qt::QueuedConnection);

@@ -943,6 +943,14 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
     // The phone did not stop existing, it stopped being here — its row stays
     // and changes state, the way a switched-off IMU's does.
     emit phonesChanged();
+
+    // ⛔ A LINK ENDING RE-ARMS THE CABLE, and without this the wired path is a
+    // one-shot per attachment.  A phone still plugged in whose link just died —
+    // the app was backgrounded, WiFi dropped it, the operator restarted it — is
+    // exactly the phone that should be re-probed, and it produces no usbmux
+    // `Attached` event to trigger one.  §6.1 rule 1 still guards the dial, so a
+    // phone that already has another live link is not double-connected.
+    if (m_wired) m_wired->retryNow();
 }
 
 void PpcpHostService::noteWantsChannel(const Ppcp::LinkId &id, bool wants)

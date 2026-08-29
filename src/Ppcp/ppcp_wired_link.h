@@ -87,6 +87,7 @@
 #include <vector>
 
 #include <QObject>
+#include <QTimer>
 #include <QSocketNotifier>
 #include <QString>
 
@@ -129,6 +130,41 @@ constexpr int         kWiredPresenceReadMs    = 2000;
 // plus one read plus one handshake, and every one of the three is now checked
 // against m_stopping before it is entered.
 constexpr int         kWiredHandshakeMs       = 3000;
+
+// ── The retry cadence, and why the wired path needs one at all ─────────────
+//
+// ⛔ FOUND ON HARDWARE 29 Aug 2026: without this the wired path fires ONLY on a
+// usbmux `Attached` event, and the most common real sequence produces no such
+// event.  A phone is left on the cable to charge, the host starts, ONE presence
+// read is attempted, the capture app happens to be backgrounded, `Number=3`
+// comes back — and nothing ever looks again.  Observed live: the phone's own
+// WiFi dial then won the link a minute later when the app WAS foregrounded.
+//
+// ⚠ "Phone already plugged in, operator then opens the app" is the normal way
+// this product is used, so an attach-only trigger means wired essentially never
+// engages in the field.
+//
+// ✅ §6.1 rule 4 says *"presence unreadable → change nothing"*, which forbids
+// disturbing the WiFi path on a failed read.  It does NOT say "never look
+// again", and re-probing costs one usbmux Connect plus a few HMACs.
+// ⛔ FLAT, NOT EXPONENTIAL, AND THAT IS A RACE THE CADENCE HAS TO BE ABLE TO
+// WIN.  Measured 29 Aug 2026 with a 2→4→…→30 s backoff: the operator opened the
+// capture app, **the phone dialled over WiFi 4 s later**, and the host's next
+// wired probe was up to 30 s away — so WiFi took the link every time and the
+// cable never got a look in.
+//
+// The thing being raced is the phone's own reconnect, which fires on app
+// foreground and is quick.  A probe is one `connect()` on a local unix socket
+// plus a refused plist round trip — a millisecond or two — so probing every 2 s
+// for as long as a phone sits on a cable costs nothing worth measuring, and an
+// exponential ramp buys nothing but a lost race.
+//
+// ⚠ It does NOT close the race, and §6.1's advertisement suppression is what
+// actually resolves it (Phase 2).  See the Log's note on the chicken-and-egg in
+// §6.1: the host may not suppress before presence is proven (rule 4 — plugging
+// in to charge must never disturb WiFi), and it cannot prove presence before
+// the app is up, by which time the phone has already dialled.
+constexpr int         kWiredRetrySecs         = 2;
 
 struct WiredPresence {
     // One entry per listener the device holds — contract C5 makes that one per
@@ -224,12 +260,25 @@ public:
 
     bool active() const { return m_watch.active(); }
 
+    // A phone's link ended, so any attached device may be dialable again.
+    // Clears the "already linked" marks and re-arms the retry for every device
+    // still on a cable.
+    //
+    // ⚠ It takes NO pairing id on purpose.  Re-arming everything costs one
+    // presence read per attached phone and is guarded by §6.1 rule 1 before a
+    // handshake is ever attempted; remembering which udid owned which pairing
+    // would be the `udid -> pairingId` cache design §10 forbids, and it would go
+    // stale the moment a phone were re-paired.
+    void retryNow();
+
     // For the diagnostic export and the log: what the wired path is doing, with
     // no identity, key or UDID in it (RV 7.2b).
     QString describe() const;
 
 private slots:
     void onWatchReadable();
+    // One tick a second; enqueues whichever attached devices are due.
+    void onRetryTick();
 
 private:
     // ── The GUI thread half ────────────────────────────────────────────────
@@ -238,6 +287,32 @@ private:
     // Runs on the GUI thread; the worker posted it here.
     void onDialFinished(PeerConnection *raw, QString resolvedPairingId,
                         Usbmux::DeviceId deviceId);
+
+    // What one dial attempt ended as.  ⚠ It travels back to the GUI thread
+    // rather than being logged where it happens, because whether it is worth a
+    // log line depends on the PREVIOUS attempt's outcome — state that lives
+    // here and not on the worker.
+    enum class DialOutcome {
+        NoPresence,       // the tunnel was refused — Number=3, and it is ambiguous
+        Unreadable,       // the tunnel opened and the record did not arrive
+        Refused,          // the record arrived and failed contract C3
+        NoMatch,          // parsed, and no held pairing resolves it (RV 3.4c)
+        HandshakeFailed,  // resolved, and the PPCP dial did not complete
+        Adopted           // a link
+    };
+    void noteDialOutcome(const std::string &udid, DialOutcome o, const QString &why);
+
+    // Per-attached-device retry state.  Attachment-scoped: created on Attached,
+    // erased on Detached, exactly like m_attached.
+    struct Retry {
+        std::string      udid;
+        Usbmux::DeviceId deviceId = 0;
+        int  dueInSecs   = 0;                      // counts down on the tick
+        bool linked      = false;                  // a link was adopted; stop
+        bool everLogged  = false;
+        DialOutcome lastLogged = DialOutcome::NoPresence;
+    };
+    Retry *retryFor(const std::string &udid);
 
     // ── The worker thread half ─────────────────────────────────────────────
     struct Job {
@@ -279,6 +354,8 @@ private:
     // Attachment-scoped by construction: an entry is added on Attached and
     // erased on Detached.
     std::vector<std::pair<Usbmux::DeviceId, std::string>> m_attached;
+    std::vector<Retry>                                    m_retry;    // GUI thread only
+    QTimer                                                m_retryTimer;
 
     std::thread                m_worker;
     mutable std::mutex         m_jobMutex;   // mutable: stopping() is const
