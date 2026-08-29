@@ -526,6 +526,24 @@ void PpcpRendezvous::noteLinkEstablished(const std::string &pairingId)
     // CODE"; 7.3b is "invalidate the pairing when the session closes".
     // Conflating them would end the session at its first reconnection.
 
+    // ⛔ AND THE CODE'S EXPIRY GOES WITH THE CODE.  `exp` is a property of a
+    // CODE (7.3c) and a spent one is a PAIRING, which 7.3f says outlives the
+    // code that created it.  Leaving `expUnixS` set made `reap()` — which runs
+    // every 20 ms off PpcpHostService::onTick() — delete the row of a phone
+    // that was CONNECTED, five minutes after its QR was minted, and wipe the
+    // key material with it: RV 7.5a's reconnection and ENC 2.1d's preview
+    // channel both resolve against K_tls and both stopped working, while the
+    // phone vanished from Settings -> Phones with a live link still up.
+    // `loadPersisted()` already builds a pairing this way — no expiry, no use
+    // limit (7.4a) — and this is the same statement for the pairing that has
+    // just been made rather than the one read back from the store.
+    //
+    // Only once the code is FULLY spent: a `mu`>1 code is still a live code to
+    // the devices that have not scanned it yet, and clearing `exp` while any
+    // use remains would leave that one displayable for ever.  Disposal of a
+    // spent pairing is 7.3b's job — closeSession() — not the clock's.
+    if (e->usesRemaining == 0) e->expUnixS = 0;
+
     // E57 — a pairing that has just completed a handshake is remembered
     // automatically (7.4b, now a SHOULD); Settings -> Phones' "Forget" is the
     // opt-out.  No-ops for a `mu`>1 code (7.4f, unchanged) and for a run with
