@@ -142,18 +142,27 @@ wrongly. I expected it to barely move. **The host is also the *responder* to the
 phone's probes**, so a reply that waited for a tick inflated the phone's measured
 RTT too. The poll degraded both directions; the notifier fixes both.
 
-**3. ⚠⚠ The case for the cable is materially weaker than the design doc claims,
-and this is the finding that matters most.** Design doc §1's table assumed a WiFi
-`min_rtt` of ~4 ms. **Measured: 1.64 ms** once the host stops polling. And
-`offset_sigma` now sits at 1.16 ms against a 5 ms gate — a **4.3× margin**.
+**3. The idle-network sigma win is mostly taken — but that is a narrower result
+than it first looked.** Design doc §1's table assumed a WiFi `min_rtt` of ~4 ms.
+**Measured: 1.64 ms** once the host stops polling, with `offset_sigma` at 1.16 ms
+against the 5 ms gate — a **4.3× margin**. On *this* measurement USB argues for
+~3× on a number that is no longer marginal.
 
-USB might reach ~0.5 ms `min_rtt` and ~0.3 ms sigma. That is real, but it is roughly
-a **3× improvement on a number already 4× inside the gate**, not the 8× on a
-marginal number that §1 implied. **Phase 0 appears to have captured most of the
-available win, with no cable.** M1 must be judged against this baseline, and the
-honest question for Phase 1 is now *"what does the remaining 3× buy that 4.3× of
-margin does not already"* — with the Windows/Linux reconnection case (§1's second
-argument, untouched by this) carrying more of the weight than it used to.
+⛔ **Do not read that as "the cable is not worth building", and my first write-up
+of it did.** The run was **one idle link on an uncontended network — the best case
+for WiFi and the case a range does not have.** 1.64 ms is a floor, not a typical
+value, and `CORE` §3.2's table is about the *tail*: *"congested WiFi: very
+heavy-tailed. May not reach useful sigma at all."* A shot happens at an instant,
+not after five quiet minutes. **M1 is therefore split (§11): an idle arm and a
+contended arm, reported at the 95th percentile and worst 5 s window.** What the
+cable sells is a floor that does not move, and the idle measurement cannot see it.
+
+⚠ **And clock alignment was never the whole case** — design doc §1.1, added after
+this run. Contention-resistance, reliability (no drops, no roaming, no multicast,
+no client isolation), **power** (a cabled phone is charging, which is what lets a
+long range session outlast a battery), and cross-platform reconnection all survive
+Phase 0 untouched. Phase 0 improved one of five arguments. It did not settle the
+question.
 
 ### Prediction made before the run, kept for the record
 
@@ -296,4 +305,5 @@ iPhone 16), so the decision is per device, not global policy.
 | 2026-08-29 | — | Design committed `d9582c3`. Nothing built. |
 | 2026-08-29 | — | Plan agreed. Phase 0 by hand this session; Phases 1+ orchestrated with Opus agents, waves shaped by repo because PPS has one warm build directory. |
 | 2026-08-29 | 0 | ✅ **Complete.** `QSocketNotifier` per channel; `min_rtt` and `own_sigma` added to the trace. `min_rtt` 12.95 → 1.64 ms, `offset_sigma` 2.50 → 1.16 ms, gate margin 2.0× → 4.3×. 4/4 affected tests pass. Three findings above; two are corrections to the design doc, and one weakens the case for the cable. |
-| | | ⚠ **Next session starts here:** re-read Finding 3 before doing any Phase 1 work. The M1 gate is now "what does ~3× more buy on a number already 4.3× inside the gate", and the answer may be that the Windows/Linux reconnection argument carries Phase 1 rather than the accuracy one. |
+| 2026-08-29 | — | Framing corrected after review: the Phase 0 run was an idle link on a quiet network, i.e. WiFi's best case. M1 split into idle (M1a) and **contended (M1b)** arms; M11 added for reliability; M10 now measures battery as well as thermal. Design doc gains §1.1 — contention, reliability, power and cross-platform reconnection, none of which Phase 0 touched. |
+| | | ⚠ **Next session starts here.** Read design doc §1, §1.1 and §7.1, then Findings above. Phase 1 proceeds; the accuracy argument alone no longer carries it, and **M1b is the measurement that matters**. |

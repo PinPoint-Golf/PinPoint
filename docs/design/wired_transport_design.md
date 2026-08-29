@@ -87,13 +87,41 @@ infra: 4 ms" as its comparison point. The real number, once the host stops polli
 (§7, shipped), is **1.64 ms** — and `offset_sigma` sits at **1.16 ms against the
 5 ms gate below, a 4.3× margin**.
 
-So the cable is arguing for roughly a **3× improvement on a number already 4×
-inside the gate**, not an 8× improvement on a marginal one. The arithmetic in this
-section is unchanged and still correct; what changed is that most of the available
-win turned out to be a poll in this host and has already been taken **with no
-cable at all**. ⚠ M1 is now the question *"what does the remaining 3× buy?"*, and
-§1's second argument — that Windows and Linux have no reconnection path at all —
-carries more of the weight for Phase 1 than the accuracy case does.
+So on *this* measurement the cable argues for roughly a **3× improvement on a
+number already 4× inside the gate**. The arithmetic is unchanged and still correct;
+what changed is that most of the win on a quiet network turned out to be a poll in
+this host, and has been taken **with no cable at all**.
+
+⛔ **But read the measurement for what it is: one idle link on an uncontended
+network, which is the BEST case for WiFi and the case a range does not have.**
+1.64 ms is a floor, not a typical value. §3.2's own table is about the *tail*, not
+the floor — *"2.4 GHz or congested WiFi: very heavy-tailed. **May not reach useful
+sigma at all**"* — and a driving range is a room full of phones, a public SSID and
+a golfer's body between the handset and the access point. The quantity that decides
+whether a Candidate is arbitrated is the sigma **at the moment of the shot**, not
+the sigma after five quiet minutes.
+
+⚠ **So the accuracy case is not spent; it was measured in the wrong conditions.**
+M1 must run a contended arm as well as an idle one (§11), and what the cable is
+really selling there is not a better floor but a **floor that does not move**.
+
+### 1.1 And clock alignment was never the whole of it
+
+Three further reasons, none of which this document's opening argument covered and
+all of which survive Phase 0 untouched:
+
+| | Why the cable wins |
+|---|---|
+| **Contention** | Wired latency does not degrade because the room filled up. WiFi's does, and unpredictably — see above |
+| **Reliability** | A cable does not drop, roam, hit client isolation, or lose multicast. `RV` 3.6a exists because *"it will not work at a range"*; the cable is the path with no such clause |
+| **Power** | A phone on a cable is charging. A long range session on 5 GHz with the camera running is a battery problem, and the cable removes it |
+| **Cross-platform reconnection** | `ppcp_discovery.cpp` is `#if defined(__APPLE__)` throughout, so Windows and Linux have no reconnection path at all today |
+
+⚠ **The power point cuts both ways and both are real.** §9.6 records charging as a
+*thermal* cost — sustained encode plus charging is a double load and iOS throttles
+quietly. It is also the thing that lets a session outlast a battery. Neither
+cancels the other; M10 is what says which dominates in a session of realistic
+length.
 
 `CORE` §3.2's own transport table says the same thing qualitatively — *"USB tunnel
 | very tight, stable | Fastest convergence, lowest sigma. **Best available.**"* —
@@ -1170,9 +1198,15 @@ thermal load **on top of** sustained HEVC encode at capture frame rates — a lo
 the WiFi path does not carry at all. iOS then throttles the camera, and it does so
 quietly: the effective frame rate falls and nothing announces it.
 
-**This is the one cost that partly offsets §1's benefit**, and it is not visible
-anywhere else in this document. It belongs in front of a reviewer as a debit, not
-a footnote.
+**This is a real cost and it is not visible anywhere else in this document.** It
+belongs in front of a reviewer as a debit.
+
+⚠ **But it is not only a debit.** The same current that heats the phone is what
+keeps it alive: a long range session with the camera running is a battery problem,
+and a cabled phone does not have it. §1.1 lists power among the reasons to build
+this at all. M10 therefore measures **both** — time to throttle and time to flat —
+because which one bites first in a session of realistic length is the whole
+question, and neither number answers it alone.
 
 ✅ **The reporting half is already built.** `ThermalState` is read on the device
 and surfaced in the capture UI (`ArmedScreen.swift:317`), and peer-level thermal
@@ -1251,7 +1285,9 @@ runs on this project are non-deterministic and network conditions are worse.
 | # | Question | Measurement | Decides |
 |---|---|---|---|
 | ~~M0~~ | ~~How much of today's `min_rtt` is the 20 ms poll?~~ | **✅ DISCHARGED 29 Aug**: 12.95 → 1.64 ms, i.e. **87% of the round trip was the poll**. `offset_sigma` 2.50 → 1.16 ms | Done. ⚠ It also moved the goalposts — see §1 |
-| M1 | What is `min_rtt` over usbmux? | Sync trace, 5 min idle link, wired vs the **new 1.64 ms** WiFi control | ⚠ The bar moved. Not *"is it lower"* but *"what does ~3× lower buy on a number already 4.3× inside the 5 ms gate"*. **If the answer is little, the accuracy case is spent and only the Windows/Linux reconnection case remains.** |
+| M1a | `min_rtt` over usbmux, **idle** | 5 min idle link, wired vs the 1.64 ms WiFi control | The floor. ⚠ Expect ~3× — real, but not on its own the reason to build this |
+| M1b | ⛔ **`min_rtt` and sigma under CONTENTION** | Both arms with the WiFi loaded — other clients, 2.4 GHz, distance, a body in the path. Report the **95th percentile and the worst 5 s window**, not the converged floor | **This is the real M1.** The cable is selling a floor that does not move, and §1's idle measurement cannot see that. A shot happens at one instant, not after five quiet minutes |
+| M11 | Does WiFi ever *fail* where wired does not? | Drop/roam/reconnect counts over a long session, both arms | The reliability half of §1.1, which no sigma number captures |
 | M2a | Does the phone hold `zero_residence` off, and what is its residence time? | `ppcp_peer_sync_zero_residence()`, and `t3−t2` distribution | §7.2 — responder residence is a small share of a WiFi round trip and a large share of a USB one |
 | M2 | What is time-to-skew-target? | Span at which `skew_sigma_ppm` crosses the WiFi 90 s value | The headline claim, in the units an operator cares about |
 | M3 | Does bulk poison control? | `min_rtt` and `offset_sigma` on channel 0 during a 25 MB channel-1 transfer, wired vs WiFi | Whether Phase 3 is needed |
@@ -1259,7 +1295,7 @@ runs on this project are non-deterministic and network conditions are worse.
 | M5 | Does `Connect` need device trust? | **Fresh, untrusted** device | Onboarding copy, and the only wired-only user step (§6.6). ⚠ Still open: the 29 Aug probe used Mark's dev phone, which is already trusted, so a successful `Connect` there proves the mechanism and **not** the trust question |
 | M6 | Concurrent tunnels | 2 and 3 channels at once through usbmux | That `CORE` T2/T5 survives the multiplexer at all |
 | M7 | Does a loopback-bound `NWListener` avoid the local-network prompt? | Fresh install, permission never granted, then declined | §5.3's second reason. Verify the exemption; do not trust it |
-| M10 | **Sustained capture before thermal throttle, cabled vs not** | Longest supported capture on the oldest supported device, `thermalState` logged throughout, wired and WiFi arms | §9.6 — the cable's own cost. ⛔ Phase 1, not Phase 2. Screen for issue #101's ~8.8 s gap signature before attributing anything to heat |
+| M10 | **Sustained capture cabled vs not — thermal AND battery** | Longest supported capture on the oldest supported device, `thermalState` **and battery level** logged throughout, both arms | §9.6. ⚠ Both directions: charging is a thermal cost and the reason a session outlasts a battery. Report time-to-throttle **and** time-to-flat. ⛔ Phase 1. Screen for issue #101's ~8.8 s gap signature before attributing anything to heat |
 | M8 | USB Restricted Mode | Phone locked > 1 hour with the cable attached, then a dial | §9.5 — whether the idle-timer fix is sufficient or the path dies between sessions |
 
 ⚠ M1 and M3 are the two that can kill or reshape the design. Run them first, on
@@ -1354,6 +1390,7 @@ be generalised in anticipation of it. This is an **iOS mechanism**, named as one
 | The cable's thermal cost is a debit on the design, measured in Phase 1 | Charging is unavoidable over USB and iOS throttles quietly; reporting already exists, the measurement does not (§9.6) |
 | Android is not designed for, and §5 must not be generalised toward it | USB tethering gives Android a network interface, so it needs none of the presence ceremony — this is an iOS mechanism (§13) |
 | No protocol primitive changes for wired | PPCP is transport-agnostic and min-RTT filtering was written for exactly this spread; what must change is the **embedding's stamping**, which `CORE` 6.1c already anticipated (§7) |
+| Wired is bought for **contention-resistance, reliability and power** as much as for sigma | Phase 0 took most of the idle-network sigma win with no cable; none of the other three moved (§1.1) |
 | **Wired is an optimisation and never a requirement** | usbmux is undocumented and unsupported; losing it must cost a transport, not the product (§0) |
 | usbmux tunnel, not USB Ethernet or MFi | The only path that works without a cellular plan or a hardware programme |
 | First-party usbmux client, ~600 lines | Three platforms differ by one socket type; avoids LGPL and `libplist`; stays Qt-free for the headless harness |
