@@ -449,9 +449,16 @@ void PpcpWiredLink::onRetryTick()
     if (!m_running) return;
 
     for (Retry &r : m_retry) {
-        if (r.linked) continue;   // §6.1 rule 1 — a link exists; do not open a second
+        if (r.linked) continue;   // this cable already carries a link
         if (std::find(m_dialling.begin(), m_dialling.end(), r.udid) != m_dialling.end())
             continue;             // one already in flight
+        // ⚠ Cheap pre-dial gate, and it runs HERE because this is the GUI
+        // thread — the worker may not touch the phone list.  It saves two TLS
+        // handshakes every 2 s for a phone that is already on the cable or busy.
+        if (!r.knownPairing.isEmpty() && m_peerState) {
+            const PeerLinkState st = m_peerState(r.knownPairing);
+            if (st == PeerLinkState::Wired || st == PeerLinkState::WifiBusy) continue;
+        }
         if (--r.dueInSecs > 0) continue;
 
         // Flat — see kWiredRetrySecs.  A ramp loses the race against the
@@ -470,18 +477,26 @@ void PpcpWiredLink::onRetryTick()
 }
 
 void PpcpWiredLink::noteDialOutcome(const std::string &udid, DialOutcome o,
-                                    const QString &why)
+                                    const QString &why, const QString &pairing)
 {
     m_dialling.erase(std::remove(m_dialling.begin(), m_dialling.end(), udid),
                      m_dialling.end());
 
     Retry *r = retryFor(udid);
     if (!r) return;   // detached while the dial was in flight
+    if (!pairing.isEmpty()) r->knownPairing = pairing;
 
     if (o == DialOutcome::Adopted) {
         r->linked = true;
         return;
     }
+
+    // ⛔ "NONE OF THIS PHONE'S PAIRINGS IS ONE OF OURS" IS A SETTLED ANSWER, NOT
+    // A TRANSIENT FAILURE.  It changes only when the phone is unplugged or newly
+    // paired, and re-asking every 2 s forever would be pointless work — and, if
+    // the device ever learns to stand aside for a cabled host, would strand a
+    // phone cabled to a Studio it is not paired with.  Stop until it replugs.
+    if (o == DialOutcome::NoMatch) r->linked = true;   // "leave this one alone"
 
     // One line per state change, per the note above.
     if (!r->everLogged || r->lastLogged != o) {
@@ -495,6 +510,16 @@ void PpcpWiredLink::noteDialOutcome(const std::string &udid, DialOutcome o,
 
 void PpcpWiredLink::retryNow()
 {
+    // ⚠ THIS RUNS INSIDE A TAKEOVER TOO, and the interaction is worth stating.
+    // dropPhone() calls it, and a takeover drops the WiFi phone — so the entry
+    // for the phone we have JUST connected over the cable gets its `linked` flag
+    // cleared here, moments before the cable link is adopted.  What stops it
+    // being re-dialled a second later is the pre-dial state check in
+    // onRetryTick(): by then the wired Phone exists, `knownPairing` was recorded
+    // when the dial succeeded, and PeerLinkState answers `Wired`.
+    //
+    // ⛔ So the pre-dial check is not merely an optimisation — remove it and a
+    // takeover re-dials itself in a loop.
     for (Retry &r : m_retry) {
         r.linked    = false;
         r.dueInSecs = 1;
@@ -689,10 +714,15 @@ void PpcpWiredLink::runJob(const Job &j)
     HandshakeFailure hf;
     std::unique_ptr<PeerConnection> link = Connector::connect(cfg, &hf);
     if (!link) {
-        finish(DialOutcome::HandshakeFailed,
-               QStringLiteral("wired handshake did not complete — %1")
-                   .arg(hf.message.empty() ? QStringLiteral("no link")
-                                           : QString::fromStdString(hf.message)));
+        QMetaObject::invokeMethod(
+            this,
+            [this, udid = j.udid, pairingId,
+             m = QString::fromStdString(hf.message.empty() ? "no link" : hf.message)] {
+                noteDialOutcome(udid, DialOutcome::HandshakeFailed,
+                                QStringLiteral("wired handshake did not complete — %1").arg(m),
+                                pairingId);
+            },
+            Qt::QueuedConnection);
         return;
     }
 
@@ -704,7 +734,7 @@ void PpcpWiredLink::runJob(const Job &j)
     PeerConnection *raw = link.release();
     QMetaObject::invokeMethod(
         this, [this, raw, pairingId, deviceId, udid = j.udid] {
-            noteDialOutcome(udid, DialOutcome::Adopted, QString());
+            noteDialOutcome(udid, DialOutcome::Adopted, QString(), pairingId);
             onDialFinished(raw, pairingId, deviceId);
         },
         Qt::QueuedConnection);
@@ -723,16 +753,27 @@ void PpcpWiredLink::onDialFinished(PeerConnection *raw, QString resolvedPairingI
         return;
     }
 
-    // §6.1 rule 1 — a live link for that peer already exists, so do nothing.
-    // Never open a second, on either transport.  ⚠ This is a per-PAIRING check
-    // and it is the weaker half of the arbitration §6.1 describes; the
-    // advertisement suppression that closes the window properly is Phase 2, and
-    // the env gate above is what stands in for it until then.
-    if (m_hasLive && m_hasLive(resolvedPairingId)) {
-        ppWarn() << "[ppcp-usb] a link for this pairing is already up — the cable "
-                    "changes nothing (design §6.1 rule 1)";
+    // §6.1 rule 1, re-checked here because the state can have moved while the
+    // handshake ran.  See PeerLinkState in the header for why this is a takeover
+    // rather than a refusal.
+    const PeerLinkState st = m_peerState ? m_peerState(resolvedPairingId)
+                                         : PeerLinkState::None;
+    if (st == PeerLinkState::Wired || st == PeerLinkState::WifiBusy) {
+        ppWarn() << "[ppcp-usb] a link for this pairing is already up and"
+                 << (st == PeerLinkState::Wired ? "on the cable" : "in use")
+                 << "— leaving it alone (design §6.1 rule 1)";
         link->close();
         return;
+    }
+
+    if (st == PeerLinkState::WifiIdle) {
+        // ⛔ DROP THE WiFi LINK ONLY NOW — the cable is already up, so this is a
+        // make-before-break and there is never a moment with no link at all.
+        // ⚠ The new link re-converges from nothing: ~35 s before it can
+        // arbitrate a shot.  That is why WifiBusy above is left alone.
+        ppWarn() << "[ppcp-usb] the cable is up for this pairing — dropping the "
+                    "WiFi link and taking over (re-syncs, about a minute)";
+        if (m_dropForTakeover) m_dropForTakeover(resolvedPairingId);
     }
 
     ++m_adopted;

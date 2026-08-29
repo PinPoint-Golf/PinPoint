@@ -241,9 +241,50 @@ public:
     // cheaper to keep than to reason about a second time.
     void setIdentityResolver(IdentityResolver r) { m_resolve = std::move(r); }
 
-    // §6.1 rule 1 — "a live link for that peer already exists → do nothing.
-    // Never open a second, on either transport."  The service answers.
-    void setHasLivePairing(std::function<bool(const QString &)> f) { m_hasLive = std::move(f); }
+    // ── §6.1 rule 1, WIDENED so the cable can take over from WiFi ─────────
+    //
+    // The original rule was "a live link for that peer already exists → do
+    // nothing, never open a second, on either transport", and it made the cable
+    // unusable in the ordinary case: the phone dials over WiFi the instant the
+    // app is foregrounded, wins the race, and the cable then declines to try.
+    //
+    // ⛔ THE RACE CANNOT BE WON BY SUPPRESSING FIRST.  Rule 2 allows the host to
+    // withhold its advertisement only once wired is PROVEN, rule 4 forbids
+    // withholding it on mere attachment ("plugging a phone in to charge must
+    // never disturb WiFi"), and presence cannot be proven until the capture app
+    // is up — which is the same instant the phone dials.  So the host is never
+    // permitted to act before the phone has already acted.
+    //
+    // ✅ The answer is to stop racing and TAKE OVER instead: let WiFi connect,
+    // dial the cable anyway, and drop the WiFi link once the cable is up.
+    //
+    // ⚠ This is NOT the migration §7.3 forbids.  Nothing carries a clock fit
+    // across: the cable link is a fresh `ppcp_peer` with a fresh estimator, and
+    // the WiFi link is destroyed rather than converted.  §7.3 names exactly this
+    // as the honest form.
+    //
+    // ⛔ AND IT COSTS A MEASURED 35 SECONDS.  A new cable link's `offset_sigma`
+    // starts at 8.4 ms and does not fall under the 5 ms arbitration gate until
+    // t+35 s (measured 29 Aug 2026), so a shot crossing in that window cannot be
+    // arbitrated at all.  That is free at the start of a session and unacceptable
+    // in the middle of one, which is why `Busy` exists and is honoured.
+    enum class PeerLinkState {
+        None,        // nothing for this pairing — dial
+        WifiIdle,    // on WiFi, nothing has happened yet — dial and take over
+        WifiBusy,    // on WiFi and working — ⛔ leave it alone
+        Wired        // already on the cable — nothing to do
+    };
+    void setPeerLinkState(std::function<PeerLinkState(const QString &)> f)
+    {
+        m_peerState = std::move(f);
+    }
+
+    // Drops the WiFi link for this pairing so the cable can replace it.  Called
+    // on the GUI thread immediately before the new link is adopted.
+    void setDropForTakeover(std::function<void(const QString &)> f)
+    {
+        m_dropForTakeover = std::move(f);
+    }
 
     // Opens the usbmux `Listen` connection and arms the notifier.  Silent and
     // harmless when the gate is off, when there is no provider, or when nothing
@@ -300,7 +341,11 @@ private:
         HandshakeFailed,  // resolved, and the PPCP dial did not complete
         Adopted           // a link
     };
-    void noteDialOutcome(const std::string &udid, DialOutcome o, const QString &why);
+    // `pairing` is empty until a dial got far enough to resolve one; once known
+    // it is kept so the retry tick can skip a phone that is busy on WiFi without
+    // paying for a presence read and two TLS handshakes to find out.
+    void noteDialOutcome(const std::string &udid, DialOutcome o, const QString &why,
+                         const QString &pairing = QString());
 
     // Per-attached-device retry state.  Attachment-scoped: created on Attached,
     // erased on Detached, exactly like m_attached.
@@ -309,6 +354,7 @@ private:
         Usbmux::DeviceId deviceId = 0;
         int  dueInSecs   = 0;                      // counts down on the tick
         bool linked      = false;                  // a link was adopted; stop
+        QString knownPairing;                      // once resolved, remembered
         bool everLogged  = false;
         DialOutcome lastLogged = DialOutcome::NoPresence;
     };
@@ -333,7 +379,8 @@ private:
 
     AdoptFn                                m_adopt;
     IdentityResolver                       m_resolve;
-    std::function<bool(const QString &)>   m_hasLive;
+    std::function<PeerLinkState(const QString &)> m_peerState;
+    std::function<void(const QString &)>         m_dropForTakeover;
 
     // ⛔ Keyed by UDID, never by DeviceID.  MEASURED 29 Aug 2026: the same
     // iPhone on the same cable was DeviceID 306 in the morning and 308 in the

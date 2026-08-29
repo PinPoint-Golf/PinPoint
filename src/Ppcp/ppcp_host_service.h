@@ -524,6 +524,12 @@ private:
         // The pairing this phone arrived on.  Stable, local, and the join
         // between a live link and the row in Settings -> Phones.
         QString pairingId;
+
+        // Which way this link came in.  ⚠ It is decided at adoption and never
+        // changes: design §7.3 forbids migrating a link between transports,
+        // because a clock offset fitted on one is WRONG on the other and the
+        // sigma would not widen to admit it.  A transport change is a NEW link.
+        bool wired = false;
         // Its declared `Peer.id`, which is what `VideoInputPpcp` keys cameras
         // and timebase relations by.
         QString counterpartId;

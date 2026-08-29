@@ -726,6 +726,7 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link,
     auto phone = std::make_unique<Phone>();
     Phone *ph = phone.get();
     ph->pairingId = pairingId;
+    ph->wired     = weDialled;
 
     // ⚠ F-H8-5 — A `ppcp_peer` IS THE CONVERSATION, NOT THE APPLICATION.
     //
@@ -1304,9 +1305,33 @@ void PpcpHostService::startWired()
     // own resolver, unchanged — a second one would be a second place for expiry
     // (7.3e), exhaustion (7.3a) and invalidation (7.3b) to be got wrong.
     m_wired->setIdentityResolver(m_rv.identityResolver());
-    // §6.1 rule 1 — never a second link for a peer that already has one.
-    m_wired->setHasLivePairing([this](const QString &pairingId) {
-        return phoneByPairing(pairingId) != nullptr;
+    // §6.1 rule 1, widened so the cable can take over from WiFi — see
+    // PpcpWiredLink::PeerLinkState for why a takeover and not a refusal.
+    using PLS = Ppcp::PpcpWiredLink::PeerLinkState;
+    m_wired->setPeerLinkState([this](const QString &pairingId) {
+        const Phone *ph = phoneByPairing(pairingId);
+        if (!ph)        return PLS::None;
+        if (ph->wired)  return PLS::Wired;
+
+        // ⛔ "BUSY" IS WHAT PROTECTS A RUNNING SESSION, and it is deliberately
+        // generous.  Taking over costs a measured 35 s before the new link's
+        // sigma falls under the 5 ms arbitration gate, so anything that has
+        // begun doing work keeps the link it has.  Nothing observed yet means
+        // nothing to lose: the phone connected moments ago and the operator is
+        // still setting up.
+        const Ppcp::PpcpShotBridge::Stats &st = ph->peer->shotBridge().stats();
+        const bool sawShots = st.nominated || st.observedForeign || st.issued
+                              || st.adopted || st.excluded || st.unarbitrated;
+        const bool importing =
+            ph->importSink && (ph->importSink->stats().captures
+                               || ph->importSink->stats().clipsWritten);
+        return (sawShots || importing) ? PLS::WifiBusy : PLS::WifiIdle;
+    });
+    // The WiFi link goes only once the cable is up — make before break, so there
+    // is never a moment with no link at all.
+    m_wired->setDropForTakeover([this](const QString &pairingId) {
+        if (Phone *ph = phoneByPairing(pairingId))
+            dropPhone(ph, "replaced by the cable");
     });
     // ⛔ Contract C2 — the pairing the wired path resolved travels with the link.
     m_wired->setAdoptHandler(
