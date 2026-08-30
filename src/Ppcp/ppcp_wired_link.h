@@ -334,6 +334,10 @@ private slots:
     // Opens the usbmux device watch and arms its notifier.  Returns false when
     // there is no daemon, which is an ordinary outcome and not an error.
     bool tryOpenWatch();
+    // Tears the watch down WITHOUT shutting the object down, so onRetryTick()
+    // can re-open it.  ⛔ Not stop(): that is shutdown, and using it here is
+    // what left the wired path dead after every unplug.
+    void closeWatch();
 
 private:
     // ── The GUI thread half ────────────────────────────────────────────────

@@ -313,6 +313,28 @@ void PpcpWiredLink::start(Usbmux::Provider provider)
     tryOpenWatch();
 }
 
+// Drops the watch and everything scoped to it, and NOTHING ELSE.  The worker,
+// the job queue and the retry timer all stay up, because the daemon coming back
+// is an ordinary event on Linux rather than the end of the session.
+void PpcpWiredLink::closeWatch()
+{
+    // ⛔ Notifier before the fd, exactly as stop() does: a QSocketNotifier left
+    // on a closed socket fires forever on some platforms and asserts on others.
+    m_notifier.reset();
+    m_watch.stop();
+    m_watchUp = false;
+    // Say it again next time it is missing — a new absence is a new state, and
+    // this is what keeps the one-line-per-state-change discipline honest across
+    // an unplug/replug cycle rather than going silent after the first one.
+    m_watchAnnouncedDown = false;
+    m_watchDueInSecs     = kWiredWatchRetrySecs;
+    // Attachment-scoped state dies with the watch: every DeviceID it holds was
+    // issued by a daemon that is gone, and 29 Aug's finding was that a DeviceID
+    // may not outlive its attachment.
+    m_retry.clear();
+    m_attached.clear();
+}
+
 // Opens the device watch and arms its notifier.  Absence of a daemon is an
 // ordinary outcome (design §6.2, RV 3.6a) and returns false without a fuss.
 bool PpcpWiredLink::tryOpenWatch()
@@ -415,7 +437,16 @@ void PpcpWiredLink::onWatchReadable()
         // must come off before the fd closes, which is what stop() does first.
         const Usbmux::Result why = m_watch.lastError();
         ppWarn() << "[ppcp-usb] device watch ended —" << why.message().c_str();
-        stop();
+        // ⛔ closeWatch(), NOT stop() — AND THIS IS THE COMMON CASE ON LINUX.
+        // The open-source `usbmuxd` exits when the last device detaches, so the
+        // watch ends on every unplug.  stop() is SHUTDOWN: it clears m_running
+        // and stops the retry timer, and since nothing calls startWired() a
+        // second time (`ppcp_host_service.cpp` calls it once), that left the
+        // wired path dead for the rest of the process — observed live 30 Aug
+        // 2026, cable replugged and never re-armed.  Tearing down only the
+        // watch leaves onRetryTick() free to re-open it, which is the same
+        // recovery that already covers "no daemon when we started".
+        closeWatch();
     }
 }
 
