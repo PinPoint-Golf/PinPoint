@@ -382,13 +382,39 @@ Item {
                 // CONNECTED phone has one; the "—" a remembered-but-absent
                 // phone shows is the same "no reading" sentinel the other
                 // facts already use, not a claim that the battery is dead.
-                readonly property int    batteryPct: phoneRow.isConnected ? (phoneRow.phoneData.batteryPct === undefined ? -1 : phoneRow.phoneData.batteryPct) : -1
-                readonly property string thermal:    phoneRow.isConnected ? (phoneRow.phoneData.thermal || "") : ""
+                // ⛔ READ VIA phoneHealth(), NOT OFF phoneData.  These three move on
+                // every `heartbeat_ack`, and they used to arrive by re-emitting
+                // phonesChanged() — which re-read the whole list, rebuilt every
+                // delegate in the Repeater, and destroyed the alias field an
+                // operator was typing into, once per heartbeat, for as long as a
+                // phone was linked.  The host now emits the narrower
+                // phoneHealthChanged() and the rows survive it.
+                // ⛔ EVERY REFERENCE IS id-QUALIFIED, AND THE UNQUALIFIED VERSION
+                // OF THIS SILENTLY DID NOTHING.  A `Connections` handler is its
+                // own scope: it cannot see `refreshHealth` or `health` from the
+                // enclosing item, and the failure is a runtime
+                // `ReferenceError: refreshHealth is not defined` once per
+                // heartbeat — the bindings simply never update, so the readings
+                // freeze at whatever they were when the row was built.
+                property var health: ({})
+                function refreshHealth() {
+                    capsRow.health = (root.controller && phoneRow.phoneData.pairingId)
+                                     ? root.controller.phoneHealth(phoneRow.phoneData.pairingId)
+                                     : ({})
+                }
+                Component.onCompleted: capsRow.refreshHealth()
+                Connections {
+                    target: root.controller
+                    function onPhoneHealthChanged() { capsRow.refreshHealth() }
+                }
+
+                readonly property int    batteryPct: phoneRow.isConnected ? (health.batteryPct === undefined ? -1 : health.batteryPct) : -1
+                readonly property string thermal:    phoneRow.isConnected ? (health.thermal || "") : ""
                 // 6.1f's clock agreement — THIS phone's own worst related-
                 // timebase sigma (PpcpHostService::worstSyncSigmaMsFor()), not
                 // the toolbar's cross-phone aggregate. -1 while unconnected or
                 // while no relation has arrived yet (§6.3a not satisfied).
-                readonly property real   syncSigmaMs: phoneRow.isConnected ? (phoneRow.phoneData.syncSigmaMs === undefined ? -1 : phoneRow.phoneData.syncSigmaMs) : -1
+                readonly property real   syncSigmaMs: phoneRow.isConnected ? (health.syncSigmaMs === undefined ? -1 : health.syncSigmaMs) : -1
                 // Design §6.1 — which path this phone is actually on. A
                 // property of the LINK, so a remembered-but-absent phone has
                 // none and shows the same "—" every other reading uses. ⛔ An

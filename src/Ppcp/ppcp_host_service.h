@@ -239,6 +239,11 @@ public:
     int     connectedCount() const { return static_cast<int>(m_phones.size()); }
     QString peerName() const;
     QStringList connectedNames() const;
+    // The per-heartbeat readings for one pairing, so a panel can bind them
+    // WITHOUT re-reading `phones()` and rebuilding its rows.  Same values and
+    // same "no reading" sentinels (-1 / empty) that `phones()` publishes.
+    Q_INVOKABLE QVariantMap phoneHealth(const QString &pairingId) const;
+
     QString lastFailureText() const { return m_lastFailureText; }
     int     failureCount() const { return m_failureCount; }
 
@@ -472,6 +477,13 @@ signals:
     void statusChanged();
     void codeChanged();
     void phonesChanged();
+    // ⛔ SEPARATE FROM phonesChanged() ON PURPOSE, and the separation is the
+    // whole point.  A `heartbeat_ack` moves a READING; it does not change which
+    // phones exist.  Emitting the structural signal for it made Settings ->
+    // Phones rebuild every delegate once per heartbeat, which destroyed the
+    // alias field an operator was typing into — measured 30 Aug 2026, and it
+    // made the field unusable for as long as any phone was linked.
+    void phoneHealthChanged();
     void guidedChanged();
     void failureChanged();
 

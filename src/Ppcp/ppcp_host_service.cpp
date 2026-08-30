@@ -391,8 +391,11 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err, bool liste
     // reading. `phones()` reads `peerHealth()` straight off the live session
     // rather than a copy kept here, so all this hook has to do is tell
     // Settings -> Phones (and the toolbar's aggregate) that it moved.
+    // ⛔ phoneHealthChanged(), NOT phonesChanged().  A reading moving is not the
+    // phone list changing, and conflating them rebuilt every row in Settings ->
+    // Phones on every heartbeat — see the signal's declaration.
     ph->peer->liveSession().setHealthCallback(
-        [this](const PpcpLiveSession::PeerHealth &) { emit phonesChanged(); });
+        [this](const PpcpLiveSession::PeerHealth &) { emit phoneHealthChanged(); });
     // 5.2a — the device answered `arm`.  This is the half that turns "we sent a
     // message" into "the device says it is ready", and until it existed nothing
     // consumed `readiness` at all.
@@ -1666,6 +1669,34 @@ QVariantMap PpcpHostService::ppcpStats() const
     m[QStringLiteral("importSessions")] = static_cast<int>(m_importLedger.sessionCount());
     m[QStringLiteral("commitsOwed")]    = static_cast<int>(m_importLedger.pendingCommitCount());
     return m;
+}
+
+// The three readings a `heartbeat_ack` moves, for one pairing.
+//
+// ⛔ EXISTS SO A PANEL NEED NOT RE-READ phones() TO REFRESH A NUMBER.  Binding a
+// row to the whole list means every heartbeat rebuilds every delegate, and a
+// destroyed delegate takes the alias field's focus with it — which made
+// Settings -> Phones untypeable while any phone was linked.  Same values and
+// the same "no reading" sentinels phones() publishes (-1, empty string), read
+// off the live session rather than a copy, so the two cannot drift.
+QVariantMap PpcpHostService::phoneHealth(const QString &pairingId) const
+{
+    QVariantMap out;
+    const Phone *live = phoneByPairing(pairingId);
+    const bool   isLive = live != nullptr;
+
+    static const PpcpLiveSession::PeerHealth kNoHealth{};
+    const PpcpLiveSession::PeerHealth &health =
+        isLive ? live->peer->liveSession().peerHealth() : kNoHealth;
+
+    out[QStringLiteral("batteryPct")] = (health.valid && health.hasBatteryPct)
+                                       ? static_cast<int>(health.batteryPct) : -1;
+    out[QStringLiteral("thermal")] = health.valid
+        ? QString::fromStdString(ppcp_thermal_level_str(health.thermal))
+        : QString();
+    out[QStringLiteral("syncSigmaMs")] = isLive
+        ? worstSyncSigmaMsFor(live->peer->liveSession()) : -1.0;
+    return out;
 }
 
 QVariantList PpcpHostService::phones() const
