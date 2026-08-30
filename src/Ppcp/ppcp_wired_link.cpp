@@ -323,6 +323,39 @@ void PpcpWiredLink::closeWatch()
     m_notifier.reset();
     m_watch.stop();
     m_watchUp = false;
+
+    // ⛔ THE DIALS MUST STOP WITH THE SUBSCRIPTION, AND LEAVING THEM RUNNING WAS
+    // A DEFECT.  The first version of closeWatch() dropped only the notifier and
+    // the socket, on the reasoning that the daemon returning is an ordinary event
+    // and the object should stay alive for it.  That is right about the object
+    // and wrong about the work in flight: `stop()` used to set m_stopping, clear
+    // the queue, join the worker and clear m_dialling, and none of that happened
+    // here.
+    //
+    // ⚠ So a dial that began under the OLD daemon could finish under the NEW one,
+    // carrying a DeviceID from an attachment that no longer exists — this plan's
+    // own finding is that a DeviceID must never outlive its attachment — and hand
+    // back a link over a tunnel that is already dead.  `link up` followed
+    // immediately by `link closed`, with no channel and no declare, which is the
+    // signature observed 30 Aug 2026 on every re-armed subscription while the
+    // one link that never went through this path stayed up for ten minutes.
+    //
+    // The worker is joined and restarted rather than left running: it owns
+    // nothing but the dial, so this costs a thread create per cable cycle and
+    // buys the guarantee that no work outlives the daemon it was issued against.
+    {
+        std::lock_guard<std::mutex> g(m_jobMutex);
+        m_stopping = true;
+        m_jobs.clear();
+    }
+    m_jobCv.notify_all();
+    if (m_worker.joinable()) m_worker.join();
+    m_dialling.clear();
+    {
+        std::lock_guard<std::mutex> g(m_jobMutex);
+        m_stopping = false;
+    }
+    if (m_running) m_worker = std::thread([this] { workerLoop(); });
     // Say it again next time it is missing — a new absence is a new state, and
     // this is what keeps the one-line-per-state-change discipline honest across
     // an unplug/replug cycle rather than going silent after the first one.

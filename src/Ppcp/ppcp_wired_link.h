@@ -178,6 +178,7 @@ constexpr int         kWiredRetrySecs         = 2;
 // permanently, which is why macOS almost never reaches this path.
 constexpr int         kWiredWatchRetrySecs    = 5;
 
+
 struct WiredPresence {
     // One entry per listener the device holds — contract C5 makes that one per
     // held pairing, each on its own ephemeral port.  ⚠ It is NOT a list of
