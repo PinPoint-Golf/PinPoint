@@ -737,6 +737,10 @@ private:
     QString m_status;
     QString m_lastFailureText;
     int     m_failureCount = 0;
+    // How many consecutive refusals before the resolver state is dumped, and
+    // how often to repeat it thereafter.  See noteFailureText().
+    static constexpr int kFailureDiagAfter = 3;
+    static constexpr int kFailureDiagEvery = 20;
     // ⚠ WHICH PAIRINGS A PHONE ACTUALLY ARRIVED ON, and it cannot be inferred
     // from the ledger.  `closeSession()` sets `invalidated` and zeroes
     // `usesRemaining` — so a code the user simply dismissed is indistinguishable

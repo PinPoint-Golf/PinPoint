@@ -2335,6 +2335,27 @@ void PpcpHostService::noteFailureText(const QString &text)
     if (text.isEmpty()) return;
     m_lastFailureText = text;
     ++m_failureCount;
+
+    // ⛔ THE ONE PLACE THAT CAN SAY *WHY* AUTHENTICATION KEEPS FAILING, and it
+    // had no caller in the application at all — only tests.  RV 5.3c/7.7c make
+    // the handshake message deliberately UNIFORM, because naming the cause on
+    // the wire is the distinguisher 7.7c forbids; that is a property of what we
+    // tell the PEER, and says nothing about what the operator's own log may
+    // know.  Without this, repeated refusals are indistinguishable from each
+    // other and the only recourse is to guess — which cost most of 30 Aug 2026.
+    //
+    // ⚠ Threshold, not every failure: a single refusal is ordinary (a stale
+    // code, a phone that walked away mid-handshake) and must stay quiet.  A RUN
+    // of them is a state worth dumping, and it is dumped again every
+    // kFailureDiagEvery so a long run shows whether the state is changing —
+    // roughly one line per five minutes at the observed two-per-30s rate.
+    if (m_failureCount == kFailureDiagAfter
+     || (m_failureCount > kFailureDiagAfter
+         && (m_failureCount - kFailureDiagAfter) % kFailureDiagEvery == 0)) {
+        ppWarn() << "[ppcp-rv]" << m_failureCount
+                 << "handshake refusals — resolver state follows\n"
+                 << m_rv.diagnosticExport().c_str();
+    }
     emit failureChanged();
 }
 
