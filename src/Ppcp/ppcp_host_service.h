@@ -107,6 +107,8 @@ class PpcpHostService : public QObject
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(int connectedCount READ connectedCount NOTIFY stateChanged)
     Q_PROPERTY(QString peerName READ peerName NOTIFY stateChanged)
+    // Read by Settings; written by setStudioName().
+    Q_PROPERTY(QString studioName READ studioName NOTIFY studioNameChanged)
     Q_PROPERTY(QStringList connectedNames READ connectedNames NOTIFY stateChanged)
 
     // ── A phone that arrived and did not become a link ──────────────────────
@@ -394,6 +396,26 @@ public:
     // afterwards.  Q_INVOKABLE so the diagnostics screen can offer it.
     Q_INVOKABLE QString diagnosticExport() const;
 
+    // ── What a phone calls this computer (RV 4.3 / 4.4d) ───────────────────
+    //
+    // ⛔ IT USED TO BE THE CONSTANT "PinPointStudio", WHICH MEANS EVERY STUDIO A
+    // PHONE HAS EVER PAIRED WITH IS CALLED THE SAME THING.  Raised by Mark while
+    // testing one phone against macOS, Linux and Windows: his Remembered Studios
+    // list read "PinPointStudio" three times and there was no way to tell which
+    // row was which machine, or which to forget.  A studio with several hosts is
+    // rare; a DEVELOPER with several hosts is not, and neither is a range that
+    // replaces a machine.
+    //
+    // ⚠ Defaults to the computer's own host name, so the common case needs no
+    // configuration at all and three machines are three different names on day
+    // one.  At most 64 bytes (4.3), and trimmed; an empty value falls back to the
+    // default rather than publishing nothing.
+    QString studioName() const;
+    Q_INVOKABLE void setStudioName(const QString &name);
+    // The value a fresh install would use — shown as placeholder text so the
+    // field can be cleared back to it.
+    Q_INVOKABLE static QString defaultStudioName();
+
     // ── What an automated run reads back to ASSERT ─────────────────────────
     //
     // The arbitration counters are otherwise printed once, when a phone
@@ -474,6 +496,7 @@ public:
 
 signals:
     void stateChanged();
+    void studioNameChanged();
     void statusChanged();
     void codeChanged();
     void phonesChanged();

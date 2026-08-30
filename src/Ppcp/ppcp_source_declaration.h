@@ -111,6 +111,21 @@ public:
         std::vector<Camera> cameras;
         bool hasMicrophone = false;
         Microphone microphone;
+        // ⛔ WHAT A PHONE CALLS THIS COMPUTER, and the reason it travels on the
+        // declaration as well as in the pairing code: the code names the studio
+        // only at the moment of pairing, so a machine renamed afterwards would
+        // keep its old name on every phone that had already paired with it —
+        // for ever, since a persisted pairing has no expiry (RV 7.4a).
+        //
+        // ⚠ It goes in `product.model`, which is the convention this system
+        // already uses in the other direction: the host names a phone's row from
+        // ITS `product.model` ("iPhone 16"). 5.2c makes `product` informational
+        // and I19 forbids inferring behaviour from it, so a display name is
+        // exactly what it may carry.
+        //
+        // Empty falls back to the product name, so a declaration built by a test
+        // or a harness still says something true.
+        std::string studioName;
     };
 
     // Reads the inventory from DeviceEnumerator.  The ONLY function here that
@@ -168,6 +183,9 @@ private:
 
     std::vector<ppcp_capture_profile> m_profiles;
     std::vector<ppcp_source>          m_sources;
+    // ⚠ Owned here because `ppcp_peer_desc_set_product` copies ids BY VALUE but
+    // the string handed to it must outlive the call, and a temporary would not.
+    std::string                       m_studioName;
     std::vector<ppcp_timebase>        m_timebases;
     std::vector<ppcp_id>              m_declaredProfiles;
     ppcp_peer_desc                    m_peer{};

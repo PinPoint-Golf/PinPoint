@@ -498,7 +498,13 @@ bool PpcpSourceDeclaration::build(const std::string &peerId, const Inventory &in
 
     // 5.2c `product` is informational and, per I19, is never used to infer
     // behaviour — which is exactly why it is safe to send.
-    ppcp_peer_desc_set_product(&m_peer, "PinPoint Golf", "PinPointStudio",
+    //
+    // ⚠ `model` carries the STUDIO'S NAME rather than the constant
+    // "PinPointStudio", so a phone that paired before the machine was renamed
+    // learns the new name on its next connect. `vendor` still identifies the
+    // product, which is where that fact belongs. See Inventory::studioName.
+    m_studioName = inv.studioName.empty() ? std::string("PinPointStudio") : inv.studioName;
+    ppcp_peer_desc_set_product(&m_peer, "PinPoint Golf", m_studioName.c_str(),
                                ppcp_library_version());
 
     // No `relations`.  CORE 5.4: a relation is measured, and the host has

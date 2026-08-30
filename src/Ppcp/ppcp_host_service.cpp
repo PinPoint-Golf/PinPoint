@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include <QDateTime>
+#include <QSysInfo>
 #include <cmath>
 #include <QDir>
 #include <QSocketNotifier>
@@ -77,6 +78,32 @@ QString hostPeerId()
     }
     id = s;
     return id;
+}
+
+// ── The name a phone shows for this computer ────────────────────────────────
+//
+// ⛔ NOT in the mDNS TXT record, and that is a security decision rather than an
+// oversight.  §3's advertisement is cleartext on the LAN and deliberately
+// minimal — `txtvers`, `pv`, `role`, `rn`, `rid` — and `rid` ROTATES precisely so
+// a passive radio observer cannot link one venue's sightings to another's
+// (3.4d/3.4e).  A stable human name beside it would undo that in one field: it is
+// exactly the tracking beacon the rotation exists to prevent.
+//
+// So the name travels on the two paths that are already private or already
+// consented to: the PAIRING CODE, which the operator is showing on purpose
+// (4.3/4.4d), and `declare`'s `product`, which is inside the encrypted link
+// after both ends have authenticated.
+QString studioNameDefault()
+{
+    // The machine's own name, which is what a person already calls it. Falls
+    // back only if the platform will not say.
+    QString host = QSysInfo::machineHostName().trimmed();
+    // ⚠ mDNS hands back "Marks-Mac-mini.local"; the suffix is machinery and not
+    // part of what anybody calls the machine. Stripped so the default is
+    // presentable enough that most people never edit it.
+    if (host.endsWith(QStringLiteral(".local"), Qt::CaseInsensitive))
+        host.chop(6);
+    return host.isEmpty() ? QStringLiteral("PinPointStudio") : host;
 }
 
 // RV 7.3c — the shortest expiry the workflow tolerates.  Long enough to walk to
@@ -463,7 +490,12 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err, bool liste
     // Source, Stream or Candidate, so this happens before anything is pumped,
     // and once per conversation.
     std::string derr;
-    if (!ph->peer->declareSelf(PpcpSourceDeclaration::hostInventory(), &derr))
+    PpcpSourceDeclaration::Inventory inv = PpcpSourceDeclaration::hostInventory();
+    // The other half of the rename path — see Inventory::studioName. A phone
+    // already paired learns the new name here rather than only from a code it
+    // will never scan again.
+    inv.studioName = studioName().toStdString();
+    if (!ph->peer->declareSelf(inv, &derr))
         ppWarn() << "[ppcp] the host could not declare itself:" << derr.c_str();
 
     ph->engine = ph->peer->makeLibppcpEngine(&derr);
@@ -1589,6 +1621,45 @@ QString PpcpHostService::phoneAliasFor(const QString &pairingId)
         .value(pairingId).toString();
 }
 
+QString PpcpHostService::defaultStudioName() { return studioNameDefault(); }
+
+QString PpcpHostService::studioName() const
+{
+    const QString stored =
+        ppSettings().value(QStringLiteral("ppcp/studioName")).toString().trimmed();
+    return stored.isEmpty() ? studioNameDefault() : stored;
+}
+
+void PpcpHostService::setStudioName(const QString &name)
+{
+    QSettings s = ppSettings();
+    // 4.3 — at most 64 bytes on the wire.  Truncated by BYTES and not by
+    // characters, because the limit is the wire's and a multi-byte name cut
+    // mid-sequence would be invalid UTF-8 rather than merely short.
+    QByteArray utf8 = name.trimmed().toUtf8();
+    while (utf8.size() > 64) {
+        utf8.chop(1);
+        // Step back off a continuation byte so the result stays well-formed.
+        while (!utf8.isEmpty() && (static_cast<unsigned char>(utf8.back()) & 0xC0) == 0x80)
+            utf8.chop(1);
+    }
+    const QString trimmed = QString::fromUtf8(utf8);
+    if (trimmed == studioName()) return;
+
+    // ⚠ Empty CLEARS the override rather than publishing an empty name — the
+    // field then shows the machine name again, which is what a user emptying a
+    // box expects and is also the only value that is never wrong.
+    if (trimmed.isEmpty()) s.remove(QStringLiteral("ppcp/studioName"));
+    else                   s.setValue(QStringLiteral("ppcp/studioName"), trimmed);
+
+    // ⚠ The name reaches a phone in two ways and BOTH need this.  A code
+    // published from now on carries it; an already-paired phone learns it from
+    // the next `declare`, which is why refreshCode() alone is not enough.
+    refreshCode();
+    emit studioNameChanged();
+    emit stateChanged();
+}
+
 void PpcpHostService::setPhoneAlias(const QString &pairingId, const QString &alias)
 {
     if (pairingId.isEmpty()) return;
@@ -2127,7 +2198,7 @@ bool PpcpHostService::publishCode(bool userAsked)
     cfg.maxUses = 1;   // 7.3a; anything above it costs 7.4f
     // 4.3/4.4d — ours to print, UNTRUSTED at the far end.  A bay name and not a
     // person's name: the code is photographed and the name is on it.
-    cfg.displayName = "PinPointStudio";
+    cfg.displayName = studioName().toStdString();
 
     std::string err;
     if (!m_rv.publish(cfg, eps, nullptr, &m_code, &err)) {

@@ -595,6 +595,56 @@ Item {
                 Layout.fillWidth: true
             }
 
+            // ── What a phone calls this computer ───────────────────────────
+            //
+            // ⛔ IT WAS THE CONSTANT "PinPointStudio" AND EVERY STUDIO A PHONE
+            // HAD EVER PAIRED WITH WAS CALLED THAT.  Raised by Mark testing one
+            // phone against macOS, Linux and Windows: his phone's Remembered
+            // Studios list read the same name three times with no way to tell
+            // which machine was which, or which one to forget.
+            //
+            // ⚠ It belongs on THIS panel rather than in General because it is a
+            // fact about the phone relationship, and this is the screen someone
+            // is looking at when they wonder what their phone is showing.
+            RowLayout {
+                visible: root.havePpcp
+                Layout.fillWidth: true
+                spacing: Theme.sp(16)
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.sp(2)
+                    Text {
+                        text:                qsTr("THIS COMPUTER")
+                        font.family:         Theme.fontBody
+                        font.pixelSize:      Theme.fontSzMicro
+                        font.letterSpacing:  Theme.trackingMicro
+                        font.capitalization: Font.AllUppercase
+                        color:               Theme.colorText3
+                    }
+                    Text {
+                        text: qsTr("The name your phone shows for this Studio. A phone already "
+                                 + "paired picks up a change the next time it connects.")
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzBody2
+                        color:          Theme.colorText3
+                        wrapMode:       Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+
+                PpTextField {
+                    id: studioNameField
+                    Layout.alignment:      Qt.AlignVCenter
+                    Layout.preferredWidth: Theme.sp(220)
+                    // ⚠ Empty shows the machine's own name, which is both the
+                    // default and what clearing the box returns you to.
+                    placeholderText:       root.havePpcp ? root.controller.defaultStudioName() : ""
+                    text:                  root.havePpcp ? root.controller.studioName : ""
+                    onEditingFinished:     if (root.havePpcp) root.controller.setStudioName(text)
+                }
+            }
+
             // ── Enumerated devices header ──────────────────────────────────
             RowLayout {
                 visible: root.havePpcp
