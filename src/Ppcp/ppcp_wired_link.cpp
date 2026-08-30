@@ -576,8 +576,9 @@ void PpcpWiredLink::onRetryTick()
         if (--r.dueInSecs > 0) continue;
 
         // Flat — see kWiredRetrySecs.  A ramp loses the race against the
-        // phone's own WiFi dial, which fires on app foreground.
-        r.dueInSecs = kWiredRetrySecs;
+        // phone's own WiFi dial, which fires on app foreground.  The only
+        // slow case is a phone that is not ours (kWiredNoMatchRetrySecs).
+        r.dueInSecs = r.everySecs;
 
         m_dialling.push_back(r.udid);
         ++m_dialled;
@@ -605,19 +606,19 @@ void PpcpWiredLink::noteDialOutcome(const std::string &udid, DialOutcome o,
         return;
     }
 
-    // ⛔ "NONE OF THIS PHONE'S PAIRINGS IS ONE OF OURS" IS A SETTLED ANSWER, NOT
-    // A TRANSIENT FAILURE.  It changes only when the phone is unplugged or newly
-    // paired, and re-asking every 2 s forever would be pointless work — and, if
-    // the device ever learns to stand aside for a cabled host, would strand a
-    // phone cabled to a Studio it is not paired with.  Stop until it replugs.
-    if (o == DialOutcome::NoMatch) r->linked = true;   // "leave this one alone"
+    // ⛔ "NONE OF THIS PHONE'S PAIRINGS IS ONE OF OURS" IS NOT SETTLED — see
+    // kWiredNoMatchRetrySecs.  It used to latch the retry off for the life of the
+    // attachment; the capture app restarting rebuilds its presence record, and a
+    // latched host never sees the new one.  Slow down, do not stop.
+    r->everySecs = (o == DialOutcome::NoMatch) ? kWiredNoMatchRetrySecs
+                                               : kWiredRetrySecs;
 
     // One line per state change, per the note above.
     if (!r->everLogged || r->lastLogged != o) {
         r->everLogged = true;
         r->lastLogged = o;
         ppWarn() << "[ppcp-usb]" << why.toUtf8().constData()
-                 << "— retrying every" << kWiredRetrySecs
+                 << "— retrying every" << r->everySecs
                  << "s while it stays plugged in";
     }
 }
@@ -637,6 +638,7 @@ void PpcpWiredLink::retryNow()
     for (Retry &r : m_retry) {
         r.linked    = false;
         r.dueInSecs = 1;
+        r.everySecs = kWiredRetrySecs;   // a link ending re-arms the fast cadence
         // ⚠ The outcome memory is deliberately NOT cleared: if the phone is
         // still refusing for the same reason, that is not a state change and
         // does not deserve a second identical line.

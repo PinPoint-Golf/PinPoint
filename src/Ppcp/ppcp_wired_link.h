@@ -166,6 +166,22 @@ constexpr int         kWiredHandshakeMs       = 3000;
 // the app is up, by which time the phone has already dialled.
 constexpr int         kWiredRetrySecs         = 2;
 
+// ⛔ THE SLOW CADENCE FOR "THIS PHONE IS NOT ONE OF OURS", AND IT IS NOT A LATCH.
+// The first version of this treated `NoMatch` as settled for the life of an
+// attachment — "it changes only when the phone is unplugged or newly paired".
+// ⚠ That was wrong, and the Linux port caught it: **it also changes when the
+// capture app restarts and rebuilds its presence record**, which is an everyday
+// event. Observed 30 Aug 2026 — a phone published four stale listeners, the host
+// latched off, the app restarted with the live pairing in its record, and the
+// host never looked again. The cable stayed unreachable while WiFi worked, and
+// cycling the cable was the only cure.
+//
+// So: keep asking, slowly. The concern the latch existed for — not hammering a
+// phone that genuinely is not ours — is met by the cadence, and the cost of
+// being wrong is one refused plist round trip a minute instead of a cable that
+// can never come back.
+constexpr int         kWiredNoMatchRetrySecs  = 60;
+
 // ⛔ HOW OFTEN TO RE-OPEN A USBMUX DAEMON THAT WAS NOT THERE AT STARTUP.
 // Slower than kWiredRetrySecs on purpose: that one is racing the phone's own
 // WiFi dial and must win it, whereas this races nothing — the daemon either
@@ -372,6 +388,7 @@ private:
         std::string      udid;
         Usbmux::DeviceId deviceId = 0;
         int  dueInSecs   = 0;                      // counts down on the tick
+        int  everySecs   = kWiredRetrySecs;        // this device's own cadence
         bool linked      = false;                  // a link was adopted; stop
         QString knownPairing;                      // once resolved, remembered
         bool everLogged  = false;
