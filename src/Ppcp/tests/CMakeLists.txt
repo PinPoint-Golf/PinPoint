@@ -197,6 +197,13 @@ pp_add_test(ppcp_bundle_import_test
 pp_add_test(ppcp_video_input_test
     SOURCES ppcp_video_input_test.cpp
             ${PP_SRC}/Video/VideoInputPpcp.cpp
+            # ⚠ THE REAL LOG, NOT `pp_log_stub.cpp`.  VideoInputPpcp names which
+            # end closed a Stream through ppWarn(), and the primitive now stands
+            # on its own (pp_log_stream.cpp) instead of arriving with whisper and
+            # ggml behind it — so a suite can carry the log rather than a stub
+            # that discards it.
+            ${PP_SRC}/Core/pp_log_stream.cpp
+            ${PP_SRC}/Core/PpMessageLog.cpp
             ${PP_SRC}/Video/video_input_base.cpp
             ${PP_SRC}/Video/raw_video_frame.cpp
             ${PPCP}/ppcp_host_engine.cpp

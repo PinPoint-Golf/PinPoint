@@ -701,6 +701,7 @@ target_compile_definitions(PinPointStudio PRIVATE
 target_sources(PinPointStudio PRIVATE
     src/Core/pp_debug.h
     src/Core/pp_debug.cpp
+    src/Core/pp_log_stream.cpp
     src/Core/app_info.h
     src/Core/app_info.cpp
     src/Core/pp_settings.h
@@ -2971,6 +2972,7 @@ if(PINPOINT_BUILD_TOOLS)
         src/Pose/pose_estimator_base.cpp
         src/Pose/pose_estimator_vitpose.cpp
         src/Core/pp_debug.cpp
+        src/Core/pp_log_stream.cpp
         src/Core/PpMessageLog.cpp
         src/Core/PpStatsLog.cpp
         src/Core/AnalysisProfileLog.cpp

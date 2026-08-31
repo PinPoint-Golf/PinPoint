@@ -32,6 +32,7 @@
 #include <ppcp/common.h>   // ppcp_result_str()
 #include <ppcp/transfer.h>
 
+#include "../Core/pp_debug.h"                   // ppWarn() — the application log
 #include "../Ppcp/ppcp_source_declaration.h"   // kHostTimebaseId, hostNowNs()
 
 namespace {
@@ -745,21 +746,21 @@ void VideoInputPpcp::closeStream(const QString &streamId, const char *reason)
     if (ppcp_instant_make_z(&closedAt, Ppcp::kHostTimebaseId, Ppcp::hostNowNs()) != PPCP_OK)
         return;
 
-    // ⚠ SAID OUT LOUD, BECAUSE THE OTHER HALF OF THE EXCHANGE ALREADY IS.  When
-    // a preview Stream ends, every other consumer of it reports "the device
-    // closed the preview stream" — true, and misleading on its own, because the
-    // device is usually answering a close THIS host asked for.  A log with only
-    // that half in it reads as the phone doing something arbitrary; Mark's log of
-    // 31 Aug 2026 has four of them and nothing to say which end started it.
+    // ⚠ SAID OUT LOUD, BECAUSE THE OTHER HALF OF THE EXCHANGE ALREADY IS.  When a
+    // preview Stream ends, every other consumer of it reports "the device closed
+    // the preview stream" — true, and misleading alone, because the device is
+    // usually answering a close THIS host asked for.  A log carrying only that
+    // half reads as the phone acting on its own; the log of 31 Aug 2026 had four
+    // such lines and nothing to say which end started it.
     //
-    // ⚠ `qWarning`, NOT `ppWarn` — the same in-app log either way (the message
-    // handler in pp_debug.cpp captures warnings into PpMessageLog), but this
-    // translation unit is compiled into `ppcp_video_input_test`, whose link
-    // closure is deliberately small and does not carry PpLogStream.
-    qWarning("[ppcp] closing %s stream %s (%s) — %s",
-             streamId == m_previewStreamId ? "preview" : "capture",
-             streamId.toUtf8().constData(), reason,
-             m_previewOnly ? "host consumer" : "tile");
+    // ⚠ `ppWarn()`, the ONE application log.  It was a `qWarning()` for one
+    // commit because ppWarn lived beside whisper.h and this file is compiled into
+    // a lean test — the primitive now lives in pp_log_stream.cpp, which is the
+    // right answer to that and not a second channel.
+    ppWarn() << "[ppcp] closing"
+             << (streamId == m_previewStreamId ? "preview" : "capture")
+             << "stream" << streamId << "-" << reason
+             << (m_previewOnly ? "(host consumer)" : "(tile)");
     (void)ppcp_peer_stream_close(m_peer, streamId.toUtf8().constData(), &closedAt, reason);
 }
 

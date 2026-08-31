@@ -44,24 +44,12 @@
 #include <streambuf>
 #include <string>
 
-// ── PpLogStream ───────────────────────────────────────────────────────────────
-
-PpLogStream::PpLogStream(QtMsgType t)
-    : m_type(t), m_dbg(std::in_place, &m_buf)
-{}
-
-PpLogStream::~PpLogStream()
-{
-    m_dbg.reset();  // destructs QDebug, flushing its internal state to m_buf
-
-    if (m_type == QtDebugMsg) {
-        fprintf(stderr, "%s\n", m_buf.trimmed().toLocal8Bit().constData());
-    } else {
-        PpMessageLog::instance()->append(m_type, m_buf.trimmed());
-    }
-
-    if (m_type == QtFatalMsg) ::abort();
-}
+// ── PpLogStream lives in pp_log_stream.cpp ───────────────────────────────────
+// ⛔ AND IT IS NOT COMING BACK HERE.  This file includes whisper.h and ggml.h to
+// silence their loggers in `install()`; the log PRIMITIVE needs neither, and
+// welding the two together is what made six test suites link a stub that
+// discards every log line rather than pay for a speech model.  See the header of
+// pp_log_stream.cpp.
 
 // ── Qt message handler ────────────────────────────────────────────────────────
 // PinPoint Studio messages bypass this via PpLogStream. This handler suppresses
