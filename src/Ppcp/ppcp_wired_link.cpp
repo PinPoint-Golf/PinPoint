@@ -842,6 +842,40 @@ void PpcpWiredLink::runJob(const Job &j)
         return;
     }
 
+    // ── 4b. ENC 2.1d — the third channel, opened HERE because on the cable
+    // this end is the dialler ─────────────────────────────────────────────────
+    //
+    // ⛔ WITHOUT THIS THERE IS NO PREVIEW OVER THE CABLE, EVER.  2.1d's further
+    // stream carries the SAME link id, so only the dialler can open it — a
+    // listener connecting back would be a stranger's first connection.  On WiFi
+    // the phone dials, so the phone opens it (`HostLinkSession.openPreviewChannel`)
+    // and this host's accept thread collects it through `acceptChannelFor()`.
+    // The cable inverts that: usbmux runs host→device only, the phone cannot dial
+    // us at all, and its own code answers "the listener side cannot dial" and
+    // refuses preview with `no_preview_channel`.  So the host opens it, and until
+    // it did, a cabled phone showed a black tile with nothing in any log to say
+    // why — reported 31 Aug 2026.
+    //
+    // ⚠ HERE, NOT AFTER THE HAND-OVER, and the ordering is deliberate twice
+    // over.  This is the worker thread, where a blocking TLS handshake belongs —
+    // the GUI thread must never run one.  And the phone tolerates either order:
+    // a stream that binds before its link has assembled is carried into the link
+    // at construction, one that binds after is attached to it.
+    //
+    // ⚠ A FAILURE IS NOT FATAL TO THE LINK.  5.11i ranks preview below transfer
+    // and capture: a cable with two channels is a working cable that cannot show
+    // a picture, which is worth saying out loud and not worth refusing.
+    {
+        HandshakeFailure pf;
+        if (Connector::connectAdditional(cfg, *link, Channel::Preview, &pf)) {
+            ppWarn() << "[ppcp-usb] ENC 2.1d — preview channel open on the cable";
+        } else {
+            ppWarn() << "[ppcp-usb] no preview channel on the cable, so this phone "
+                        "can show no picture —"
+                     << (pf.message.empty() ? "no reason given" : pf.message.c_str());
+        }
+    }
+
     // ── 5. Cross to the GUI thread ─────────────────────────────────────────
     //
     // ⚠ The identical hand-off the accept thread uses at

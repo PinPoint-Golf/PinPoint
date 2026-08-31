@@ -813,7 +813,14 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link,
     // ENC 2.1d — this link has its two required channels; a `preview` one may
     // follow at any later point in the session, and until this call nothing in
     // the application was listening for it.
-    noteWantsChannel(ph->link->linkId(), true);
+    //
+    // ⚠ UNLESS IT IS ALREADY HERE, which is the cable.  There the host is the
+    // dialler, so `PpcpWiredLink` opened the third channel itself before handing
+    // the link over (the phone cannot dial us over usbmux).  Asking the accept
+    // thread to watch for one as well would leave it polling `acceptChannelFor()`
+    // for a stream that can never arrive, for the life of the link.
+    if (!ph->link->channel(Ppcp::Channel::Preview))
+        noteWantsChannel(ph->link->linkId(), true);
     m_phones.push_back(std::move(phone));
 
     // ⚠ THE CODE ON SCREEN IS NOW SPENT, SO REPLACE IT.  `mu` is 1 (7.3a), so
