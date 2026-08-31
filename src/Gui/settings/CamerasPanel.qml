@@ -992,23 +992,59 @@ Item {
                             // necessary 25 Aug 2026: the typeof guard alone still
                             // logged "ReferenceError: appSettings is not defined"
                             // here on a real PPCP camera's crop editor.
+                            function persistRoi() {
+                                try {
+                                    if (!camData.cameraKey) return
+                                    var roi = camRow.instance.cropRoi
+                                    var map = appSettings.cameraRoi
+                                    if (roi.width > 0 && roi.height > 0)
+                                        map[camData.cameraKey] = { x: roi.x, y: roi.y, w: roi.width, h: roi.height }
+                                    else
+                                        delete map[camData.cameraKey]
+                                    appSettings.cameraRoi = map
+                                } catch (e) {
+                                    // The context this handler needed is gone —
+                                    // the row is being torn down and there is
+                                    // nothing left here to persist ROI for.
+                                }
+                            }
+
                             Connections {
                                 target: camRow.instance
                                 function onCropRoiChanged() {
-                                    try {
-                                        if (!camData.cameraKey) return
-                                        var roi = camRow.instance.cropRoi
-                                        var map = appSettings.cameraRoi
-                                        if (roi.width > 0 && roi.height > 0)
-                                            map[camData.cameraKey] = { x: roi.x, y: roi.y, w: roi.width, h: roi.height }
-                                        else
-                                            delete map[camData.cameraKey]
-                                        appSettings.cameraRoi = map
-                                    } catch (e) {
-                                        // The context this handler needed is gone —
-                                        // the row is being torn down and there is
-                                        // nothing left here to persist ROI for.
-                                    }
+                                    // ⛔ NOT WHILE A DRAG IS IN FLIGHT, AND THIS IS WHY
+                                    // RESIZING THE CROP BOX WAS ALMOST IMPOSSIBLE.
+                                    //
+                                    // Writing `appSettings.cameraRoi` emits
+                                    // `cameraRoiChanged`, and CameraManager wires that
+                                    // straight to `cameraListChanged` (camera_manager.cpp,
+                                    // "a crop edit must refresh the list") because
+                                    // `cameraList()` derives initialWidth/initialHeight
+                                    // from the persisted crop.  That rebuilds every
+                                    // delegate in this Repeater — including THIS
+                                    // `previewRect` and the MouseArea holding the mouse
+                                    // grab — so the drag died on the first pixel and the
+                                    // operator had to re-press for each one.
+                                    //
+                                    // ⚠ AND IT IS WHY MOVING WORKED WHILE RESIZING DID
+                                    // NOT.  Qt leaves a Repeater's delegates standing when
+                                    // a row's CONTENTS have not changed: a move alters x/y
+                                    // only, which no list field carries, so the rebuild was
+                                    // a no-op.  A resize changes the crop-derived
+                                    // initialWidth/initialHeight, the row genuinely
+                                    // differs, and the delegates go.
+                                    //
+                                    // ⚠ AND IT TOOK THE PREVIEW WITH IT.  The teardown ran
+                                    // `Component.onDestruction` → `destroyPreviewInstance()`
+                                    // → `stopCapture()`, which is where the four
+                                    // "the device closed the preview stream (not_needed)"
+                                    // lines in Mark's 31 Aug log came from.
+                                    //
+                                    // The gesture is persisted once, on release.  A
+                                    // numeric field, a preset or a clear still lands here
+                                    // and is written immediately.
+                                    if (previewRect.roiDragMode !== "none") return
+                                    previewRect.persistRoi()
                                 }
                             }
 
@@ -1222,7 +1258,16 @@ Item {
                                     }
                                 }
 
-                                onReleased: previewRect.roiDragMode = "none"
+                                onReleased: {
+                                    // The one write for the whole gesture — see the
+                                    // cropRoiChanged handler above for why it is not
+                                    // per-pixel.  ⚠ AFTER clearing the mode, so the
+                                    // handler that fires on the way through does not
+                                    // skip it.
+                                    const wasDragging = previewRect.roiDragMode !== "none"
+                                    previewRect.roiDragMode = "none"
+                                    if (wasDragging) previewRect.persistRoi()
+                                }
                             }
 
                             // Live badge
