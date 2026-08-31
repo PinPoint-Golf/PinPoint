@@ -75,12 +75,22 @@ CameraManager::CameraManager(pinpoint::EventBuffer *buffer, AppSettings *appSett
     if (aliasDirty)
         s->setCameraAlias(aliasMap);
 
-    // cameraList() derives initialWidth/initialHeight from the persisted
-    // crop, so a crop edit must refresh the list — disconnected placeholder
-    // tiles resize to the new crop immediately, not on the next reconnect.
-    if (m_appSettings)
-        connect(m_appSettings, &AppSettings::cameraRoiChanged,
-                this, &CameraManager::cameraListChanged);
+    // ⛔ A CROP EDIT NO LONGER REFRESHES THE CAMERA LIST, AND THAT CONNECTION
+    // WAS EXPENSIVE OUT OF ALL PROPORTION TO WHAT IT BOUGHT.
+    //
+    // It existed for one thing: `cameraList()` derives initialWidth/initialHeight
+    // from the persisted crop, and a DISCONNECTED tile's placeholder aspect read
+    // them, so a crop edit had to re-emit `cameraListChanged` for that tile to
+    // resize before the next reconnect.  The cost was every delegate in every
+    // camera Repeater in the application being rebuilt on every crop write — the
+    // crop editor's own MouseArea among them, which is why dragging a corner lost
+    // the mouse grab, and the Settings preview instances with it, which is why
+    // their Streams closed (31 Aug 2026).
+    //
+    // `PpCameraTiles.qml` now binds that aspect to `appSettings.cameraRoi`
+    // directly, so the tile follows a crop reactively and nothing has to be
+    // rebuilt.  The row values stay in the list as the fallback for a camera with
+    // no crop stored; they are refreshed by every other thing that rebuilds it.
 }
 
 CameraManager::~CameraManager()

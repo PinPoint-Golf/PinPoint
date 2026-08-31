@@ -93,8 +93,26 @@ Item {
                 Layout.fillHeight: true
                 Layout.fillWidth: false
                 Layout.preferredWidth: height * videoAspect
-                placeholderAspect: (modelData.initialWidth > 0 && modelData.initialHeight > 0)
-                                   ? modelData.initialWidth / modelData.initialHeight : 16.0 / 9.0
+                // ⚠ READ FROM THE SETTING, NOT FROM THE LIST ROW, AND THAT IS
+                // WHAT LETS A CROP EDIT LEAVE THE CAMERA LIST ALONE.
+                // `cameraList()` carries crop-derived initialWidth/initialHeight,
+                // so keeping a disconnected tile's aspect honest used to mean
+                // re-emitting `cameraListChanged` on every crop write — which
+                // rebuilt every delegate in every camera Repeater in the
+                // application, including the one holding the mouse grab in the
+                // crop editor (see CamerasPanel.qml's cropRoiChanged handler) and
+                // the Settings tiles whose teardown closed their Streams.  This
+                // binding depends on the setting itself, so the tile follows a
+                // crop with no list refresh at all.  The row's own values remain
+                // the fallback for a camera with no crop stored.
+                placeholderAspect: {
+                    const roi = appSettings.cameraRoi[modelData.cameraKey]
+                    if (roi && roi.w > 0 && roi.h > 0
+                        && modelData.maxWidth > 0 && modelData.maxHeight > 0)
+                        return (modelData.maxWidth * roi.w) / (modelData.maxHeight * roi.h)
+                    return (modelData.initialWidth > 0 && modelData.initialHeight > 0)
+                           ? modelData.initialWidth / modelData.initialHeight : 16.0 / 9.0
+                }
                 instance: {
                     var insts = cameraManager.instances
                     for (var i = 0; i < insts.length; ++i)
