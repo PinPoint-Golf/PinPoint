@@ -463,6 +463,19 @@ private:
     bool    m_previewOnly = false;
     QString m_captureStreamId;
     QString m_previewStreamId;
+    // ⛔ DID THIS INSTANCE OPEN THE PREVIEW STREAM, OR MERELY ADOPT IT?  There
+    // is ONE preview Stream per Source and several consumers of it — the host's
+    // own, alive from `declare`, and any tile an operator opens — because 5.1a
+    // fixes a Stream's identity for its life and `onCaptureAnnounce()` resolves
+    // by `source_id` rather than by who opened what.  The open side of that has
+    // been right for a while (`ppcp_peer_stream_find` before `openStream`); the
+    // CLOSE side was not, and `stop()` shut the shared Stream whenever any
+    // consumer finished with it.  The owner then saw the device's
+    // `stream_close` and reported "the device closed the preview stream
+    // (not_needed)" for a Stream this host had asked to close — which is what a
+    // crop editor closing (or its delegate being rebuilt) did to a live preview,
+    // reported 31 Aug 2026 on a cabled phone.
+    bool    m_previewOwned = false;
     // Empty means "the fastest declared", which is what every instance did
     // before an operator could say otherwise.
     QString m_preferredProfileId;

@@ -744,6 +744,22 @@ void VideoInputPpcp::closeStream(const QString &streamId, const char *reason)
     ppcp_instant closedAt{};
     if (ppcp_instant_make_z(&closedAt, Ppcp::kHostTimebaseId, Ppcp::hostNowNs()) != PPCP_OK)
         return;
+
+    // ⚠ SAID OUT LOUD, BECAUSE THE OTHER HALF OF THE EXCHANGE ALREADY IS.  When
+    // a preview Stream ends, every other consumer of it reports "the device
+    // closed the preview stream" — true, and misleading on its own, because the
+    // device is usually answering a close THIS host asked for.  A log with only
+    // that half in it reads as the phone doing something arbitrary; Mark's log of
+    // 31 Aug 2026 has four of them and nothing to say which end started it.
+    //
+    // ⚠ `qWarning`, NOT `ppWarn` — the same in-app log either way (the message
+    // handler in pp_debug.cpp captures warnings into PpMessageLog), but this
+    // translation unit is compiled into `ppcp_video_input_test`, whose link
+    // closure is deliberately small and does not carry PpLogStream.
+    qWarning("[ppcp] closing %s stream %s (%s) — %s",
+             streamId == m_previewStreamId ? "preview" : "capture",
+             streamId.toUtf8().constData(), reason,
+             m_previewOnly ? "host consumer" : "tile");
     (void)ppcp_peer_stream_close(m_peer, streamId.toUtf8().constData(), &closedAt, reason);
 }
 
@@ -799,9 +815,12 @@ bool VideoInputPpcp::startPreviewOnly()
     // duplicate the owner must refuse.  Captures reach this instance either
     // way: onCaptureAnnounce() resolves by `source_id`, not by which Streams
     // this object opened.
-    if (!ppcp_peer_stream_find(m_peer, m_previewStreamId.toUtf8().constData())
-        && !openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW,
-                       pv->id.v, PPCP_CONTINUOUS)) {
+    if (ppcp_peer_stream_find(m_peer, m_previewStreamId.toUtf8().constData())) {
+        m_previewOwned = false;          // adopted — someone else's to close
+    } else if (openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW,
+                          pv->id.v, PPCP_CONTINUOUS)) {
+        m_previewOwned = true;
+    } else {
         m_previewStreamId.clear();
         m_previewOnly = false;
         return false;
@@ -912,11 +931,20 @@ bool VideoInputPpcp::start(const QString &deviceId)
         // onCaptureAnnounce() resolves by `source_id` rather than by which
         // Streams this object opened.
         if (ppcp_peer_stream_find(m_peer, m_previewStreamId.toUtf8().constData())) {
-            // nothing to do — it is open and we already answer for this Source
-        } else if (!openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW,
-                               pv->id.v, PPCP_CONTINUOUS))
+            // Nothing to open — it is up and we already answer for this Source.
+            // ⛔ AND IT IS NOT OURS TO CLOSE: see m_previewOwned.
+            m_previewOwned = false;
+        } else if (openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW,
+                              pv->id.v, PPCP_CONTINUOUS)) {
+            m_previewOwned = true;
+        } else {
             m_previewStreamId.clear();
-        else if (pv->format.present) {
+        }
+        // ⚠ ON BOTH LIMBS, NOT ONLY THE ONE THAT OPENED.  This used to hang off
+        // the open as a third `else if`, so a tile that ADOPTED a live Stream
+        // took the geometry of nothing: `frameFormat()` has no size and reports
+        // an invalid format.  The profile says the same thing whoever opened it.
+        if (!m_previewStreamId.isEmpty() && pv->format.present) {
             m_frameWidth  = static_cast<int>(pv->format.width);
             m_frameHeight = static_cast<int>(pv->format.height);
             m_previewPixelFormat = idStr(pv->format.pixel_format);
@@ -930,8 +958,16 @@ bool VideoInputPpcp::start(const QString &deviceId)
 
 void VideoInputPpcp::stop()
 {
-    closeStream(m_previewStreamId, "not_needed");
+    // ⛔ ONLY THE OPENER CLOSES THE PREVIEW STREAM.  A consumer that adopted it
+    // walks away from it instead: closing here ends the picture for every other
+    // consumer of the same Source, and the owner is then told by the DEVICE that
+    // its Stream went away — which is how "the device closed the preview stream
+    // (not_needed)" appeared in front of an operator who was only setting a crop.
+    // The capture Stream needs no such test: `start()` is the only thing that
+    // opens one, and it reclaims any sibling's first.
+    if (m_previewOwned) closeStream(m_previewStreamId, "not_needed");
     closeStream(m_captureStreamId, "not_needed");
+    m_previewOwned = false;
     m_previewStreamId.clear();
     m_captureStreamId.clear();
     m_open = Open{};
@@ -946,7 +982,10 @@ void VideoInputPpcp::suspend()
     // The capture Stream stays open: suspending a live tile must not disarm a
     // camera that is waiting for a shot.
     if (!m_previewStreamId.isEmpty()) {
-        closeStream(m_previewStreamId, "not_needed");
+        // Same rule as stop(): an adopted Stream belongs to whoever opened it,
+        // and this consumer is only saying it has stopped looking.
+        if (m_previewOwned) closeStream(m_previewStreamId, "not_needed");
+        m_previewOwned = false;
         m_previewStreamId.clear();
     }
     m_state = State::Suspended;
@@ -957,8 +996,16 @@ void VideoInputPpcp::resume()
 {
     if (const ppcp_capture_profile *pv = bestPreviewProfile()) {
         m_previewStreamId = streamIdFor(m_peerId, m_sourceId, QStringLiteral("preview"));
-        if (!openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW, pv->id.v, PPCP_CONTINUOUS))
+        // The same adopt-or-open the two start paths do: a sibling consumer may
+        // have kept the Stream open while this one was suspended.
+        if (ppcp_peer_stream_find(m_peer, m_previewStreamId.toUtf8().constData())) {
+            m_previewOwned = false;
+        } else if (openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW,
+                              pv->id.v, PPCP_CONTINUOUS)) {
+            m_previewOwned = true;
+        } else {
             m_previewStreamId.clear();
+        }
     }
     m_state = State::Active;
     emit stateChanged(m_state);
@@ -1243,8 +1290,14 @@ void VideoInputPpcp::onStreamClose(const ppcp_msg *m)
     // `not_needed`, `calibration_changed` and whatever a peer adds — so it is
     // carried as the owner worded it and never mapped onto one we knew (10.3a).
     const QString why = idStr(b.reason);
-    if (isCapture) m_captureStreamId.clear();
-    else           m_previewStreamId.clear();
+    if (isCapture) {
+        m_captureStreamId.clear();
+    } else {
+        m_previewStreamId.clear();
+        // It is gone; nobody owns it now, and this instance must not try to
+        // close it again if it is stopped later.
+        m_previewOwned = false;
+    }
     ++m_counters.streamsClosedByOwner;
 
     const QString what = isPreview ? QStringLiteral("preview") : QStringLiteral("capture");

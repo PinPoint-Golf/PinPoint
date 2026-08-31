@@ -729,6 +729,60 @@ TEST(VideoInputPpcpStreams, ATileStartingDoesNotReclaimThePreviewOnlyConsumer)
     EXPECT_NE(ppcp_peer_stream_find(L.host->peer(), kVideoStream), nullptr);
 }
 
+// ⚠ AND A TILE CLOSING DOES NOT TAKE THE PREVIEW WITH IT.  The open side of
+// "one preview Stream per Source, several consumers" was right; the close side
+// was not, and `stop()` shut the shared Stream whenever ANY consumer finished
+// with it.  What an operator saw: open the crop editor on a phone's camera,
+// close it (or have its delegate rebuilt underneath them) and the device dutifully
+// stopped previewing — reported as "the device closed the preview stream
+// (not_needed)" against the host's own consumer, which had asked for nothing.
+// Reported 31 Aug 2026 on a cabled phone while setting a crop.
+TEST(VideoInputPpcpStreams, ATileClosingLeavesTheStreamItAdoptedOpen)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    ASSERT_TRUE(L.in.startPreviewOnly());        // the host's own consumer: the owner
+    L.toDevice(0);
+    L.toHost(0);
+
+    VideoInputPpcp tile;                          // the crop editor
+    tile.attach(L.host->peer(), kSessionId);
+    tile.prepareDevice(VideoInputPpcp::deviceIdFor(kDevPeer, kSourceId));
+    ASSERT_TRUE(tile.start());
+    L.toDevice(0);
+    L.toHost(0);
+    ASSERT_NE(ppcp_peer_stream_find(L.host->peer(), kPreviewStream), nullptr);
+
+    // The editor closes.  Its own capture Stream goes; the preview Stream it
+    // merely adopted stays, and the consumer that opened it is untouched.
+    tile.stop();
+    L.toDevice(0);
+    L.toHost(0);
+
+    EXPECT_NE(ppcp_peer_stream_find(L.host->peer(), kPreviewStream), nullptr)
+        << "the tile closed a preview Stream it did not open";
+    EXPECT_TRUE(L.in.isActive()) << "the owner lost its preview when a tile closed";
+}
+
+// The other half, so the rule is "the opener closes it" and not "nobody does".
+TEST(VideoInputPpcpStreams, TheConsumerThatOpenedThePreviewStillClosesIt)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    ASSERT_TRUE(L.in.startPreviewOnly());
+    L.toDevice(0);
+    L.toHost(0);
+    ASSERT_NE(ppcp_peer_stream_find(L.host->peer(), kPreviewStream), nullptr);
+
+    L.in.stop();
+    L.toDevice(0);
+    L.toHost(0);
+    EXPECT_EQ(ppcp_peer_stream_find(L.host->peer(), kPreviewStream), nullptr)
+        << "the Stream's owner walked away and left it open";
+}
+
 // ── The device id ──────────────────────────────────────────────────────────
 
 TEST(VideoInputPpcp, ADeviceIdCarriesBothHalvesOfAPpcpIdentity)
