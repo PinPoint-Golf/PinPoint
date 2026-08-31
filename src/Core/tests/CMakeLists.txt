@@ -34,6 +34,19 @@ set(PROFILER_CORE
     ${CORE}/pp_log_stream.cpp
     ${CORE}/PpMessageLog.cpp)
 
+# ── The CGColorSpace pin (macOS) ────────────────────────────────────────────
+# QColorSpace lives in Qt6::Gui, and the pin talks to CoreGraphics directly.
+# Neither is needed by the profiler tests above, so this target carries them
+# rather than widening PROFILER_CORE.
+pp_add_test(pp_colorspace_pin_test
+    SOURCES pp_colorspace_pin_test.cpp
+            ${CORE}/pp_colorspace_pin.cpp
+            ${CORE}/pp_log_stream.cpp
+            ${CORE}/PpMessageLog.cpp
+    INCLUDE ${CORE}
+    LINK    Qt6::Gui $<$<PLATFORM_ID:Darwin>:-framework\ CoreGraphics>
+    GTEST)
+
 # Profiler tests with BOTH tiers compiled in (deep exercised).
 pp_add_test(pp_profiler_test
     SOURCES pp_profiler_test.cpp ${PROFILER_CORE}

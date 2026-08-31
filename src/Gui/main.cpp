@@ -34,6 +34,7 @@
 #include <cmath>
 
 #include "pp_debug.h"
+#include "pp_colorspace_pin.h"
 #include "app_settings.h"
 #include "app_info.h"
 #ifdef HAVE_OPENCV
@@ -96,6 +97,12 @@ int main(int argc, char *argv[])
     ::CreateMutexW(nullptr, FALSE, L"PinPointStudio.SingleInstance.Mutex");
 #endif
     PinPointDebug::install();
+    // ⛔ BEFORE ANYTHING CAN CONVERT A QImage TO A CGImage.  Qt 6.11.1's
+    // `qt_mac_cgImageFormatForImage()` releases the colour space it hands to
+    // `CGImageCreate`, and this holds those objects down so the window it opens
+    // cannot be lost — see src/Core/pp_colorspace_pin.cpp for the disassembly,
+    // the measurements and the crash it answers.  A no-op off macOS.
+    PinPointColour::pinNativeColourSpaces();
 #ifdef HAVE_OPENCV
     // WARN+ logger output still goes to std::cerr (no writer hook before
     // OpenCV 4.11) — captured into PpMessageLog by the cerr tee in
