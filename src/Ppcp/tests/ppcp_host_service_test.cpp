@@ -49,7 +49,9 @@
 
 #include <ppcp/rv.h>
 
+#include <cstdint>
 #include <cstring>
+#include <limits>
 
 #include <ppcp/cbor.h>
 
@@ -1250,8 +1252,16 @@ TEST_F(HostServiceClock, AnAcceptedLinkStillSpendsItsCodeAndIsRemembered)
         const QVariantMap m = v.toMap();
         if (m.value(QStringLiteral("pairingId")).toString() != pairingId) continue;
         found = true;
-        EXPECT_EQ(m.value(QStringLiteral("usesRemaining")).toULongLong(), 0u)
-            << "RV 7.3a — the code the phone used was not spent";
+        // ⚠ UNLIMITED, NOT ZERO, AND 7.3a IS STILL SATISFIED.  The code IS
+        // spent by noteLinkEstablished() — but that same call remembers the
+        // pairing (E57), and `remember()` promotes a remembered pairing back to
+        // unlimited use, which is what 4df28db fixed after a QR-redeemed phone
+        // was refused as EXHAUSTED on every reconnect after the first.  So this
+        // field stops describing a code and starts describing a pairing at the
+        // instant the two become one.  Asserting 0 here asserts the bug.
+        EXPECT_EQ(m.value(QStringLiteral("usesRemaining")).toULongLong(),
+                  std::numeric_limits<std::uint64_t>::max())
+            << "a remembered pairing was left exhausted — the reconnect bug is back";
         EXPECT_TRUE(m.value(QStringLiteral("persisted")).toBool())
             << "E57 — a completed pairing is remembered automatically";
     }

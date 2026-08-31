@@ -163,20 +163,24 @@ class PpcpHostService : public QObject
 
     // ── Aggregates over CONNECTED phones, for the session toolbar ───────────
     // The same shape `ImuManager::lowBatteryPercent` has: -1 means "no
-    // connected phone has reported a level yet", not "0%". Sourced from
-    // `phonesChanged` — the health hook in `configurePhonePeer()` fires it on
-    // every `heartbeat_ack` — rather than a poll, because there is nothing to
-    // poll; the reading already arrived.
-    Q_PROPERTY(int phoneLowestBatteryPct READ phoneLowestBatteryPct NOTIFY phonesChanged)
+    // connected phone has reported a level yet", not "0%".
+    // ⛔ THEY NOTIFY OFF phoneHealthChanged(), NOT phonesChanged().  Every one
+    // of these three moves when a READING arrives — a `heartbeat_ack` or a
+    // `relation_update` — and those deliberately do not emit the structural
+    // signal, because it rebuilds Settings -> Phones (see phoneHealthChanged
+    // below).  `onDeclare()` and `dropPhone()` emit phoneHealthChanged() as
+    // well as phonesChanged() so that the set these aggregate over changing
+    // moves them too.
+    Q_PROPERTY(int phoneLowestBatteryPct READ phoneLowestBatteryPct NOTIFY phoneHealthChanged)
     // "" when no connected phone has a reading yet; otherwise the most severe
     // `ThermalLevel` any connected phone has reported ("nominal".."critical").
-    Q_PROPERTY(QString phoneWorstThermal READ phoneWorstThermal NOTIFY phonesChanged)
+    Q_PROPERTY(QString phoneWorstThermal READ phoneWorstThermal NOTIFY phoneHealthChanged)
     // 6.1f's `outSigmaNs`, worst-case across every related timebase on every
     // connected phone, in milliseconds. -1 while no relation has an estimate
     // yet (fresh connection, still in the ~2-minute burst-then-maintenance
     // convergence window) — never 0, which would claim a perfect sync nobody
     // has measured.
-    Q_PROPERTY(double phoneWorstSyncSigmaMs READ phoneWorstSyncSigmaMs NOTIFY phonesChanged)
+    Q_PROPERTY(double phoneWorstSyncSigmaMs READ phoneWorstSyncSigmaMs NOTIFY phoneHealthChanged)
 
     // ── RV-6 guided pairing, the INITIATOR half (H10) ───────────────────────
     //
@@ -506,6 +510,12 @@ signals:
     // Phones rebuild every delegate once per heartbeat, which destroyed the
     // alias field an operator was typing into — measured 30 Aug 2026, and it
     // made the field unusable for as long as any phone was linked.
+    // ⚠ `relation_update` IS THE SAME KIND OF EVENT and took a year less to
+    // find: `onRelations()` kept emitting the structural signal after the
+    // heartbeat stopped, so the field was still unusable while linked (31 Aug
+    // 2026).  Anything that only moves battery, thermal, transport or sigma
+    // belongs on this signal; only a phone appearing, leaving, being renamed or
+    // being forgotten is phonesChanged().
     void phoneHealthChanged();
     void guidedChanged();
     void failureChanged();

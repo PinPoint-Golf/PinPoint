@@ -89,6 +89,84 @@ Item {
     // that is a QR on screen and belongs to the pairing dialog.
     readonly property var rows: root.controller ? root.controller.phones : []
 
+    // ── An alias being typed, kept ABOVE the Repeater that is typing it ──────
+    //
+    // ⚠ A Repeater over a plain list REBUILDS EVERY DELEGATE when the list is
+    // re-read, so a rebuild while an operator is mid-word destroys the very
+    // TextField holding the keyboard focus and the half-typed text goes with
+    // it.  The cure is upstream — `phones()` is re-read only when the set of
+    // phones actually changes, not when a reading moves (see the note on
+    // `phoneHealthChanged` in ppcp_host_service.h) — but "not on a cadence" is
+    // not "never": another phone connecting, or this one arming, is a genuine
+    // list change that can still land between two keystrokes.
+    //
+    // So the in-progress text does not live in the field.  It lives here, keyed
+    // by pairingId, and a freshly built field adopts it and takes the focus
+    // back.  What the user typed survives a rebuild it never sees.
+    property var    aliasDraft:   ({})    // pairingId -> text being typed
+    property string aliasFocusId: ""      // pairingId whose field held the focus
+    property int    aliasCursor:  0       // and where the caret was in it
+    property bool   aliasFieldFocused: false  // is SOME alias field focused now
+
+    function noteAliasDraft(pairingId, txt, cursor) {
+        if (!pairingId) return
+        var d = root.aliasDraft
+        d[pairingId] = txt
+        root.aliasDraft = d          // whole-object assignment: QML sees no
+        root.aliasCursor = cursor    // change to a var's INTERNALS
+    }
+
+    function clearAliasDraft(pairingId) {
+        if (!pairingId || root.aliasDraft[pairingId] === undefined) return
+        var d = root.aliasDraft
+        delete d[pairingId]
+        root.aliasDraft = d
+    }
+
+    function knownPairing(pairingId) {
+        for (var i = 0; i < root.rows.length; ++i)
+            if (root.rows[i].pairingId === pairingId) return true
+        return false
+    }
+
+    // ⚠ EVERY COMMIT IS DEFERRED, AND THE DEFERRAL IS THE MECHANISM.
+    //
+    // A field losing the focus is two different events wearing one signal: the
+    // user moved on (the edit is over, write it down), or the row was rebuilt
+    // underneath them (the edit is NOT over, and the replacement field is about
+    // to take the focus back).  Nothing readable at that instant tells them
+    // apart — but one event-loop turn later they are obvious, because the
+    // rebuild has finished and either an alias field holds the focus again or
+    // none does.  So the blur schedules this, and this decides.
+    //
+    // ⛔ IT ALSO KEEPS THE WRITE OUT OF THE REBUILD.  `setPhoneAlias()` emits
+    // phonesChanged(), so committing straight from a blur that was itself
+    // caused by a Repeater regenerating would re-enter that regeneration.
+    function finishAliasEdit(pairingId, force) {
+        if (!pairingId) return
+        if (!force && root.aliasFieldFocused && root.aliasFocusId === pairingId)
+            return                                  // a rebuild, not a farewell
+        var txt = root.aliasDraft[pairingId]
+        root.clearAliasDraft(pairingId)
+        if (!force && root.aliasFocusId === pairingId) root.aliasFocusId = ""
+        // A pairing that has been forgotten while its alias was half-typed is
+        // not given the alias back: forgetPairing() deletes the entry, and
+        // writing one now would resurrect a record of a phone this host has
+        // just been told to forget.
+        if (txt !== undefined && root.controller && root.knownPairing(pairingId))
+            root.controller.setPhoneAlias(pairingId, txt)
+    }
+
+    // The panel itself going away — a Loader dropping it as the user leaves
+    // Settings — takes the deferred commit with it, so anything outstanding is
+    // written here instead.  Nothing can be rebuilt at this point, so the
+    // re-entrancy the deferral avoids cannot arise.
+    Component.onDestruction: {
+        for (var pid in root.aliasDraft)
+            if (root.controller && root.knownPairing(pid))
+                root.controller.setPhoneAlias(pid, root.aliasDraft[pid])
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Inline component — one phone's row, the same frame CameraDeviceRow and
     // ImuDeviceRow use: background surface, coloured border, status dot,
@@ -204,12 +282,55 @@ Item {
                     spacing: Theme.sp(2)
 
                     PpTextField {
+                        id: aliasField
+                        // Not a `setting_` name: those are the search index's
+                        // (SettingsIndex.qml), and one row's alias is not an
+                        // indexable setting.  This one is for the QML suite.
+                        objectName: "phoneAliasField"
+                        readonly property string pid: phoneRow.phoneData.pairingId || ""
+
                         Layout.fillWidth: true
                         placeholderText:   qsTr("Device alias…")
-                        text:              phoneRow.phoneData.alias || ""
-                        enabled:           !phoneRow.isRevoked
-                        onEditingFinished: if (root.controller)
-                                               root.controller.setPhoneAlias(phoneRow.phoneData.pairingId, text)
+                        // A draft outranks the stored alias — that is the whole
+                        // point of it — and there is a draft only while one is
+                        // being typed.  Otherwise this is the plain binding it
+                        // always was.
+                        text: root.aliasDraft[aliasField.pid] !== undefined
+                              ? root.aliasDraft[aliasField.pid]
+                              : (phoneRow.phoneData.alias || "")
+                        enabled: !phoneRow.isRevoked
+
+                        onTextEdited: root.noteAliasDraft(aliasField.pid, text, cursorPosition)
+
+                        // ⛔ THIS HANDLER REPLACES PpTextField'S OWN, which
+                        // commits on the spot when the focus goes.  Here the
+                        // commit is one turn later instead — see
+                        // `finishAliasEdit` for why it has to be.
+                        onActiveFocusChanged: {
+                            if (activeFocus) {
+                                root.aliasFocusId = aliasField.pid
+                                root.aliasFieldFocused = true
+                                return
+                            }
+                            root.aliasFieldFocused = false
+                            // The id is passed by VALUE: this field may not
+                            // exist by the time the call runs, which is the
+                            // entire case being handled.
+                            Qt.callLater(root.finishAliasEdit, aliasField.pid, false)
+                        }
+
+                        // Return — the edit is over even though the focus has
+                        // not moved, so this one is not conditional.
+                        onAccepted: Qt.callLater(root.finishAliasEdit, aliasField.pid, true)
+
+                        // The rebuilt row taking the edit back over.
+                        Component.onCompleted: {
+                            if (aliasField.pid && root.aliasFocusId === aliasField.pid) {
+                                aliasField.forceActiveFocus()
+                                aliasField.cursorPosition =
+                                    Math.min(root.aliasCursor, aliasField.text.length)
+                            }
+                        }
                     }
 
                     Row {

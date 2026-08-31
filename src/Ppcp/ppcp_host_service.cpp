@@ -991,6 +991,10 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
     // The phone did not stop existing, it stopped being here — its row stays
     // and changes state, the way a switched-off IMU's does.
     emit phonesChanged();
+    // The toolbar's battery/thermal/sigma aggregates are over CONNECTED phones
+    // and notify off phoneHealthChanged(), so a phone leaving has to move them
+    // too — otherwise the pill keeps showing a departed phone's last reading.
+    emit phoneHealthChanged();
 
     // ⛔ A LINK ENDING RE-ARMS THE CABLE, and without this the wired path is a
     // one-shot per attachment.  A phone still plugged in whose link just died —
@@ -1303,6 +1307,9 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
     emit sourcesChanged();
     emit stateChanged();
     emit phonesChanged();
+    // As in dropPhone(): the connected set just grew, and the aggregates over
+    // it notify off phoneHealthChanged().
+    emit phoneHealthChanged();
 }
 
 // ── RV §3 discovery ─────────────────────────────────────────────────────────
@@ -1982,8 +1989,15 @@ void PpcpHostService::onRelations(Phone *ph)
 
     // Every relation_update moves `phoneWorstSyncSigmaMs`, so the toolbar's
     // warning pill tracks convergence the same way it tracks battery/thermal —
-    // off `phonesChanged` rather than a poll.
-    emit phonesChanged();
+    // off a signal rather than a poll.
+    // ⛔ phoneHealthChanged(), NOT phonesChanged(), FOR THE SAME REASON THE
+    // HEARTBEAT USES IT.  A clock relation converging is a READING moving; it
+    // does not change which phones exist.  `relation_update` arrives every few
+    // seconds for as long as a phone is linked, so the structural signal here
+    // rebuilt every delegate in Settings -> Phones on that cadence and destroyed
+    // the alias field an operator was typing into — the same defect the
+    // heartbeat fix cured, arriving by a second door (reported 31 Aug 2026).
+    emit phoneHealthChanged();
 }
 
 void PpcpHostService::onTick()

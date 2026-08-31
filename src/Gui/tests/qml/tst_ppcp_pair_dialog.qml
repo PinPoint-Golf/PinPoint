@@ -120,6 +120,100 @@ Item {
         controller: null            // the H0 build, which is what a test is
     }
 
+    // ── A host with one phone on it, for the alias field ─────────────────────
+    //
+    // ⚠ THE ALIAS FIELD HAS BEEN UNTYPEABLE TWICE, and both times the report was
+    // the same sentence: "the phone heartbeat refreshes it while I am editing".
+    // The first cure (30 Aug) moved `heartbeat_ack` off phonesChanged(); the
+    // second (31 Aug) moved `relation_update` off it too.  Neither is what this
+    // asserts.  Signals fired at a cadence are a C++ matter and this file cannot
+    // see them; what it CAN pin down is the thing that made them fatal — that a
+    // rebuild of the list threw away the text and the focus.  With this test the
+    // third door, whatever it turns out to be, is an inconvenience rather than
+    // an unusable field.
+    QtObject {
+        id: fakePhoneHost
+
+        // Matches PpcpHostService: `phones` notifies phonesChanged, which QML
+        // generates for a `var` property of that name.
+        property var phones: [{
+            kind: "Phone", pairingId: "pair-one", alias: "", declaredName: "Pixel 8",
+            name: "Pixel 8", status: "connected", persisted: true, invalidated: false,
+            transport: "wifi", counterpartId: "", batteryPct: 74, thermal: "nominal",
+            syncSigmaMs: 3.5, armState: "disarmed", armBlockedReason: "", armReadyMs: -1,
+            dataRateStr: "—", model: "", backend: "PPCP", identifier: "pair-one",
+            hasWarning: false
+        }]
+
+        signal phoneHealthChanged()
+
+        property int    aliasWrites: 0
+        property string lastAlias:   ""
+
+        function phoneHealth(pairingId) {
+            return { batteryPct: 74, thermal: "nominal", syncSigmaMs: 3.5 }
+        }
+
+        // ⚠ EVERY REFERENCE IS `fakePhoneHost.`-QUALIFIED, AND THE UNQUALIFIED
+        // VERSION IS NOT A STYLE CHOICE.  The H0 panel above is `id: phones`,
+        // which shadows this object's own `phones` property inside its
+        // functions — an id is not an lvalue, so the write failed at runtime
+        // with "left-hand side of assignment operator is not an lvalue" and the
+        // list never moved.
+        //
+        // ⚠ AND THE ROWS ARE REBUILT RATHER THAN PATCHED, for the same reason:
+        // an object reached through a `var` property is not assignable in
+        // place.  The real `phones()` builds fresh QVariantMaps on every read
+        // anyway, so this is also the more faithful fake.
+        function setPhoneAlias(pairingId, alias) {
+            fakePhoneHost.aliasWrites += 1
+            fakePhoneHost.lastAlias = alias
+            fakePhoneHost.phones = fakePhoneHost.copyRows(pairingId, alias)
+        }
+
+        // What a phonesChanged() that is NOT an alias write looks like from the
+        // panel's side: the list re-read with a READING moved in it, which is
+        // exactly what a `heartbeat_ack` or a `relation_update` used to cause.
+        //
+        // ⚠ IT HAS TO MOVE SOMETHING.  A list rebuilt with identical contents
+        // leaves the delegates standing — Qt diffs it — so an "identical copy"
+        // version of this asserted nothing at all: the field it was meant to
+        // destroy was never touched.  One changed reading is the difference
+        // between a real regression test and a decoration.
+        property int heartbeats: 0
+        function heartbeat() {
+            fakePhoneHost.heartbeats += 1
+            var src = fakePhoneHost.phones
+            var copy = []
+            for (var i = 0; i < src.length; ++i) {
+                var row = {}
+                for (var k in src[i]) row[k] = src[i][k]
+                row.batteryPct  = 74 - fakePhoneHost.heartbeats
+                row.syncSigmaMs = 3.5 + fakePhoneHost.heartbeats
+                copy.push(row)
+            }
+            fakePhoneHost.phones = copy
+        }
+
+        function copyRows(pairingId, alias) {
+            var src = fakePhoneHost.phones
+            var copy = []
+            for (var i = 0; i < src.length; ++i) {
+                var row = {}
+                for (var k in src[i]) row[k] = src[i][k]
+                if (pairingId && row.pairingId === pairingId) row.alias = alias
+                copy.push(row)
+            }
+            return copy
+        }
+    }
+
+    PhonesPanel {
+        id: livePhones
+        width: 600; height: 400
+        controller: fakePhoneHost
+    }
+
     function findByName(item, name) {
         if (!item) return null
         if (item.objectName === name) return item
@@ -347,6 +441,56 @@ Item {
             compare(phones.rows.length, 0)
             compare(phones.scrollToItem(""), true)
             compare(phones.scrollToItem("no_such_row"), false)
+        }
+
+        // The report, twice over: "the edit alias still gets refreshed by the
+        // phone heartbeat, making it impossible to edit whilst a phone is
+        // connected."  A rebuild lands mid-word here on purpose.
+        function test_an_alias_being_typed_survives_the_list_being_rebuilt() {
+            var field = findByName(livePhones, "phoneAliasField")
+            verify(field !== null, "no alias field in the panel")
+            field.forceActiveFocus()
+            tryVerify(function() { return field.activeFocus })
+
+            // Unshifted, so lower case is what a key event actually produces.
+            keyClick(Qt.Key_B); keyClick(Qt.Key_A); keyClick(Qt.Key_Y)
+            compare(field.text, "bay")
+            compare(fakePhoneHost.aliasWrites, 0, "a half-typed alias was written down")
+
+            // The phone list is re-read while the caret is between "Bay" and
+            // whatever came next.  Every delegate — this field included — is
+            // destroyed and built again.
+            fakePhoneHost.heartbeat()
+
+            var again = findByName(livePhones, "phoneAliasField")
+            verify(again !== field, "the delegate was not rebuilt — the test proves nothing")
+            verify(again !== null, "the row did not come back")
+            tryVerify(function() { return again.activeFocus }, 2000,
+                      "the rebuilt field did not take the focus back")
+            compare(again.text, "bay", "the half-typed alias was lost in the rebuild")
+            compare(fakePhoneHost.aliasWrites, 0,
+                    "the rebuild committed an unfinished alias")
+
+            // Finishing it still writes it down exactly once.
+            keyClick(Qt.Key_2)
+            keyClick(Qt.Key_Return)
+            tryCompare(fakePhoneHost, "aliasWrites", 1)
+            compare(fakePhoneHost.lastAlias, "bay2")
+        }
+
+        // The other half: a real farewell IS a commit, and must not be mistaken
+        // for a rebuild by the deferral that makes the test above pass.
+        function test_leaving_the_field_writes_the_alias_down() {
+            var field = findByName(livePhones, "phoneAliasField")
+            verify(field !== null)
+            fakePhoneHost.aliasWrites = 0
+            field.forceActiveFocus()
+            tryVerify(function() { return field.activeFocus })
+            field.selectAll()
+            keyClick(Qt.Key_D); keyClick(Qt.Key_T); keyClick(Qt.Key_L)
+            probe.forceActiveFocus()          // the user moves on
+            tryCompare(fakePhoneHost, "aliasWrites", 1)
+            compare(fakePhoneHost.lastAlias, "dtl")
         }
 
         function test_with_no_controller_there_is_nothing_to_show() {
