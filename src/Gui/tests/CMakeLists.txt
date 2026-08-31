@@ -72,15 +72,17 @@ pp_add_test(swing_series_model_test
     LINK    Qt6::Qml  AUTOMOC)
 
 # ShotListModel::shotSummary — focused-shot metadata map for PpShotActionBar.
-# Links the model + the swing.json writer it references + a stub PpLogStream
-# (pp_debug.cpp drags in whisper/ggml — reuse the Core stub).
+# Links the model + the swing.json writer it references + the application log
+# (pp_log_stream.cpp + PpMessageLog.cpp — the primitive no longer arrives with
+# pp_debug.cpp's whisper/ggml installer behind it, so this logs for real).
 pp_add_test(shot_list_model_test
     SOURCES shot_list_model_test.cpp
             ${GUI}/shot/shot_list_model.cpp
             ${SRC}/Export/swing_doc.cpp
             ${SRC}/Export/swing_paths.cpp
             ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
-            ${SRC}/Core/tests/pp_log_stub.cpp
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
     INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core ${SRC}/LaunchMonitor
     LINK    Qt6::Qml  AUTOMOC)
 
@@ -92,7 +94,8 @@ pp_add_test(reanalysis_controller_test
             reanalysis_stubs.cpp
             ${GUI}/shot/reanalysis_controller.cpp
             ${SRC}/Core/pp_os_metrics.cpp   # reanalysis_controller.cpp scopes its worker thread
-            ${SRC}/Core/tests/pp_log_stub.cpp
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
     INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core ${SRC}/LaunchMonitor
     LINK    Qt6::Qml Qt6::Concurrent  AUTOMOC)
 

@@ -8,9 +8,12 @@
 #   cmake --build build/core-tests -j && ctest --test-dir build/core-tests --output-on-failure
 #
 # Each profiler test compiles the Core sources it needs directly (there is no
-# pinpoint_core library) + a PpLogStream stub (pp_log_stub.cpp) so we avoid the
-# whisper/ggml-dependent pp_debug.cpp. Tests build with BOTH tiers ON so the deep
-# tier is exercised; the compile-out test builds with both OFF.
+# pinpoint_core library) + the REAL log (pp_log_stream.cpp + PpMessageLog.cpp).
+# It used to be pp_log_stub.cpp, which satisfied the linker and threw every line
+# away, because ppWarn() lived in the whisper/ggml-dependent pp_debug.cpp; the
+# primitive stands on its own now, so these tests log for real and a future one
+# can assert on a line. Tests build with BOTH tiers ON so the deep tier is
+# exercised; the compile-out test builds with both OFF.
 
 if(NOT COMMAND pp_add_test)
     cmake_minimum_required(VERSION 3.16)
@@ -23,12 +26,13 @@ endif()
 set(CORE    ${CMAKE_CURRENT_SOURCE_DIR}/..)        # src/Core
 set(MONITOR ${CORE}/../Gui/monitor)                # src/Gui/monitor
 
-# The profiler core + a PpLogStream stub, compiled directly into each test.
+# The profiler core + the application log, compiled directly into each test.
 set(PROFILER_CORE
     ${CORE}/pp_profiler.cpp
     ${CORE}/pp_os_metrics.cpp
     ${CORE}/PpStatsLog.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/pp_log_stub.cpp)
+    ${CORE}/pp_log_stream.cpp
+    ${CORE}/PpMessageLog.cpp)
 
 # Profiler tests with BOTH tiers compiled in (deep exercised).
 pp_add_test(pp_profiler_test

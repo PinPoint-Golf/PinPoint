@@ -6,11 +6,13 @@
 //     dt clock). The frame-parse / eulerToQuat goldens don't fuse, but the symbol is
 //     needed at link time. A deterministic monotonic fake keeps any incidental fusion
 //     reproducible.
-//   * PpLogStream — the ppWarn()/ppInfo()/... RAII logger. The real impl
-//     (pp_debug.cpp) drags in whisper/ggml; here we just swallow the message.
+//
+// ⚠ IT NO LONGER PROVIDES PpLogStream, AND THAT IS THE POINT.  Swallowing the
+// log was the price of avoiding pp_debug.cpp's whisper/ggml installer; ppWarn()
+// now lives in src/Core/pp_log_stream.cpp, which costs Qt and PpMessageLog and
+// nothing else, so the suites carry the REAL log and a test can assert on a line.
 
 #include "event_buffer.h"
-#include "pp_debug.h"
 
 namespace pinpoint {
 int64_t EventBuffer::nowMicros() noexcept
@@ -20,8 +22,3 @@ int64_t EventBuffer::nowMicros() noexcept
     return t;
 }
 } // namespace pinpoint
-
-// m_dbg writes into m_buf via QDebug; on destruction the message is simply dropped
-// (no stderr, no PpMessageLog) — enough to satisfy operator<< and the linker.
-PpLogStream::PpLogStream(QtMsgType t) : m_type(t) { m_dbg.emplace(&m_buf); }
-PpLogStream::~PpLogStream() = default;

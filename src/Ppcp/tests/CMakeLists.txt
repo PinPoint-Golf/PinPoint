@@ -599,6 +599,10 @@ endif()
 pp_add_test(ppcp_host_service_test
     SOURCES ppcp_host_service_test.cpp
             ppcp_host_service_stubs.cpp
+            # The real log rather than a stub inside the file above — see the note
+            # there, and pp_log_stream.cpp's header for why it is finally possible.
+            ${PP_SRC}/Core/pp_log_stream.cpp
+            ${PP_SRC}/Core/PpMessageLog.cpp
             ${PPCP}/ppcp_host_service.cpp
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp

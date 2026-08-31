@@ -80,7 +80,8 @@ else()
         ${PP_ROOT}/src/Export/swing_doc.cpp
         ${PP_ROOT}/src/Export/swing_paths.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/shot/shot_list_model.cpp
-        ${PP_ROOT}/src/Core/tests/pp_log_stub.cpp)
+        ${PP_ROOT}/src/Core/pp_log_stream.cpp
+        ${PP_ROOT}/src/Core/PpMessageLog.cpp)
 
     # ⚠ RESOURCE ALIASES ARE MANDATORY HERE, unlike in the app. The app declares the module from the
     # repo root, so each .qml is already a relative path and Qt derives the alias from it. These

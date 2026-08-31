@@ -303,9 +303,11 @@ ctest --test-dir build/tests --rerun-failed --output-on-failure
 2. Add one `pp_add_test` call to that suite's `CMakeLists.txt`, listing the test
    plus any production `.cpp` it must compile (remember: there is no library to
    link — name the sources). Reach for the right flags from §5.
-3. If the production code touches `PpLogStream`, add the suite's existing log stub
-   to `SOURCES` (e.g. `src/Core/tests/pp_log_stub.cpp`, or the suite-local
-   `*_test_stubs.cpp`) — **do not** pull in `pp_debug.cpp` (it drags in whisper).
+3. If the production code touches `PpLogStream`, add `src/Core/pp_log_stream.cpp`
+   and `src/Core/PpMessageLog.cpp` to `SOURCES` — that is the real application
+   log and it costs Qt and nothing else. **Do not** pull in `pp_debug.cpp`: that
+   one still drags in whisper/ggml, because it also installs the message handler
+   and silences whisper, ggml, OpenCV and FFmpeg.
 4. Build + run standalone, then once under the umbrella.
 
 For reference, every suite's `CMakeLists.txt` begins with this bootstrap so it
@@ -394,12 +396,20 @@ declaring a QML module from a test directory will hit the same wall.
   uses a fixed `QSettings` org/app, the test's `main()` calls
   `QStandardPaths::setTestModeEnabled(true)` **before** `QCoreApplication` so it
   never reads or writes the developer's real settings file.
-- **Never link `pp_debug.cpp`.** It pulls in whisper/ggml. Use a `PpLogStream`
-  stub instead. Three exist (`Core/tests/pp_log_stub.cpp`,
-  `Analysis/tests/imu_test_stubs.cpp`, `Pose/tests/pose_test_stubs.cpp`); reuse the
-  nearest one — the LaunchMonitor suite reaches across to Core's rather than adding a
-  fourth. (`Gui/tests/reanalysis_stubs.cpp` is a different thing: it stubs the
-  re-analysis worker body, not logging.)
+- **Never link `pp_debug.cpp`** — it pulls in whisper/ggml for `PinPointDebug::install()`,
+  which silences whisper, ggml, OpenCV and FFmpeg at startup. **Link
+  `src/Core/pp_log_stream.cpp` + `src/Core/PpMessageLog.cpp` instead**: that is
+  `ppWarn()`/`ppInfo()` itself, and it needs Qt and nothing more.
+
+  Until 31 Aug 2026 the log primitive lived in `pp_debug.cpp`, so every suite
+  linked a stub that satisfied the linker and **threw every log line away** —
+  `Core/tests/pp_log_stub.cpp` (six suites), plus copies in
+  `Analysis/tests/imu_test_stubs.cpp` and `Pose/tests/pose_test_stubs.cpp`. All of
+  them now carry the real log, so a test can assert on a line instead of
+  discarding it. `Core/tests/pp_log_stub.cpp` is kept for anything that
+  deliberately wants silence; nothing in the tree needs it.
+  (`Gui/tests/reanalysis_stubs.cpp` is a different thing: it stubs the re-analysis
+  worker body, not logging.)
 - **C++20 unless you say otherwise.** Anything pulling in `event_buffer.h` →
   `swing_window.h` (`std::span`) needs C++20 — that's the default, so it just
   works; only set `STD 17` to deliberately pin an older standard.

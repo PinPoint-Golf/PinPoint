@@ -48,7 +48,8 @@ pp_add_test(update_controller_policy_test
             ${SRC}/Gui/app/app_settings.cpp
             ${SRC}/Gui/session/session_controller.cpp
             ${SRC}/Gui/athlete/athlete_controller.cpp
-            ${SRC}/Core/tests/pp_log_stub.cpp
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
             # athlete_controller.cpp includes Diagnostics/norm_pack.h for Cohort/cohortFor()/
             # cohortToMap(), so the definitions have to come with it. cohortFor() and cohortToMap's
             # sexFromName/ageBandFromName are defined in norm.cpp now (norm.h's out-of-line

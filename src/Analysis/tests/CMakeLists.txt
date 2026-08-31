@@ -188,7 +188,7 @@ pp_add_test(phase_segmenter_test
 
 # Phase segmenter + metric extractor over a synthetic swing. metric_extractor.cpp
 # carries resource-profiler instrumentation, so it pulls in the profiler core
-# (pp_profiler/pp_os_metrics/PpStatsLog) and a PpLogStream (imu_test_stubs).
+# (pp_profiler/pp_os_metrics/PpStatsLog) and the application log itself.
 # imu_test_stubs.cpp pulls event_buffer.h → swing_window.h (std::span) → C++20.
 pp_add_test(pipeline_test
     SOURCES pipeline_test.cpp
@@ -199,7 +199,9 @@ pp_add_test(pipeline_test
             ${SRC}/Core/pp_os_metrics.cpp
             ${SRC}/Core/PpStatsLog.cpp
             imu_test_stubs.cpp
-    INCLUDE ${SRC}/Core   # pp_debug.h for the stub
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
+    INCLUDE ${SRC}/Core   # pp_debug.h, and the log it now really carries
     STD 20)
 
 # --- Banded weighted-geometric-mean scorer (Swing/GRF adherence) -------------
@@ -240,6 +242,8 @@ pp_add_test(analysis_profiling_test
             ${SRC}/Core/PpStatsLog.cpp
             ${SRC}/Core/AnalysisProfileLog.cpp
             imu_test_stubs.cpp
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
     INCLUDE ${SRC}/Core
     STD 20)
 
@@ -405,6 +409,8 @@ find_package(Qt6 REQUIRED COMPONENTS Bluetooth)
 pp_add_test(imu_driver_frame_test
     SOURCES imu_driver_frame_test.cpp
             imu_test_stubs.cpp
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
             ${SRC}/IMU/wt9011dcl_ble.cpp
             ${SRC}/IMU/ble_imu_transport.cpp
             ${SRC}/IMU/wt9011dcl_base.cpp
@@ -926,12 +932,14 @@ pp_add_test(session_diagnostics_model_test
             ${DIAG}/merged_pack_provider.cpp
             # The model dates each shot from clock.wallclock via SwingDocReader::readSwingSummary
             # rather than the file's mtime, so the summary reader comes with it. swing_paths.cpp is
-            # swing_doc.cpp's own dependency and logs through pp_debug.h — hence the Core stub, since
-            # the real pp_debug.cpp drags in whisper/ggml (same reason shot_list_model_test uses it).
+            # swing_doc.cpp's own dependency and logs through pp_debug.h — hence the log sources
+            # below, which are now the REAL ones: pp_debug.cpp still drags whisper/ggml in for its
+            # installer, but ppWarn() itself lives in pp_log_stream.cpp and costs neither.
             ${SRC}/Export/swing_doc.cpp
             ${SRC}/Export/swing_paths.cpp
             ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
-            ${SRC}/Core/tests/pp_log_stub.cpp
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
     INCLUDE ${NORM_INC} ${SRC} ${SRC}/Core ${SRC}/LaunchMonitor
     LINK    Qt6::Qml
     AUTOMOC

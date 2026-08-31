@@ -58,11 +58,14 @@ pp_add_test(heatmap_decode_test
 
 # BallDetector throttle contract: exactly one ballDetected/detectionSkipped per
 # detect() on every path (disabled, no-ROI, empty, seeding, lock/present, removal).
-# Builds the real ball_detector.cpp (Q_OBJECT → AUTOMOC) with a PpLogStream stub
-# (no whisper) and the profiler core (ball_detector.cpp carries a PP_PROFILE_SCOPE).
+# Builds the real ball_detector.cpp (Q_OBJECT → AUTOMOC) with the real application
+# log (pp_log_stream.cpp + PpMessageLog.cpp — ppWarn() no longer arrives with
+# pp_debug.cpp's whisper/ggml installer behind it) and the profiler core, since
+# ball_detector.cpp carries a PP_PROFILE_SCOPE.
 pp_add_test(ball_detector_contract_test
     SOURCES ball_detector_contract_test.cpp
-            pose_test_stubs.cpp
+            ${CORE}/pp_log_stream.cpp
+            ${CORE}/PpMessageLog.cpp
             ${POSE}/ball_detector.cpp
             ${CORE}/pp_profiler.cpp
             ${CORE}/pp_os_metrics.cpp

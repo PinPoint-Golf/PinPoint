@@ -88,14 +88,12 @@ QVariantList VideoInputPpcp::countersFor(const QString & /*peerId*/)
     return {};
 }
 
-// ── The logger ──────────────────────────────────────────────────────────────
-// `ppWarn()` is a `PpLogStream`, and `pp_debug.cpp` reaches whisper and FFmpeg
-// to install their log captures.  A collecting sink that drops what it collects
-// is the whole of what this suite needs from it — the assertions are on the
-// service's state, never on what it printed.
-PpLogStream::PpLogStream(QtMsgType t) : m_type(t), m_dbg(QDebug(&m_buf)) {}
-
-PpLogStream::~PpLogStream() = default;
+// ── The logger is NOT stubbed here any more ─────────────────────────────────
+// It was, because `ppWarn()` used to live in pp_debug.cpp beside the installer
+// that reaches whisper and FFmpeg — so this suite dropped every line the service
+// logged.  The primitive stands alone now (src/Core/pp_log_stream.cpp), which the
+// target links, and this host service is loud on purpose: its log is how a
+// pairing or a wired dial is followed in the field.
 
 // ── The host's own inventory ────────────────────────────────────────────────
 // ⚠ UNLIKE THE THREE ABOVE, THIS ONE IS REACHED: `start()` builds this host's

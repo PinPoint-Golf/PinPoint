@@ -82,13 +82,20 @@ function, and any local sanitizer function. Suite-specific `find_package`
 3. **`enable_testing()` at top only.** The bootstrap header guards it behind
    `if(NOT COMMAND pp_add_test)`, so it runs only in standalone configures.
 
-## Shared stub (optional follow-up, not required for phase 1)
+## Shared stub — DONE, and by removal rather than consolidation (31 Aug 2026)
 
-Three near-identical `PpLogStream` stubs exist (`Core/tests/pp_log_stub.cpp`,
-`Analysis/tests/imu_test_stubs.cpp`, `Pose/tests/pose_test_stubs.cpp`), and Gui
-reaches cross-tree into Core's. Consolidating to `tests/stubs/pp_log_stub.cpp`
-removes the cross-tree include but is independent of the umbrella wiring — can be
-a later cleanup.
+Three near-identical `PpLogStream` stubs existed (`Core/tests/pp_log_stub.cpp`,
+`Analysis/tests/imu_test_stubs.cpp`, `Pose/tests/pose_test_stubs.cpp`), with Gui
+reaching cross-tree into Core's. They existed because `ppWarn()` lived in
+`pp_debug.cpp` beside its whisper/ggml installer, so every suite paid for a speech
+model or threw its log away — and all of them threw it away.
+
+The primitive now lives in `src/Core/pp_log_stream.cpp`, needing Qt and
+`PpMessageLog` only, so there is nothing left to consolidate: every suite links
+the REAL log. `Pose/tests/pose_test_stubs.cpp` is gone (it existed only for this),
+`imu_test_stubs.cpp` keeps its `EventBuffer::nowMicros()` fake and nothing else,
+and `Core/tests/pp_log_stub.cpp` is kept only for anything that deliberately wants
+silence — nothing does.
 
 ## Suggested order (each step ends green)
 
