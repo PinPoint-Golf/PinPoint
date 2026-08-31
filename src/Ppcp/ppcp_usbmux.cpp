@@ -391,6 +391,39 @@ bool waitFor(pp_socket_t s, bool forRead, double deadlineMs)
     return pp_poll(&p, 1, static_cast<int>(remain)) > 0;
 }
 
+// Finishes a non-blocking connect() that may still be pending, waiting up to
+// `deadlineMs`.  Shared by the AF_UNIX (macOS/Linux) and TCP (Windows) paths
+// below — same pending/timeout/refused semantics either way.  On failure the
+// socket is closed and `r.status` is set; RV 3.6a: absence is not an error,
+// so ENOENT/ECONNREFUSED and a bare timeout are distinguished only for the
+// log line, never surfaced as a banner.
+bool finishConnect(pp_socket_t s, int connectErrno, double deadlineMs, Result &r)
+{
+    bool pending =
+#ifdef _WIN32
+        (connectErrno == WSAEWOULDBLOCK);
+#else
+        (connectErrno == EINPROGRESS || connectErrno == EWOULDBLOCK || connectErrno == EAGAIN);
+#endif
+    bool connected = false;
+    if (pending && waitFor(s, /*forRead=*/false, deadlineMs)) {
+        int err = 0;
+        socklen_t len = sizeof err;
+        getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&err), &len);
+        connected = (err == 0);
+        if (!connected) r.systemError = err;
+    } else if (!pending) {
+        r.systemError = connectErrno;
+    }
+    if (!connected) {
+        pp_close_socket(s);
+        // A connect that neither failed nor completed inside the deadline is
+        // the only Timeout case here.
+        r.status = (r.systemError != 0) ? Status::NoProvider : Status::Timeout;
+    }
+    return connected;
+}
+
 // Opens a connection to the usbmux provider.  The fd comes back NON-BLOCKING
 // and SIGPIPE-safe, because both `Connect` and `Listen` leave the caller
 // holding this very socket afterwards.
@@ -399,10 +432,37 @@ pp_socket_t openProvider(const Provider &prov, double deadlineMs, Result &r)
     ensureSockets();
 
     if (prov.kind == Provider::Kind::Tcp) {
-        // Phase 2.  Named here rather than silently unsupported so the log line
-        // is true on the day somebody runs this on Windows.
-        r.status = Status::NoProvider;
-        return kInvalidSocket;
+        // Apple Mobile Device Service (Windows, W1) — a loopback TCP socket
+        // in place of macOS/Linux's AF_UNIX one.  Everything above this
+        // socket byte (plist framing, PortNumber byte-swap, ConnectionType
+        // filter) is already shared and already tested.
+        const pp_socket_t s = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (s == kInvalidSocket) {
+            r.status = Status::NoProvider;
+            r.systemError = pp_last_error();
+            return kInvalidSocket;
+        }
+        setNonBlocking(s);
+        setNoSigPipe(s);
+
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_port = htons(prov.port);
+        if (::inet_pton(AF_INET, prov.host.c_str(), &a.sin_addr) != 1) {
+            pp_close_socket(s);
+            r.status = Status::NoProvider;
+            return kInvalidSocket;
+        }
+
+        if (::connect(s, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0) {
+#ifdef _WIN32
+            const int e = WSAGetLastError();
+#else
+            const int e = pp_last_error();
+#endif
+            if (!finishConnect(s, e, deadlineMs, r)) return kInvalidSocket;
+        }
+        return s;
     }
 
 #ifdef _WIN32
@@ -429,29 +489,7 @@ pp_socket_t openProvider(const Provider &prov, double deadlineMs, Result &r)
     std::memcpy(a.sun_path, prov.path.c_str(), prov.path.size() + 1);
 
     if (::connect(s, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0) {
-        const int e = pp_last_error();
-        bool pending = (e == EINPROGRESS || e == EWOULDBLOCK || e == EAGAIN);
-        bool connected = false;
-        if (pending && waitFor(s, /*forRead=*/false, deadlineMs)) {
-            int err = 0;
-            socklen_t len = sizeof err;
-            getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&err), &len);
-            connected = (err == 0);
-            if (!connected) r.systemError = err;
-        } else if (!pending) {
-            r.systemError = e;
-        }
-        if (!connected) {
-            pp_close_socket(s);
-            // ⛔ Absence is not an error (RV 3.6a): "no usbmuxd here" and "the
-            // daemon refused us" are the same row of §6.2 and neither is a
-            // banner.  systemError carries ENOENT vs EACCES for the log line,
-            // which is what tells a Linux user their group membership is wrong.
-            // A connect that neither failed nor completed inside the deadline is
-            // the only Timeout case here.
-            r.status = (r.systemError != 0) ? Status::NoProvider : Status::Timeout;
-            return kInvalidSocket;
-        }
+        if (!finishConnect(s, pp_last_error(), deadlineMs, r)) return kInvalidSocket;
     }
     return s;
 #endif
@@ -652,7 +690,7 @@ Provider Provider::platformDefault()
 {
     Provider p;
 #ifdef _WIN32
-    // Apple Mobile Device Service.  ⚠ Phase 2 — openProvider() still refuses it.
+    // Apple Mobile Device Service.
     p.kind = Kind::Tcp;
     p.host = "127.0.0.1";
     p.port = 27015;
@@ -668,6 +706,15 @@ Provider Provider::unixSocket(std::string socketPath)
     Provider p;
     p.kind = Kind::Unix;
     p.path = std::move(socketPath);
+    return p;
+}
+
+Provider Provider::tcpSocket(std::string host, std::uint16_t port)
+{
+    Provider p;
+    p.kind = Kind::Tcp;
+    p.host = std::move(host);
+    p.port = port;
     return p;
 }
 

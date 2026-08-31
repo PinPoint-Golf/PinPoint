@@ -200,24 +200,29 @@ struct Device {
 
 // ── Where the daemon lives ─────────────────────────────────────────────────
 // Structured so the Windows (AF_INET 127.0.0.1:27015, Apple Mobile Device
-// Service) and Linux (AF_UNIX, same path) providers of Phase 2 are a value
-// change and not a code change.  Only the Unix branch is implemented today;
-// asking for Tcp returns Status::NoProvider with a plain reason.
+// Service) and Linux (AF_UNIX, same path) providers are a value change and
+// not a code change.
 struct Provider {
     enum class Kind { Unix, Tcp };
 
     Kind kind = Kind::Unix;
     std::string path = "/var/run/usbmuxd";   // Kind::Unix
-    std::string host = "127.0.0.1";          // Kind::Tcp  (Phase 2, Windows)
-    std::uint16_t port = 27015;              // Kind::Tcp  (Phase 2, Windows)
+    std::string host = "127.0.0.1";          // Kind::Tcp  (Windows)
+    std::uint16_t port = 27015;              // Kind::Tcp  (Windows)
 
     // The platform default.  macOS and Linux: the AF_UNIX socket above, which
-    // on macOS is part of the OS and verified present (srw-rw-rw-).
+    // on macOS is part of the OS and verified present (srw-rw-rw-). Windows:
+    // Apple Mobile Device Service over loopback TCP (W1).
     static Provider platformDefault();
 
     // A named AF_UNIX socket — the stub usbmuxd of the test suite, and nothing
     // else in shipping code.
     static Provider unixSocket(std::string socketPath);
+
+    // A loopback TCP provider at an arbitrary host/port — the Windows stub
+    // usbmuxd of the test suite (W3), and nothing else in shipping code
+    // (platformDefault() already hardcodes AMDS's 127.0.0.1:27015).
+    static Provider tcpSocket(std::string host, std::uint16_t port);
 };
 
 // ── The blocking half: enumerate, and dial ─────────────────────────────────

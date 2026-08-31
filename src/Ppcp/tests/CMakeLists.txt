@@ -34,7 +34,37 @@ set(PPCP ${CMAKE_CURRENT_SOURCE_DIR}/..)   # src/Ppcp
 # Directory scope on purpose: the definition is only ever read by
 # `ppcp_discovery.cpp`, and scoping it per-target would mean remembering to add
 # it to a fifth target later.
-if(NOT APPLE)
+if(WIN32)
+    # W4, mirroring the root CMakeLists' Bonjour SDK probe. ⚠ Implicit-linked
+    # here rather than delay-loaded: unlike the shipped app, these binaries
+    # never leave a machine that doesn't also have the SDK's runtime piece.
+    set(_bonjour_hint "$ENV{BONJOUR_SDK_HOME}")
+    find_path(DNSSD_INCLUDE_DIR dns_sd.h
+              HINTS "${_bonjour_hint}/Include" "C:/Program Files/Bonjour SDK/Include")
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_bonjour_lib_subdir "Lib/x64")
+    else()
+        set(_bonjour_lib_subdir "Lib/Win32")
+    endif()
+    find_library(DNSSD_LIBRARY dnssd
+                 HINTS "${_bonjour_hint}/${_bonjour_lib_subdir}"
+                       "C:/Program Files/Bonjour SDK/${_bonjour_lib_subdir}")
+    if(DNSSD_INCLUDE_DIR AND DNSSD_LIBRARY)
+        set(DNSSD_INCLUDE_DIRS "${DNSSD_INCLUDE_DIR}")
+        set(DNSSD_LIBRARIES    "${DNSSD_LIBRARY}")
+        set(DNSSD_FOUND TRUE)
+    endif()
+    if(DNSSD_FOUND)
+        include_directories(${DNSSD_INCLUDE_DIRS})
+        add_compile_definitions(PP_HAVE_DNS_SD)
+        link_libraries(${DNSSD_LIBRARIES})
+        message(STATUS "PPCP tests: DNS-SD via ${DNSSD_LIBRARIES}")
+    else()
+        message(STATUS
+            "PPCP tests: no Bonjour SDK found — the real-responder tests will SKIP. "
+            "Install the Bonjour SDK for Windows, or set BONJOUR_SDK_HOME.")
+    endif()
+elseif(NOT APPLE)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
         pkg_check_modules(DNSSD QUIET avahi-compat-libdns_sd)
@@ -312,27 +342,24 @@ pp_add_test(ppcp_transport_test
     NO_QT
     GTEST)
 
-# ── The usbmux tunnel of the wired transport (Phase 1) ───────────────────────
+# ── The usbmux tunnel of the wired transport ─────────────────────────────────
 # Driven entirely against a stub usbmuxd (usbmuxd_stub.h) — no phone, no cable
 # and no daemon — because design §12 names "both halves of the wired path are
 # unreached code" as the largest single estimate risk in Phase 1.
 #
-# ⚠ POSIX only.  The client compiles everywhere (the Windows provider of Phase 2
-# is a stub that returns Status::NoProvider), but the stub daemon is an AF_UNIX
-# server and the Windows provider it would have to impersonate is AF_INET; the
-# row comes back when that provider does.
+# ✅ Windows (W3): the stub serves the same plist protocol over a loopback
+# AF_INET listener instead of AF_UNIX, so the wire format is exercised there
+# too rather than shipping a Windows provider with its tests still excluded.
 #
 # Qt-free (NO_QT), and it does NOT link OpenSSL: ppcp_usbmux.cpp includes
 # ppcp_transport.h only for Ppcp::pp_socket_t, which is a typedef.
-if(NOT WIN32)
-    pp_add_test(ppcp_usbmux_test
-        SOURCES ppcp_usbmux_test.cpp ${PPCP}/ppcp_usbmux.cpp
-        INCLUDE ${PPCP}
-        LINK    Threads::Threads
-        STD 20
-        NO_QT
-        GTEST)
-endif()
+pp_add_test(ppcp_usbmux_test
+    SOURCES ppcp_usbmux_test.cpp ${PPCP}/ppcp_usbmux.cpp
+    INCLUDE ${PPCP}
+    LINK    Threads::Threads
+    STD 20
+    NO_QT
+    GTEST)
 
 # ── ENC §2.1 link binding (erratum E1) ───────────────────────────────────────
 # Concurrent dials, an abandoned dial, a late third channel and a bad first
@@ -396,12 +423,19 @@ pp_add_test(ppcp_host_peer_test
 # this list.  On Apple it comes from libSystem, so the note above about needing
 # no framework remains true where it was written.
 set(_rv_link ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads Qt6::Core)
+if(WIN32)
+    # ppcp_rendezvous.cpp's Windows branch: GetAdaptersAddresses (RV 4.3d's
+    # endpoint enumeration) needs iphlpapi, BCryptGenRandom (RV 7.2a's CSPRNG)
+    # needs bcrypt — same pairing the root CMakeLists links for the app.
+    list(APPEND _rv_link iphlpapi bcrypt)
+endif()
 
 pp_add_test(ppcp_rendezvous_test
     SOURCES ppcp_rendezvous_test.cpp
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp
             ${PPCP}/ppcp_discovery.cpp
+            ${PPCP}/ppcp_dnssd_runtime.cpp
             ${PPCP}/ppcp_transport.cpp
     INCLUDE ${PPCP}
     LINK    ${_rv_link}
@@ -424,6 +458,7 @@ pp_add_test(ppcp_rendezvous_test
 pp_add_test(ppcp_advertise_test
     SOURCES ppcp_advertise_test.cpp
             ${PPCP}/ppcp_discovery.cpp
+            ${PPCP}/ppcp_dnssd_runtime.cpp
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp
             ${PPCP}/ppcp_transport.cpp
@@ -497,17 +532,31 @@ set_tests_properties(ppcp_advertise_hold PROPERTIES TIMEOUT 300)
 #
 # The live rows — `PpcpGuidedRelay.*` — skip in a millisecond unless
 # PPCP_BS_RELAY names a running relay.  run-guided-relay.sh sets it.
-pp_add_test(ppcp_bootstrap_test
-    SOURCES ppcp_bootstrap_test.cpp
-            ${PPCP}/ppcp_bootstrap.cpp
-            ${PPCP}/ppcp_discovery.cpp
-    INCLUDE ${PPCP}
-    LINK    ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads
-    DEFINES PP_PPCP_SRC_DIR="${PPCP}"
-    STD 20
-    NO_QT
-    GTEST)
-set_tests_properties(ppcp_bootstrap_test PROPERTIES TIMEOUT 120)
+#
+# ⚠ POSIX only, for now — a gap FOUND rather than introduced by the wired-
+# transport Windows port (Phase 2W), and out of that phase's scope: H10
+# guided pairing is a different work package from H1's wired transport.
+# `ppcp_bootstrap_test.cpp` drives libppcp's acceptor engine over
+# `socketpair(AF_UNIX, ...)` at eleven call sites, plus `MSG_DONTWAIT` —
+# the same class of porting work W3 did for the dial-seam tests in
+# `ppcp_transport_test.cpp` (one call site), just an order of magnitude
+# more of it. This target was never reachable on Windows before this
+# session either — the standalone suite could not find OpenSSL here until
+# now (see `-DOPENSSL_ROOT_DIR`), so it silently never compiled.
+if(NOT WIN32)
+    pp_add_test(ppcp_bootstrap_test
+        SOURCES ppcp_bootstrap_test.cpp
+                ${PPCP}/ppcp_bootstrap.cpp
+                ${PPCP}/ppcp_discovery.cpp
+                ${PPCP}/ppcp_dnssd_runtime.cpp
+        INCLUDE ${PPCP}
+        LINK    ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+        DEFINES PP_PPCP_SRC_DIR="${PPCP}"
+        STD 20
+        NO_QT
+        GTEST)
+    set_tests_properties(ppcp_bootstrap_test PROPERTIES TIMEOUT 120)
+endif()
 
 
 # ── H-compose (c) — the pairing code's clock ────────────────────────────────
@@ -534,6 +583,11 @@ set_tests_properties(ppcp_bootstrap_test PROPERTIES TIMEOUT 120)
 # ⚠ Security.framework is gone with the keychain pairing store (erratum E56);
 # Qt6::Multimedia already brings Qt6::Core, which the settings store needs.
 set(_hs_link ppcp Qt6::Multimedia OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+if(WIN32)
+    # Same pairing as _rv_link above — this target also compiles
+    # ppcp_rendezvous.cpp (transitively, via ppcp_transport.cpp's callers).
+    list(APPEND _hs_link iphlpapi bcrypt)
+endif()
 
 pp_add_test(ppcp_host_service_test
     SOURCES ppcp_host_service_test.cpp
@@ -542,6 +596,7 @@ pp_add_test(ppcp_host_service_test
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp
             ${PPCP}/ppcp_discovery.cpp
+            ${PPCP}/ppcp_dnssd_runtime.cpp
             # H10 — the guided-pairing surface QML binds to lives on
             # PpcpHostService, so the initiator comes with it.
             ${PPCP}/ppcp_bootstrap.cpp

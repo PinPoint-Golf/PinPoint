@@ -585,7 +585,10 @@ struct Tls12Probe {
         // For a PSK suite the body is: 2-byte length, then the hint (RFC 4279).
         if (len >= 6) {
             const std::size_t n = (static_cast<std::size_t>(b[4]) << 8) | b[5];
-            p->hint.assign(b + 6, b + 6 + std::min(n, len - 6));
+            // Parenthesised: OpenSSL's own Windows headers pull in <windows.h>
+            // without NOMINMAX, so a bare `std::min(` here is macro-expanded
+            // into `std::(` — parenthesising the name is the standard escape.
+            p->hint.assign(b + 6, b + 6 + (std::min)(n, len - 6));
         }
     }
 
@@ -762,23 +765,41 @@ TEST(PpcpTransportTls12, IdentityWithAnEmbeddedNulCannotSurviveTheTls12Path)
 // seam is transport-agnostic on purpose, and ppcp_usbmux_test.cpp is where the
 // tunnel itself is proved.
 //
-// ⚠ POSIX-only, as Phase 1 is (design §4.3 — macOS first).  The seam itself is
-// portable; socketpair() and fcntl() are what these rows use to observe it, and
-// re-expressing them for Winsock buys nothing until the Windows provider of
-// Phase 2 exists to be tested.
+// ✅ Ported to Windows (W3): the seam itself is transport-agnostic, so once a
+// Windows dialler (W1, ppcp_usbmux.cpp's Kind::Tcp path) existed to be tested
+// there was no reason to leave these unreached there.  Two of the three rows
+// below needed only the loopback connect helper widened to Winsock; the third
+// used `socketpair(AF_UNIX, ...)`, which Winsock does not implement at all, so
+// its Windows arm substitutes a short-lived loopback listener that hands back
+// an equivalent connected pair.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #ifndef _WIN32
-
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/socket.h>
+#endif
 
 namespace {
 
 // A connected, non-blocking loopback fd — the shape contract C1 requires.
 pp_socket_t dialLoopbackNonBlocking(std::uint16_t port)
 {
+#ifdef _WIN32
+    const pp_socket_t s = static_cast<pp_socket_t>(::socket(AF_INET, SOCK_STREAM, 0));
+    if (s == kInvalidSocket) return kInvalidSocket;
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons(port);
+    if (::connect(static_cast<SOCKET>(s), reinterpret_cast<sockaddr *>(&a), sizeof a) != 0) {
+        ::closesocket(static_cast<SOCKET>(s));
+        return kInvalidSocket;
+    }
+    u_long on = 1;
+    ::ioctlsocket(static_cast<SOCKET>(s), FIONBIO, &on);
+    return s;
+#else
     const pp_socket_t s = static_cast<pp_socket_t>(socket(AF_INET, SOCK_STREAM, 0));
     if (s == kInvalidSocket) return kInvalidSocket;
     sockaddr_in a{};
@@ -792,7 +813,47 @@ pp_socket_t dialLoopbackNonBlocking(std::uint16_t port)
     const int fl = ::fcntl(s, F_GETFL, 0);
     ::fcntl(s, F_SETFL, fl | O_NONBLOCK);
     return s;
+#endif
 }
+
+#ifdef _WIN32
+// Winsock has no socketpair(). A short-lived 127.0.0.1:0 listener accepts the
+// one connection dialLoopbackNonBlocking makes to it; the accepted socket and
+// the dialled socket are then an equivalent connected, non-blocking pair.
+bool tcpSocketpairNonBlocking(pp_socket_t out[2])
+{
+    const SOCKET listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (listener == INVALID_SOCKET) return false;
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = 0;
+    if (::bind(listener, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0 ||
+        ::listen(listener, 1) != 0) {
+        ::closesocket(listener);
+        return false;
+    }
+    sockaddr_in bound{};
+    int boundLen = sizeof bound;
+    ::getsockname(listener, reinterpret_cast<sockaddr *>(&bound), &boundLen);
+
+    const pp_socket_t client = dialLoopbackNonBlocking(ntohs(bound.sin_port));
+    if (client == kInvalidSocket) { ::closesocket(listener); return false; }
+
+    const SOCKET server = ::accept(listener, nullptr, nullptr);
+    ::closesocket(listener);
+    if (server == INVALID_SOCKET) {
+        ::closesocket(static_cast<SOCKET>(client));
+        return false;
+    }
+    u_long on = 1;
+    ::ioctlsocket(server, FIONBIO, &on);
+
+    out[0] = static_cast<pp_socket_t>(server);   // held by the test, watched for EOF
+    out[1] = client;                             // handed to the Connector via cfg.dial
+    return true;
+}
+#endif
 
 }  // namespace
 
@@ -867,8 +928,14 @@ TEST(PpcpTransportDialSeam, AnInvalidSocketIsACleanCouldNotDial)
 // end of a socketpair sees EOF once the Connector has given up.
 TEST(PpcpTransportDialSeam, OwnershipTransfersOnReturnAndTheConnectorClosesIt)
 {
-    int sp[2] = {-1, -1};
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sp), 0);
+    pp_socket_t sp[2] = {kInvalidSocket, kInvalidSocket};
+#ifdef _WIN32
+    ASSERT_TRUE(tcpSocketpairNonBlocking(sp)) << "could not build a loopback pair";
+#else
+    int rawSp[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, rawSp), 0);
+    sp[0] = rawSp[0];
+    sp[1] = rawSp[1];
 
     // ⛔ BOTH ends non-blocking, and the second one is not tidiness.  C1 says the
     // fd handed back "MUST be non-blocking", and this transport takes it at its
@@ -876,10 +943,14 @@ TEST(PpcpTransportDialSeam, OwnershipTransfersOnReturnAndTheConnectorClosesIt)
     // BLOCKING fd parks in read() inside SSL_do_handshake and the handshake
     // timeout never runs.  Measured here — the first draft of this test handed
     // over a blocking socketpair end and hung indefinitely.
-    for (int fd : sp) {
+    for (pp_socket_t fd : sp) {
         const int fl = ::fcntl(fd, F_GETFL, 0);
         ::fcntl(fd, F_SETFL, fl | O_NONBLOCK);
     }
+#endif
+    // ⛔ BOTH ends non-blocking is likewise not tidiness on the Windows arm:
+    // tcpSocketpairNonBlocking() already returns both ends set FIONBIO, for the
+    // identical reason — a blocking fd parks the handshake past its own timeout.
 
     ConnectorConfig cfg;
     cfg.host = "127.0.0.1";
@@ -905,14 +976,22 @@ TEST(PpcpTransportDialSeam, OwnershipTransfersOnReturnAndTheConnectorClosesIt)
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (!sawEof && std::chrono::steady_clock::now() < until) {
         char buf[512];
+#ifdef _WIN32
+        const int n = ::recv(static_cast<SOCKET>(sp[0]), buf, sizeof buf, 0);
+        if (n == 0) { sawEof = true; break; }
+        if (n < 0 && WSAGetLastError() != WSAEWOULDBLOCK) break;
+#else
         const ssize_t n = ::recv(sp[0], buf, sizeof buf, 0);
         if (n == 0) { sawEof = true; break; }
         if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) break;
+#endif
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     EXPECT_TRUE(sawEof) << "the Connector did not close a socket it had taken ownership of — "
                            "contract C1, and on the wired path that fd is a usbmux tunnel";
+#ifdef _WIN32
+    ::closesocket(static_cast<SOCKET>(sp[0]));
+#else
     ::close(sp[0]);
+#endif
 }
-
-#endif  // !_WIN32

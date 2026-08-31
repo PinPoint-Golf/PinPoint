@@ -18,6 +18,10 @@
 
 #include "ppcp_discovery.h"
 
+#ifdef _WIN32
+#include "ppcp_dnssd_runtime.h"
+#endif
+
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -40,12 +44,52 @@
 #define PP_DNS_SD_AVAILABLE 1
 #endif
 
+// ── Which DNSService* implementation answers a resolve, and how fast ───────
+// macOS and Windows both talk to Apple's OWN mDNSResponder — natively on
+// macOS, and via the Bonjour SDK's `mDNSResponder.exe` service on Windows,
+// the SAME upstream codebase cross-compiled rather than an independent
+// reimplementation. Both answer a local resolve inline, in well under a
+// millisecond, and are safe to call from inside a browse callback — the
+// behaviour this file has always assumed for `__APPLE__`.
+//
+// Linux's Avahi compat shim is independently implemented and measured
+// otherwise (29 Aug 2026): 650 ms, and it deadlocks if resolved from inside
+// the browse callback. Only Avahi gets the deferred/async epoll path below.
+//
+// ⚠ Windows joining the fast path is REASONED FROM THE SHARED CODEBASE, not
+// yet measured on Windows hardware the way the Linux number was — the
+// Bonjour SDK is not installed on this box. Confirm on first bring-up (a
+// standalone resolve-from-inside-a-browse-callback probe, mirroring the one
+// that caught Avahi's deadlock) before relying on it under load.
+#if defined(__APPLE__) || defined(_WIN32)
+#define PP_DNS_SD_INLINE_RESOLVE 1
+#endif
+
 #if defined(PP_DNS_SD_AVAILABLE)
+#if defined(_WIN32)
+// ⛔ ORDER IS LOAD-BEARING. The Bonjour SDK's `dns_sd.h` (line ~123) does a
+// bare `#include <windows.h>` with no `WIN32_LEAN_AND_MEAN` guard of its
+// own — last touched circa 2007, well before that became the convention.
+// Unguarded, `<windows.h>` pulls in the LEGACY WinSock 1.1 `<winsock.h>`,
+// and a later `<winsock2.h>` then collides with it: `struct sockaddr`
+// redefinition, `accept`/`bind`/`connect`/… "redefinition; different
+// linkage", cascading into hundreds of errors in `ws2tcpip.h`. Defining
+// `WIN32_LEAN_AND_MEAN` and including `<winsock2.h>` BEFORE `<dns_sd.h>`
+// is the standard fix: winsock2.h's own header guard then stops the
+// legacy header from redefining anything when dns_sd.h's windows.h
+// include runs.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
-#include <dns_sd.h>
 #include <poll.h>
+#endif
+#include <dns_sd.h>
 #include <chrono>
-#if !defined(__APPLE__)
+#if !defined(PP_DNS_SD_INLINE_RESOLVE)
 #include <sys/epoll.h>
 #include <unistd.h>
 #endif
@@ -285,7 +329,7 @@ public:
             m_browse = nullptr;
             return false;   // 3.6a — not an error state, just no discovery
         }
-#if !defined(__APPLE__)
+#if !defined(PP_DNS_SD_INLINE_RESOLVE)
         m_epoll = ::epoll_create1(0);
         if (m_epoll < 0) {                  // 3.6a again: degrade, never fault
             DNSServiceRefDeallocate(m_browse);
@@ -306,7 +350,7 @@ public:
             if (kv.second) DNSServiceRefDeallocate(kv.second);
         m_resolves.clear();
         m_discovered.clear();
-#if !defined(__APPLE__)
+#if !defined(PP_DNS_SD_INLINE_RESOLVE)
         for (auto &kv : m_byFd) {
             if (kv.second.first) DNSServiceRefDeallocate(kv.second.first);
             delete kv.second.second;
@@ -322,7 +366,7 @@ public:
 
     int fd() const override
     {
-#if defined(__APPLE__)
+#if defined(PP_DNS_SD_INLINE_RESOLVE)
         return m_browse ? DNSServiceRefSockFD(m_browse) : -1;
 #else
         // The epoll set, not the browse socket: it goes readable when the
@@ -335,7 +379,7 @@ public:
     bool process() override
     {
         if (!m_browse) return false;
-#if defined(__APPLE__)
+#if defined(PP_DNS_SD_INLINE_RESOLVE)
         const bool ok = DNSServiceProcessResult(m_browse) == kDNSServiceErr_NoError;
         drainDiscovered();
         return ok;
@@ -379,6 +423,8 @@ public:
     {
 #if defined(__APPLE__)
         return "DNS-SD via mDNSResponder (browse only)";
+#elif defined(_WIN32)
+        return "DNS-SD via Bonjour for Windows (browse only)";
 #else
         return "DNS-SD via Avahi compat (browse only)";
 #endif
@@ -432,7 +478,7 @@ private:
         std::uint32_t ifIndex;
     };
 
-#if !defined(__APPLE__)
+#if !defined(PP_DNS_SD_INLINE_RESOLVE)
     // Close one pending resolve and free everything it owns.
     void retire(std::map<int, std::pair<DNSServiceRef, Pending *>>::iterator it)
     {
@@ -502,20 +548,28 @@ private:
         // ⚠ A freeze, by contrast, is unrecoverable and blames the wrong
         // subsystem when someone finally looks.
         const int rfd = DNSServiceRefSockFD(ref);
-#if defined(__APPLE__)
+#if defined(PP_DNS_SD_INLINE_RESOLVE)
         if (rfd >= 0) {
+#if defined(_WIN32)
+            WSAPOLLFD pfd{};
+            pfd.fd = static_cast<SOCKET>(rfd);
+            pfd.events = POLLIN;
+            if (::WSAPoll(&pfd, 1, kResolveBudgetMs) > 0 && (pfd.revents & POLLIN))
+                DNSServiceProcessResult(ref);
+#else
             struct pollfd pfd;
             pfd.fd = rfd;
             pfd.events = POLLIN;
             pfd.revents = 0;
             if (::poll(&pfd, 1, kResolveBudgetMs) > 0 && (pfd.revents & POLLIN))
                 DNSServiceProcessResult(ref);
+#endif
         }
         DNSServiceRefDeallocate(ref);
         delete pending;
 #else
-        // ⚠ `pending` deliberately OUTLIVES this function off Apple — the
-        // resolve is now asynchronous, so onResolve frees it.
+        // ⚠ `pending` deliberately OUTLIVES this function off the inline-resolve
+        // platforms — the resolve is now asynchronous, so onResolve frees it.
         if (rfd < 0 || m_epoll < 0) {
             DNSServiceRefDeallocate(ref);
             delete pending;
@@ -558,11 +612,12 @@ private:
     // Instances the browse callback reported, waiting to be resolved off the
     // callback stack — see drainDiscovered().
     std::vector<Discovered> m_discovered;
-#if !defined(__APPLE__)
+#if !defined(PP_DNS_SD_INLINE_RESOLVE)
     int m_epoll = -1;                          // the one fd the owner watches
     // resolve socket -> {ref, its callback context}.  ⚠ BOTH are owned here:
-    // off Apple the resolve is asynchronous, so `Pending` outlives resolveOne()
-    // and this map is the only thing that can free it.
+    // off the inline-resolve platforms the resolve is asynchronous, so
+    // `Pending` outlives resolveOne() and this map is the only thing that can
+    // free it.
     std::map<int, std::pair<DNSServiceRef, Pending *>> m_byFd;
 #endif
     FoundFn m_found;
@@ -575,6 +630,12 @@ private:
 std::unique_ptr<RvBrowser> makePlatformBrowser()
 {
 #if defined(PP_DNS_SD_AVAILABLE)
+#if defined(_WIN32)
+    // W4: dnssd.dll is delay-loaded (CMake's /DELAYLOAD:dnssd.dll). Touching a
+    // DNSService* symbol before confirming the DLL loaded would crash the
+    // process on a machine without the Bonjour SDK's runtime component.
+    if (!pinpoint::ppcp::dnssdRuntimeAvailable()) return nullptr;
+#endif
     return std::unique_ptr<RvBrowser>(new BonjourBrowser);
 #else
     // No DNS-SD client on this platform.  3.6b: failure to discover falls
@@ -914,6 +975,9 @@ private:
 std::unique_ptr<RvAdvertiser> makePlatformAdvertiser()
 {
 #if defined(PP_DNS_SD_AVAILABLE)
+#if defined(_WIN32)
+    if (!pinpoint::ppcp::dnssdRuntimeAvailable()) return nullptr;
+#endif
     return std::unique_ptr<RvAdvertiser>(new BonjourAdvertiser);
 #else
     // CA5 — Windows is DEFERRED and this is where it is recorded.  There is no

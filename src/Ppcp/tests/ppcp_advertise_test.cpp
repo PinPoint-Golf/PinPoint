@@ -37,7 +37,6 @@
 
 #include <gtest/gtest.h>
 
-#include <poll.h>
 #include <time.h>
 
 #include <cstdio>
@@ -48,6 +47,19 @@
 #include <map>
 #include <string>
 #include <vector>
+
+// `struct pollfd`/`POLLIN` are defined identically by winsock2.h (Microsoft's
+// own struct tag is `pollfd`, with the same three fields in the same order),
+// so every use of them below compiles verbatim on Windows. Only the poll()
+// function itself has a different name there.
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  define pp_poll WSAPoll
+#else
+#  include <poll.h>
+#  define pp_poll ::poll
+#endif
 
 #include <ppcp/rv.h>
 
@@ -621,7 +633,7 @@ TEST(PpcpAdvertise, RegisteringWithTheRealResponderIsVisibleToARealBrowse)
         if (bf >= 0) { fds[n].fd = bf; fds[n].events = POLLIN; fds[n].revents = 0; ++n; }
         if (af >= 0) { fds[n].fd = af; fds[n].events = POLLIN; fds[n].revents = 0; ++n; }
         if (n == 0) break;
-        if (::poll(fds, n, 250) <= 0) continue;
+        if (pp_poll(fds, n, 250) <= 0) continue;
         for (int i = 0; i < n; ++i) {
             if (!(fds[i].revents & POLLIN)) continue;
             if (fds[i].fd == bf) br->process();
@@ -714,12 +726,19 @@ TEST(PpcpAdvertiseHold, HoldsARealAdvertisementSoItCanBeWatchedWithDnsSd)
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(holdS);
     while (std::chrono::steady_clock::now() < until) {
         const int fd = adv->fd();
+        // Assigned field-by-field rather than aggregate-initialised: on
+        // Windows `pollfd::fd` is a `SOCKET` (unsigned), and brace-init
+        // enforces no-narrowing even for a value-preserving int->SOCKET
+        // conversion, which the aggregate form used to warn on (C4838).
         if (fd >= 0) {
-            struct pollfd p { fd, POLLIN, 0 };
-            if (::poll(&p, 1, 200) > 0 && (p.revents & POLLIN)) adv->process();
+            struct pollfd p {};
+            p.fd = fd;
+            p.events = POLLIN;
+            if (pp_poll(&p, 1, 200) > 0 && (p.revents & POLLIN)) adv->process();
         } else {
-            struct pollfd p { -1, 0, 0 };
-            ::poll(&p, 0, 200);
+            struct pollfd p {};
+            p.fd = -1;   // negative fd: poll() ignores this entry (n=0 below)
+            pp_poll(&p, 0, 200);
         }
         if (drv.tick(static_cast<std::uint64_t>(::time(nullptr))))
             std::fprintf(stderr, "  rotated -> %s\n", drv.describe().c_str());

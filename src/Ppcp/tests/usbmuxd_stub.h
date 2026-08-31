@@ -18,9 +18,14 @@
 
 #pragma once
 
-// A STUB usbmuxd — the plist protocol of design §4.2 over an AF_UNIX socket,
-// with scripted device lists, scripted `Connect` results and scripted
-// attach/detach.
+// A STUB usbmuxd — the plist protocol of design §4.2, with scripted device
+// lists, scripted `Connect` results and scripted attach/detach.  macOS and
+// Linux serve it over AF_UNIX, matching the real daemon's own transport;
+// Windows (W3) serves it over loopback TCP on an ephemeral port, matching the
+// AF_INET shape of the real Apple Mobile Device Service (127.0.0.1:27015) —
+// the daemon hands its bound port to `Provider::tcpSocket()` the same way
+// `WiredPresenceListener` on the device binds 0 and reports what it got
+// (design §5.3).
 //
 // WHY IT EXISTS.  Design §12 names "both halves of the wired path are unreached
 // code" as the largest single estimate risk in Phase 1.  Everything above the
@@ -51,15 +56,76 @@
 #include <thread>
 #include <vector>
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/un.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  pragma comment(lib, "ws2_32.lib")
+#  define PP_STUB_LAST_ERROR() WSAGetLastError()
+#  define PP_STUB_EINTR WSAEINTR
+#  define PP_STUB_EAGAIN WSAEWOULDBLOCK
+#else
+#  include <arpa/inet.h>
+#  include <fcntl.h>
+#  include <poll.h>
+#  include <sys/socket.h>
+#  include <sys/types.h>
+#  include <sys/un.h>
+#  include <unistd.h>
+#  define PP_STUB_LAST_ERROR() errno
+#  define PP_STUB_EINTR EINTR
+#  define PP_STUB_EAGAIN EAGAIN
+#endif
 
 namespace UsbmuxStub {
+
+#ifdef _WIN32
+inline void ensureWinsock()
+{
+    struct Once {
+        Once() { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); }
+    };
+    static Once once;
+    (void)once;
+}
+#endif
+
+inline void stubClose(Ppcp::pp_socket_t fd)
+{
+#ifdef _WIN32
+    ::closesocket(static_cast<SOCKET>(fd));
+#else
+    ::close(fd);
+#endif
+}
+
+inline void stubShutdownBoth(Ppcp::pp_socket_t fd)
+{
+#ifdef _WIN32
+    ::shutdown(static_cast<SOCKET>(fd), SD_BOTH);
+#else
+    ::shutdown(fd, SHUT_RDWR);
+#endif
+}
+
+// `::recv`/`::send` differ only in pointer/length type between the two
+// platforms; wrapped once so every call site below reads the same either way.
+inline long sockRecv(Ppcp::pp_socket_t fd, void *buf, std::size_t len)
+{
+#ifdef _WIN32
+    return ::recv(static_cast<SOCKET>(fd), reinterpret_cast<char *>(buf), static_cast<int>(len), 0);
+#else
+    return ::recv(fd, buf, len, 0);
+#endif
+}
+inline long sockSend(Ppcp::pp_socket_t fd, const void *buf, std::size_t len)
+{
+#ifdef _WIN32
+    return ::send(static_cast<SOCKET>(fd), reinterpret_cast<const char *>(buf),
+                   static_cast<int>(len), 0);
+#else
+    return ::send(fd, buf, len, 0);
+#endif
+}
 
 // One device as usbmuxd would describe it in `DeviceList` / `Attached`.
 struct Entry {
@@ -92,26 +158,55 @@ class Daemon {
 public:
     Daemon()
     {
+#ifdef _WIN32
+        ensureWinsock();
+
+        m_listen = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (m_listen == Ppcp::kInvalidSocket) return;
+
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_port = 0;   // ephemeral — read back below, then handed to the Provider
+        ::inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+        if (::bind(static_cast<SOCKET>(m_listen), reinterpret_cast<sockaddr *>(&a), sizeof a) !=
+            0) {
+            stubClose(m_listen);
+            m_listen = Ppcp::kInvalidSocket;
+            return;
+        }
+        sockaddr_in bound{};
+        int boundLen = sizeof bound;
+        ::getsockname(static_cast<SOCKET>(m_listen), reinterpret_cast<sockaddr *>(&bound),
+                       &boundLen);
+        m_port = ntohs(bound.sin_port);
+
+        if (::listen(static_cast<SOCKET>(m_listen), 8) != 0) {
+            stubClose(m_listen);
+            m_listen = Ppcp::kInvalidSocket;
+            return;
+        }
+#else
         static std::atomic<int> counter{0};
         m_path = "/tmp/ppcp-muxstub-" + std::to_string(::getpid()) + "-" +
                  std::to_string(counter.fetch_add(1)) + ".sock";
         ::unlink(m_path.c_str());
 
         m_listen = ::socket(AF_UNIX, SOCK_STREAM, 0);
-        if (m_listen < 0) return;
+        if (m_listen == Ppcp::kInvalidSocket) return;
         sockaddr_un a{};
         a.sun_family = AF_UNIX;
         std::memcpy(a.sun_path, m_path.c_str(), m_path.size() + 1);
         if (::bind(m_listen, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0) {
-            ::close(m_listen);
-            m_listen = -1;
+            stubClose(m_listen);
+            m_listen = Ppcp::kInvalidSocket;
             return;
         }
         if (::listen(m_listen, 8) != 0) {
-            ::close(m_listen);
-            m_listen = -1;
+            stubClose(m_listen);
+            m_listen = Ppcp::kInvalidSocket;
             return;
         }
+#endif
         m_ok = true;
         m_acceptor = std::thread([this] { acceptLoop(); });
     }
@@ -123,7 +218,14 @@ public:
 
     bool ok() const { return m_ok; }
     const std::string &path() const { return m_path; }
-    Ppcp::Usbmux::Provider provider() const { return Ppcp::Usbmux::Provider::unixSocket(m_path); }
+    Ppcp::Usbmux::Provider provider() const
+    {
+#ifdef _WIN32
+        return Ppcp::Usbmux::Provider::tcpSocket("127.0.0.1", m_port);
+#else
+        return Ppcp::Usbmux::Provider::unixSocket(m_path);
+#endif
+    }
 
     // ── The script ─────────────────────────────────────────────────────────
     void setDevices(std::vector<Entry> d)
@@ -201,29 +303,43 @@ public:
         // ⚠ close() does NOT reliably wake a thread parked in accept() on macOS,
         // so the acceptor is woken the way anything else would wake it: with a
         // connection.  It sees m_stopped and returns.
-        if (m_listen >= 0) {
-            const int w = ::socket(AF_UNIX, SOCK_STREAM, 0);
-            if (w >= 0) {
+        if (m_listen != Ppcp::kInvalidSocket) {
+#ifdef _WIN32
+            const Ppcp::pp_socket_t w = ::socket(AF_INET, SOCK_STREAM, 0);
+            if (w != Ppcp::kInvalidSocket) {
+                sockaddr_in a{};
+                a.sin_family = AF_INET;
+                a.sin_port = htons(m_port);
+                ::inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+                ::connect(static_cast<SOCKET>(w), reinterpret_cast<sockaddr *>(&a), sizeof a);
+                stubClose(w);
+            }
+#else
+            const Ppcp::pp_socket_t w = ::socket(AF_UNIX, SOCK_STREAM, 0);
+            if (w != Ppcp::kInvalidSocket) {
                 sockaddr_un a{};
                 a.sun_family = AF_UNIX;
                 std::memcpy(a.sun_path, m_path.c_str(), m_path.size() + 1);
                 ::connect(w, reinterpret_cast<sockaddr *>(&a), sizeof a);
-                ::close(w);
+                stubClose(w);
             }
+#endif
         }
         if (m_acceptor.joinable()) m_acceptor.join();
-        if (m_listen >= 0) { ::close(m_listen); m_listen = -1; }
+        if (m_listen != Ppcp::kInvalidSocket) { stubClose(m_listen); m_listen = Ppcp::kInvalidSocket; }
 
         // Every handler is parked in recv() — on a held-open Listen connection
         // or on a tunnel echo.  shutdown() is what ends those.
         {
             std::lock_guard<std::mutex> g(m_m);
-            for (int fd : m_conns) ::shutdown(fd, SHUT_RDWR);
+            for (Ppcp::pp_socket_t fd : m_conns) stubShutdownBoth(fd);
         }
         for (auto &t : m_handlers)
             if (t.joinable()) t.join();
         m_handlers.clear();
+#ifndef _WIN32
         ::unlink(m_path.c_str());
+#endif
     }
 
 private:
@@ -252,25 +368,27 @@ private:
         return out;
     }
 
-    static bool writeAll(int fd, const std::string &b)
+    static bool writeAll(Ppcp::pp_socket_t fd, const std::string &b)
     {
         std::size_t sent = 0;
         while (sent < b.size()) {
-            const ssize_t w = ::send(fd, b.data() + sent, b.size() - sent, 0);
+            const long w = sockSend(fd, b.data() + sent, b.size() - sent);
             if (w > 0) { sent += static_cast<std::size_t>(w); continue; }
-            if (w < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+            if (w < 0 && (PP_STUB_LAST_ERROR() == PP_STUB_EINTR ||
+                          PP_STUB_LAST_ERROR() == PP_STUB_EAGAIN))
+                continue;
             return false;
         }
         return true;
     }
 
-    static bool readExact(int fd, unsigned char *p, std::size_t n)
+    static bool readExact(Ppcp::pp_socket_t fd, unsigned char *p, std::size_t n)
     {
         std::size_t got = 0;
         while (got < n) {
-            const ssize_t r = ::recv(fd, p + got, n - got, 0);
+            const long r = sockRecv(fd, p + got, n - got);
             if (r > 0) { got += static_cast<std::size_t>(r); continue; }
-            if (r < 0 && errno == EINTR) continue;
+            if (r < 0 && PP_STUB_LAST_ERROR() == PP_STUB_EINTR) continue;
             return false;
         }
         return true;
@@ -360,20 +478,25 @@ private:
 
     void sendToListenersLocked(const std::string &xml)
     {
-        for (int fd : m_listeners) writeAll(fd, frame(0, xml));
+        for (Ppcp::pp_socket_t fd : m_listeners) writeAll(fd, frame(0, xml));
     }
 
     // ── Connection handling ────────────────────────────────────────────────
     void acceptLoop()
     {
         for (;;) {
-            const int c = ::accept(m_listen, nullptr, nullptr);
+#ifdef _WIN32
+            const Ppcp::pp_socket_t c = static_cast<Ppcp::pp_socket_t>(
+                ::accept(static_cast<SOCKET>(m_listen), nullptr, nullptr));
+#else
+            const Ppcp::pp_socket_t c = ::accept(m_listen, nullptr, nullptr);
+#endif
             if (m_stopped.load()) {
-                if (c >= 0) ::close(c);
+                if (c != Ppcp::kInvalidSocket) stubClose(c);
                 return;
             }
-            if (c < 0) {
-                if (errno == EINTR) continue;
+            if (c == Ppcp::kInvalidSocket) {
+                if (PP_STUB_LAST_ERROR() == PP_STUB_EINTR) continue;
                 return;   // listener gone
             }
             {
@@ -384,7 +507,7 @@ private:
         }
     }
 
-    void forgetConn(int fd)
+    void forgetConn(Ppcp::pp_socket_t fd)
     {
         std::lock_guard<std::mutex> g(m_m);
         for (auto it = m_conns.begin(); it != m_conns.end(); ++it)
@@ -393,11 +516,11 @@ private:
             if (*it == fd) { m_listeners.erase(it); break; }
     }
 
-    void serve(int fd)
+    void serve(Ppcp::pp_socket_t fd)
     {
         struct Closer {
-            Daemon *d; int fd;
-            ~Closer() { d->forgetConn(fd); ::close(fd); }
+            Daemon *d; Ppcp::pp_socket_t fd;
+            ~Closer() { d->forgetConn(fd); stubClose(fd); }
         } closer{this, fd};
 
         unsigned char hdr[16];
@@ -464,8 +587,10 @@ private:
             // shuts it down.  Nothing more is read from a Listen connection.
             for (;;) {
                 unsigned char sink[64];
-                const ssize_t r = ::recv(fd, sink, sizeof sink, 0);
-                if (r == 0 || (r < 0 && errno != EINTR && errno != EAGAIN)) break;
+                const long r = sockRecv(fd, sink, sizeof sink);
+                if (r == 0 || (r < 0 && PP_STUB_LAST_ERROR() != PP_STUB_EINTR &&
+                               PP_STUB_LAST_ERROR() != PP_STUB_EAGAIN))
+                    break;
                 if (r < 0) continue;
             }
             return;
@@ -479,13 +604,14 @@ private:
             // connected fd rather than a number.
             for (;;) {
                 unsigned char buf[512];
-                const ssize_t r = ::recv(fd, buf, sizeof buf, 0);
+                const long r = sockRecv(fd, buf, sizeof buf);
                 if (r > 0) {
-                    if (::send(fd, buf, static_cast<std::size_t>(r), 0) < 0) break;
+                    if (sockSend(fd, buf, static_cast<std::size_t>(r)) < 0) break;
                     continue;
                 }
                 if (r == 0) break;
-                if (errno == EINTR || errno == EAGAIN) continue;
+                if (PP_STUB_LAST_ERROR() == PP_STUB_EINTR || PP_STUB_LAST_ERROR() == PP_STUB_EAGAIN)
+                    continue;
                 break;
             }
             return;
@@ -493,7 +619,8 @@ private:
     }
 
     std::string m_path;
-    int m_listen = -1;
+    std::uint16_t m_port = 0;   // Windows only — the ephemeral port bound at construction
+    Ppcp::pp_socket_t m_listen = Ppcp::kInvalidSocket;
     bool m_ok = false;
     std::atomic<bool> m_stopped{false};
     std::thread m_acceptor;
@@ -502,8 +629,8 @@ private:
     mutable std::mutex m_m;
     std::condition_variable m_listenerCv;
     std::vector<Entry> m_devices;
-    std::vector<int> m_listeners;   // Listen connections, for event fan-out
-    std::vector<int> m_conns;       // every accepted fd, so stop() can wake them
+    std::vector<Ppcp::pp_socket_t> m_listeners;   // Listen connections, for event fan-out
+    std::vector<Ppcp::pp_socket_t> m_conns;       // every accepted fd, so stop() can wake them
     int m_connectResult = 0;
     int m_listenResult = 0;
     bool m_echoTag = true;

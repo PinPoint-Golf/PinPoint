@@ -3166,6 +3166,10 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
         src/Ppcp/ppcp_rendezvous.h    src/Ppcp/ppcp_rendezvous.cpp
         src/Ppcp/ppcp_pairing_store.cpp
         src/Ppcp/ppcp_discovery.h     src/Ppcp/ppcp_discovery.cpp
+        # W4 — the delay-load runtime probe for dnssd.dll (Windows only; a
+        # no-op elsewhere, see the file's own guard). Beside ppcp_discovery.cpp
+        # because it exists only to gate that file's two factory functions.
+        src/Ppcp/ppcp_dnssd_runtime.h src/Ppcp/ppcp_dnssd_runtime.cpp
         # H10 — RV-6 guided pairing, the INITIATOR half.  In the TRANSPORT
         # block for the same reason the rendezvous is: what a guided pairing
         # produces is a `PRK`, and §5's TLS handshake is the only thing that
@@ -3228,10 +3232,60 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
     # the pairing code carries its own endpoints.  A STATUS line, never a
     # warning — this is a capability, not a prerequisite.
     #
-    # ⚠ Windows (W4) gets no help from this.  There is no `dns_sd.h` there
-    # without Apple's Bonjour SDK, which is an installer rather than a header,
-    # so W4 remains a genuinely separate piece of work.
-    if(NOT APPLE)
+    # ✅ Windows (W4): the Bonjour SDK for Windows exposes the SAME `dns_sd.h`
+    # API as the Apple/Avahi paths, so this widens the existing `#if` rather
+    # than writing a second backend here either — same shape as Linux (L3).
+    # It is an installer, not a header, so the probe below is a capability
+    # check, not a hard prerequisite: absent, PP_HAVE_DNS_SD stays unset and
+    # the two factories keep returning null (RV 3.6b — pairing by code is
+    # unaffected).
+    if(WIN32)
+        # No .pc/pkg-config on Windows — the SDK installs to a fixed default
+        # location (BONJOUR_SDK_HOME env var if it was moved).
+        set(_bonjour_hint "$ENV{BONJOUR_SDK_HOME}")
+        find_path(DNSSD_INCLUDE_DIR dns_sd.h
+                  HINTS "${_bonjour_hint}/Include" "C:/Program Files/Bonjour SDK/Include")
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            set(_bonjour_lib_subdir "Lib/x64")
+        else()
+            set(_bonjour_lib_subdir "Lib/Win32")
+        endif()
+        find_library(DNSSD_LIBRARY dnssd
+                     HINTS "${_bonjour_hint}/${_bonjour_lib_subdir}"
+                           "C:/Program Files/Bonjour SDK/${_bonjour_lib_subdir}")
+        if(DNSSD_INCLUDE_DIR AND DNSSD_LIBRARY)
+            set(DNSSD_INCLUDE_DIRS "${DNSSD_INCLUDE_DIR}")
+            set(DNSSD_LIBRARIES    "${DNSSD_LIBRARY}")
+            set(DNSSD_FOUND TRUE)
+        endif()
+        if(DNSSD_FOUND)
+            target_include_directories(PinPointStudio PRIVATE ${DNSSD_INCLUDE_DIRS})
+            target_link_libraries(PinPointStudio PRIVATE ${DNSSD_LIBRARIES})
+            target_compile_definitions(PinPointStudio PRIVATE PP_HAVE_DNS_SD)
+            # ⛔ NOT `/DELAYLOAD` — `dnssd.lib` is not a conventional import
+            # library at all. `dumpbin /archivemembers` shows exactly ONE
+            # object in it, `DLLStub.obj`: every `DNSService*` entry point is
+            # a small stub that does its OWN `LoadLibrary`/`GetProcAddress`
+            # against `dnssd.dll` at call time (Apple's own, hand-rolled
+            # delay-loading, predating MSVC's `/DELAYLOAD` convention this
+            # codebase uses for Spinnaker_v140.dll above). A `/DELAYLOAD`
+            # flag here has NO import descriptor to act on — dnssd.dll never
+            # appears in the binary's import table at all, confirmed with
+            # `dumpbin /dependents`, and is silently a no-op. The absence
+            # protection is real, it is just Apple's, not the linker's.
+            # ppcp_dnssd_runtime.cpp's probe stays anyway, as an explicit,
+            # early, OWN diagnostic point rather than trusting every one of
+            # the 2007-era stub's error paths — cheap, and consistent with
+            # how every other optional native dependency here is gated.
+            message(STATUS "PPCP discovery: DNS-SD via Bonjour SDK for Windows (self-delay-loading)")
+        else()
+            message(STATUS
+                "PPCP discovery: no Bonjour SDK found — reconnection discovery is off. "
+                "Pairing by code still works (RV 3.6b). Install the Bonjour SDK for "
+                "Windows (developer.apple.com/bonjour) to build it in; set "
+                "BONJOUR_SDK_HOME if it is installed somewhere other than the default.")
+        endif()
+    elseif(NOT APPLE)
         find_package(PkgConfig QUIET)
         if(PkgConfig_FOUND)
             pkg_check_modules(DNSSD QUIET avahi-compat-libdns_sd)
