@@ -275,6 +275,15 @@ struct PpcpRendezvous::Impl {
                 return no("the code was multi-use, so the pairing is session-scoped (RV 7.4f)");
             if (!store->put(pairingId, prk)) return no("the platform store refused the key");
             persisted = true;
+            // 7.4a — a persisted pairing is not a code: no expiry and no use
+            // limit, the same invariant adoptGuidedPairing() and
+            // loadPersisted() already give a persisted entry. Without this,
+            // a code redeemed with maxUses=1 spends usesRemaining to 0 on
+            // the SAME handshake that persists it, and the resolver refuses
+            // every reconnect on this pairing as EXHAUSTED for the rest of
+            // the process — until a restart calls loadPersisted() instead,
+            // which is why "restart fixed it" kept masking this.
+            usesRemaining = UINT64_MAX;
             return true;
         }
     };

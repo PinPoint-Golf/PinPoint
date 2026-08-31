@@ -223,6 +223,12 @@ struct Provider {
     // usbmuxd of the test suite (W3), and nothing else in shipping code
     // (platformDefault() already hardcodes AMDS's 127.0.0.1:27015).
     static Provider tcpSocket(std::string host, std::uint16_t port);
+
+    // For logging. ⛔ NOT `path` unconditionally — that field keeps its
+    // struct-default value ("/var/run/usbmuxd") on a Kind::Tcp provider,
+    // since platformDefault() never touches it there, and printing it
+    // regardless of kind would name the wrong provider on Windows.
+    std::string describe() const;
 };
 
 // ── The blocking half: enumerate, and dial ─────────────────────────────────

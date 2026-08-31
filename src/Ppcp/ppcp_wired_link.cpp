@@ -413,7 +413,7 @@ bool PpcpWiredLink::tryOpenWatch()
 
     m_watchUp = true;
     m_watchAnnouncedDown = false;
-    ppWarn() << "[ppcp-usb] wired path armed —" << m_provider.path.c_str();
+    ppWarn() << "[ppcp-usb] wired path armed —" << m_provider.describe().c_str();
     return true;
 }
 

@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -414,6 +415,46 @@ TEST(PpcpRendezvous, ACompletedPairingIsRememberedAutomaticallyOnceItsLinkEstabl
     bay.rv.revoke(a.pairingId);
     EXPECT_FALSE(bay.rv.isPersisted(a.pairingId));
     EXPECT_TRUE(bay.rv.secretStore()->list().empty());
+}
+
+// ── A persisted pairing must not stay stuck at the CODE's use limit ────────
+// Found live on Windows, 31 Aug 2026: a `mu:1` QR code pairs, noteLinkEstablished()
+// spends its usesRemaining to 0 (7.3a — correct, the CODE is spent) and remembers
+// it in the SAME call — but nothing ever promoted usesRemaining back to
+// unlimited for the PERSISTED pairing that just replaced it (7.4a: "no expiry
+// and no use limit"), unlike adoptGuidedPairing() and loadPersisted(), which
+// both already do. Every reconnect on that pairing was then refused as
+// EXHAUSTED for the life of the process — invisible until a restart, because
+// loadPersisted() re-derives entries from disk with usesRemaining = UINT64_MAX
+// and masks the defect on every fresh launch.
+TEST(PpcpRendezvous, APersistedPairingHasNoUseLimitEvenWhenItWasBornFromAMuOneCode)
+{
+    Bay bay;
+    bay.rv.setSecretStore(makeEphemeralPairingStore());
+    ASSERT_TRUE(bay.open());   // default Config: mu:1, exactly the field case
+    Scanner s(bay.code.uri);
+    ASSERT_TRUE(s.ok);
+
+    Bay::Arrival first = bay.dial(s, 0x61);
+    ASSERT_TRUE(first.linked);
+    bay.rv.noteLinkEstablished(first.pairingId);
+    ASSERT_TRUE(bay.rv.isPersisted(first.pairingId));
+
+    CodeStatus st;
+    ASSERT_TRUE(bay.rv.status(first.pairingId, &st));
+    EXPECT_EQ(st.usesRemaining, UINT64_MAX)
+        << "7.4a: a persisted pairing carries no use limit, the same invariant "
+           "adoptGuidedPairing() and loadPersisted() already give one";
+
+    // The reconnect this bug broke: the SAME identity dials again — no new
+    // code, exactly RV 7.4a's point — and must succeed, not be refused as
+    // exhausted the way the live host was refusing every reconnect attempt.
+    const auto before = bay.rv.counters();
+    Bay::Arrival second = bay.dial(s, 0x62);
+    EXPECT_TRUE(second.linked) << "a persisted pairing must be reusable without limit";
+    const auto after = bay.rv.counters();
+    EXPECT_EQ(after.refusedExhausted, before.refusedExhausted)
+        << "the persisted pairing must never be seen as exhausted";
 }
 
 TEST(PpcpRendezvous, ACompletedPairingIsNotRememberedWithNoStoreInstalled)

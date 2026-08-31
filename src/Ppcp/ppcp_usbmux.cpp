@@ -718,6 +718,12 @@ Provider Provider::tcpSocket(std::string host, std::uint16_t port)
     return p;
 }
 
+std::string Provider::describe() const
+{
+    if (kind == Kind::Tcp) return host + ":" + std::to_string(port);
+    return path;
+}
+
 std::vector<Device> wiredOnly(const std::vector<Device> &all)
 {
     std::vector<Device> out;
