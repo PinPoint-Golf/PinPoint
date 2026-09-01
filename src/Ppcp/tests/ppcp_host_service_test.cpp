@@ -54,6 +54,11 @@
 #include <limits>
 
 #include <ppcp/cbor.h>
+// MSG §12 — the ack the clamp row hands to observe(); see that test for why it
+// is constructed here rather than arriving.
+#include <ppcp/message.h>
+#include <ppcp/model.h>
+#include <ppcp/peer.h>
 
 #include <mutex>
 #include <thread>
@@ -1296,6 +1301,194 @@ TEST_F(HostServiceClock, ADialledLinkAdoptedWithNoPairingIsLiveAndInvisible)
                   QString::fromStdString(code.pairingId))
             << "a link with no pairing found its way into the ledger";
     }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// CR-02 — the Actuator list, and the trap-3 guard at the Qt seam
+// ══════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// The `actuators` entry for one phone row, or an empty map.
+QVariantMap firstActuator(const QVariantList &rows, const QString &pairingId)
+{
+    for (const QVariant &v : rows) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("pairingId")).toString() != pairingId) continue;
+        const QVariantList acts = m.value(QStringLiteral("actuators")).toList();
+        return acts.isEmpty() ? QVariantMap() : acts.first().toMap();
+    }
+    return QVariantMap();
+}
+
+}  // namespace
+
+// ⛔ ⭐ THE TRAP-3 GUARD, AT THE LAYER QML ACTUALLY READS.  Everything below
+// asks the same question in a different place: does anything on the click path
+// write a lit state?  It must not, and this suite is a good place to ask
+// because it links `ppcp_host_service_stubs.cpp` and never accepts a link —
+// so the command CANNOT be answered here, and a `state` that ever reads "on"
+// in this file can only have come from the click.
+TEST_F(HostServiceClock, ADeclaredTorchIsPublishedUnknownAndTheClickDoesNotLightIt)
+{
+    Phone p(&m_svc);
+    ASSERT_TRUE(p.ok());
+    ASSERT_TRUE(p.dial(m_svc.port(), 61));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+
+    ASSERT_TRUE(m_svc.declareForTest(0, QStringLiteral("peer:torchy"),
+                                     QStringLiteral("torch")));
+
+    const QString pid = QString::fromStdString(p.pairingId());
+    QVariantMap act = firstActuator(m_svc.phones(), pid);
+    ASSERT_FALSE(act.isEmpty()) << "the declared Actuator never reached the phone row";
+    EXPECT_EQ(act.value(QStringLiteral("kind")).toString(), QStringLiteral("torch"));
+    EXPECT_EQ(act.value(QStringLiteral("control")).toString(), QStringLiteral("on_off"));
+    // 12.2 is push: nobody has commanded it and it has not moved, so we know
+    // nothing.  "unknown" is that answer and it is NOT "off".
+    EXPECT_EQ(act.value(QStringLiteral("state")).toString(), QStringLiteral("unknown"));
+    EXPECT_FALSE(act.value(QStringLiteral("pending")).toBool());
+
+    // ⛔ phoneHealth() MUST CARRY THE SAME THING.  The two exist so a panel can
+    // refresh a reading without re-reading the phone list and rebuilding every
+    // delegate (trap 1); two hand-written copies of one reading drift, and this
+    // is the assertion that stops them.
+    const QVariantList healthActs =
+        m_svc.phoneHealth(pid).value(QStringLiteral("actuators")).toList();
+    ASSERT_EQ(healthActs.size(), 1);
+    EXPECT_EQ(healthActs.first().toMap(), act);
+
+    // Now click it.  The stub link has no counterpart declaration behind it, so
+    // libppcp refuses the send (12.1d) and this returns false — but the
+    // assertion that matters is the one AFTER: whatever happened, the state did
+    // not become "on".
+    m_svc.setActuatorForTest(0, QStringLiteral("act:test"), true);
+    act = firstActuator(m_svc.phones(), pid);
+    ASSERT_FALSE(act.isEmpty());
+    EXPECT_NE(act.value(QStringLiteral("state")).toString(), QStringLiteral("on"))
+        << "the click lit the torch — this is trap 3, at the Qt seam";
+}
+
+// ── ⭐⭐ 12.1c AT THE QT SEAM — THE ACHIEVED VALUE REACHES QML UNALTERED ────
+//
+// The other half of `PpcpLiveSessionActuator.TheAckCarriesTheAchievedLevelAndNot
+// TheRequestedOne`.  That test proves the WIRE half over two real engines: the
+// host asks for 0.90, the device's driver quantises to 0.75, and the reading
+// holds 0.75.  This one proves the half that test cannot see — that
+// `actuatorRowsFor()` hands QML the number the reading holds and not one of its
+// own.  Between them there is no step at which a requested value could survive.
+//
+// ⚠ THE ACK IS HANDED TO `observe()` DIRECTLY, AND THAT IS THE LIMIT OF THIS
+// ROW.  This suite links `ppcp_host_service_stubs.cpp` and never accepts a link
+// from a real engine, so no ack can ARRIVE here; the decode is libppcp's and is
+// asserted in libppcp's own CT-I39.  What is real here is everything after the
+// decode: PpcpLiveSession::observe(), the ActuatorReading it writes, and the
+// QVariantMap the Cameras pill binds to.
+TEST_F(HostServiceClock, AClampedAchievedLevelIsWhatThePhoneRowPublishes)
+{
+    Phone p(&m_svc);
+    ASSERT_TRUE(p.ok());
+    ASSERT_TRUE(p.dial(m_svc.port(), 64));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+
+    // A DIMMABLE lamp.  `control: on_off` has nothing between on and off, so a
+    // clamp is unsayable on it — 12.1c's achieved-differs-from-requested case
+    // needs a `level` Actuator and this is why the seam takes a control.
+    ASSERT_TRUE(m_svc.declareForTest(0, QStringLiteral("peer:dimmer"),
+                                     QStringLiteral("torch"), QStringLiteral("level")));
+    const QString pid = QString::fromStdString(p.pairingId());
+    QVariantMap act = firstActuator(m_svc.phones(), pid);
+    ASSERT_FALSE(act.isEmpty());
+    EXPECT_EQ(act.value(QStringLiteral("control")).toString(), QStringLiteral("level"));
+    // Nothing has been said about it yet, and -1 is this row's "no reading" —
+    // distinct from 0.0, which is a lamp that is genuinely dark.
+    EXPECT_DOUBLE_EQ(act.value(QStringLiteral("level")).toDouble(), -1.0);
+    EXPECT_FALSE(act.value(QStringLiteral("stalled")).toBool());
+
+    Ppcp::PpcpLiveSession *ls = m_svc.liveSessionForTest(0);
+    ASSERT_NE(ls, nullptr);
+
+    // 12.1c — the ack the device sent after clamping 0.90 to 0.75.
+    ppcp_msg m{};
+    ASSERT_EQ(ppcp_msg_init(&m, PPCP_MT_ACTUATOR_COMMAND_ACK, 11), PPCP_OK);
+    ASSERT_EQ(ppcp_id_set_z(&m.body.actuator_command_ack.actuator_id, "act:test"), PPCP_OK);
+    m.body.actuator_command_ack.verdict   = PPCP_ACTUATOR_APPLIED;
+    m.body.actuator_command_ack.has_state = true;
+    ASSERT_EQ(ppcp_actuator_setting_level(&m.body.actuator_command_ack.state, 0.75), PPCP_OK);
+    ppcp_event ev{};
+    ev.kind   = PPCP_EVENT_ACTUATOR_COMMAND_ACK;
+    ev.msg    = &m;
+    ev.status = PPCP_OK;
+    ls->observe(ev);
+
+    act = firstActuator(m_svc.phones(), pid);
+    ASSERT_FALSE(act.isEmpty());
+    // ⭐ THE ASSERTION.  0.75 is what the far end reported it is ACTUALLY doing.
+    EXPECT_DOUBLE_EQ(act.value(QStringLiteral("level")).toDouble(), 0.75)
+        << "the row lost or rewrote the achieved level on its way to QML";
+    // I39 — a level setting carries no `on`, so "on"/"off" is not an answer
+    // this Actuator has.  "unknown" is, and it is the honest one.
+    EXPECT_EQ(act.value(QStringLiteral("state")).toString(), QStringLiteral("unknown"));
+    EXPECT_FALSE(act.value(QStringLiteral("pending")).toBool());
+    EXPECT_FALSE(act.value(QStringLiteral("stalled")).toBool());
+    EXPECT_TRUE(act.value(QStringLiteral("refusedReason")).toString().isEmpty());
+
+    // Trap 1 again: the two publishers of one reading must not drift.
+    const QVariantList healthActs =
+        m_svc.phoneHealth(pid).value(QStringLiteral("actuators")).toList();
+    ASSERT_EQ(healthActs.size(), 1);
+    EXPECT_EQ(healthActs.first().toMap(), act);
+}
+
+// 12.1d, one layer above the library: an Actuator this phone never declared is
+// not ours to command.
+TEST_F(HostServiceClock, AnActuatorThePhoneNeverDeclaredIsNotCommandable)
+{
+    Phone p(&m_svc);
+    ASSERT_TRUE(p.ok());
+    ASSERT_TRUE(p.dial(m_svc.port(), 62));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+
+    ASSERT_TRUE(m_svc.declareForTest(0, QStringLiteral("peer:torchy")));
+
+    // 5.19c — a peer owning no Actuators participates fully, and an empty list
+    // is a complete declaration.  The control is then ABSENT, not disabled.
+    const QString pid = QString::fromStdString(p.pairingId());
+    EXPECT_TRUE(firstActuator(m_svc.phones(), pid).isEmpty());
+    EXPECT_FALSE(m_svc.setActuatorForTest(0, QStringLiteral("act:test"), true));
+    EXPECT_FALSE(m_svc.setPhoneActuator(QStringLiteral("no-such-pairing"),
+                                        QStringLiteral("act:test"), true));
+}
+
+// CB3 — the statistics the resource-monitor tab reads.  The KEYS are the
+// contract with `ScreenResourceMonitor.qml`; a key that quietly disappears
+// renders as an em dash forever and nothing else complains.
+TEST_F(HostServiceClock, PerPhoneStatsCarryTheCrTwoReadings)
+{
+    Phone p(&m_svc);
+    ASSERT_TRUE(p.ok());
+    ASSERT_TRUE(p.dial(m_svc.port(), 63));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+    ASSERT_TRUE(m_svc.declareForTest(0, QStringLiteral("peer:statsy"),
+                                     QStringLiteral("torch")));
+
+    const QVariantList per = m_svc.ppcpStats().value(QStringLiteral("perPhone")).toList();
+    ASSERT_EQ(per.size(), 1);
+    const QVariantMap one = per.first().toMap();
+    EXPECT_TRUE(one.contains(QStringLiteral("deviceStatus")));
+    EXPECT_TRUE(one.contains(QStringLiteral("bufferStatus")));
+    EXPECT_TRUE(one.contains(QStringLiteral("sessionForMs")));
+    EXPECT_TRUE(one.contains(QStringLiteral("actuators")));
+    // 5.5a / 5.6c are push-on-change, so nothing has been reported and both
+    // lists are empty.  ⚠ EMPTY IS "NOTHING SAID", not "everything fine" — the
+    // panel renders an em dash for exactly this state.
+    EXPECT_TRUE(one.value(QStringLiteral("deviceStatus")).toList().isEmpty());
+    EXPECT_TRUE(one.value(QStringLiteral("bufferStatus")).toList().isEmpty());
+    EXPECT_EQ(one.value(QStringLiteral("actuators")).toList().size(), 1);
 }
 
 }  // namespace

@@ -95,6 +95,11 @@ set(PP_QML_FILES
     src/Gui/monitor/RmAnalysisRunRow.qml
     src/Gui/monitor/RmTimelineChart.qml
     src/Gui/monitor/RmWarningNotice.qml
+    # H15 (CR-02) — the PINPOINTCAPTURE tab's two delegates.  They read only
+    # what is handed to them, so the offscreen QML suite can stand them up
+    # without `ppcpHost` existing at all.
+    src/Gui/monitor/RmPpcpPhoneCard.qml
+    src/Gui/monitor/RmPpcpCameraRow.qml
     src/Gui/home/ScreenHome.qml
     # H5 — the sessions a connected capture device offers, in the DEVICES area
     # of the home screen.  This is where H3's deleted "File -> Import Session…"

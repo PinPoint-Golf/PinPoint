@@ -137,7 +137,29 @@ struct Link {
         live.setLinkStateCallback([this](ppcp_link_state s) { linkStates.push_back(s); });
     }
 
+    // ⭐ THE DEVICE'S SIMULATED DRIVER (MSG 12.1c, libppcp L30).  Null means
+    // "applies exactly what it was asked", which is an honest torch; a test
+    // that wants a CLAMP or a REFUSAL sets one.  There is no longer any such
+    // thing as the engine answering for it.
+    pptest::ActuatorApply actuatorApply;
+
+    // Every drain of the DEVICE's events goes through here, so a command that
+    // arrives is answered wherever it arrives — MSG 1c is not conditional on
+    // which helper happened to move the frame.
+    pptest::EventSink devSink()
+    {
+        return [this](const ppcp_event &e) {
+            pptest::answerActuatorCommand(dev.p, e, actuatorApply);
+        };
+    }
+
     void toHost() { pptest::pipe(dev.p, host->peer(), PPCP_CHANNEL_CONTROL); }
+    // ⚠ NO DEFAULT SINK, AND THAT IS DELIBERATE.  pipe() drains as it feeds
+    // when it is given one, so a sink here would CONSUME the very events a
+    // caller is about to look for (the harness header says so, and making it
+    // the default cost one green test).  The device's events are drained —
+    // and its actuator commands answered — by the explicit drainEvents() call
+    // that follows each pipe below.
     void toDevice(const pptest::EventSink &sink = {})
     { pptest::pipe(host->peer(), dev.p, PPCP_CHANNEL_CONTROL, {}, sink); }
 
@@ -147,6 +169,30 @@ struct Link {
         toHost();
         ASSERT_EQ(ppcp_peer_declare(host->peer(), decl.peer()), PPCP_OK);
         toDevice();
+    }
+
+    // MSG 3.2 — `hello` / `hello_accept`.  ⚠ NOT COSMETIC FOR §12: 12a is
+    // enforced at the RESPONDER against `remote_role`, which is learned from
+    // `hello` and from nothing else, so an actuator command over a link that
+    // never said hello is answered `permission_denied` — correctly, and
+    // confusingly if the test forgot to shake hands.
+    void hello()
+    {
+        ASSERT_EQ(ppcp_peer_hello(host->peer()), PPCP_OK);
+        toDevice();
+        pptest::drainEvents(dev.p, devSink());
+        toHost();
+        pptest::drainEvents(host->peer(), [this](const ppcp_event &e) { live.observe(e); });
+    }
+
+    // Move whatever is queued in both directions once, folding everything the
+    // host learns into the live session.
+    void exchange()
+    {
+        toDevice();
+        pptest::drainEvents(dev.p, devSink());
+        toHost();
+        pptest::drainEvents(host->peer(), [this](const ppcp_event &e) { live.observe(e); });
     }
 
     // Advance both simulated clocks together and let both engines make progress.
@@ -173,8 +219,10 @@ struct Link {
         live.pump(hostNowNs());
         toDevice();
         // The device answers `sync_probe` inside its own feed path; draining its
-        // events keeps the four-deep ring from overwriting.
-        pptest::drainEvents(dev.p, [](const ppcp_event &) {});
+        // events keeps the four-deep ring from overwriting.  It answers an
+        // `actuator_command` here too — 12.1c is the embedding's, and a tick is
+        // a place a command can land.
+        pptest::drainEvents(dev.p, devSink());
         toHost();
         pptest::drainEvents(host->peer(), [this](const ppcp_event &e) { live.observe(e); });
     }
@@ -696,4 +744,424 @@ TEST(PpcpLiveSession, F_L13_1_FeedStopsAtTheEventRingAndLosesNothing)
         << "one frame per feed with a drain between must lose nothing";
     EXPECT_EQ(bulkSeen, slicedSeen)
         << "and since L15, neither must feeding the whole read and draining as it stalls";
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// CR-02 — device status, buffer margin, and the torch
+// ══════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// A link whose device declares a torch.  Everything else is the harness above.
+void buildWithTorch(Link &L, bool alsoLevel = false)
+{
+    L.dev.withActuator = true;
+    L.dev.withLevelActuator = alsoLevel;
+    ASSERT_NO_FATAL_FAILURE(L.build(/*declareCameras=*/true));
+    ASSERT_NO_FATAL_FAILURE(L.hello());
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    PpcpLiveSession::Config cfg;
+    cfg.sessionId = kSession;
+    std::string err;
+    ASSERT_TRUE(L.live.open(cfg, &err)) << err;
+    L.exchange();
+}
+
+}  // namespace
+
+// ── ⭐ TRAP 3 — the control reflects the ACK, never the click ───────────────
+//
+// This is the assertion the whole of H14 rests on, and it is written as a
+// SEQUENCE on purpose: the interesting moment is the one between the command
+// leaving and the ack arriving, because that is the moment a control bound to
+// the click would already be lit.
+TEST(PpcpLiveSessionActuator, TheTorchStateComesFromTheAckAndNeverFromTheCommand)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L));
+
+    // Nothing has been said about this Actuator, and "nothing said" is its own
+    // answer: 12.2 is push, so an Actuator nobody has commanded has no state
+    // here.  Not "off".
+    EXPECT_EQ(L.live.actuatorReading("act:torch"), nullptr);
+
+    std::string err;
+    ASSERT_TRUE(L.live.setActuator("act:torch", true, &err)) << err;
+
+    // ⛔ THE MOMENT THAT MATTERS.  The command is queued — the call above said
+    // so — and not one byte has moved.  A control reading `state` here shows
+    // nothing, which is the correct answer, and `commandPending` is the only
+    // thing that moved.
+    const PpcpLiveSession::ActuatorReading *r = L.live.actuatorReading("act:torch");
+    ASSERT_NE(r, nullptr);
+    EXPECT_TRUE(r->commandPending);
+    EXPECT_FALSE(r->valid) << "the click wrote a state — this is trap 3";
+    EXPECT_FALSE(r->on)    << "the click lit the torch — this is trap 3";
+
+    // Now let the device answer.
+    L.exchange();
+
+    r = L.live.actuatorReading("act:torch");
+    ASSERT_NE(r, nullptr);
+    EXPECT_FALSE(r->commandPending);
+    EXPECT_TRUE(r->valid);
+    EXPECT_TRUE(r->hasOn);
+    EXPECT_TRUE(r->on);
+    EXPECT_TRUE(r->refusedReason.empty());
+}
+
+// ── ⭐⭐ 12.1c — THE ACHIEVED VALUE, WHICH IS NOT THE REQUESTED ONE ──────────
+//
+// THE ROW C2 REPORTED AS UNREACHABLE, AND WHY IT NOW IS.  Until libppcp L30 the
+// engine wrote the `applied` ack itself, ECHOING the request — so every ack a
+// test could obtain agreed with the command by construction, and "the host
+// renders the achieved value" was an assertion nothing could fail.  12.1c is a
+// MUST: `state` reports what the Actuator is ACTUALLY doing, "not an echo of
+// the request".  The engine now raises PPCP_EVENT_ACTUATOR_COMMAND and answers
+// nothing, the DEVICE below answers, and its simulated driver quantises.
+//
+// The request is 0.90.  The driver's steps are 0.25, so it lands on 0.75.  A
+// host that showed the number it sent would read 0.90 here; there is now
+// nothing in the library that could produce that value, so this assertion can
+// only be satisfied by the reading actually coming off the wire.
+TEST(PpcpLiveSessionActuator, TheAckCarriesTheAchievedLevelAndNotTheRequestedOne)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L, /*alsoLevel=*/true));
+
+    // The device's driver: quarter steps, rounded DOWN, which is what a lamp
+    // with four discrete brightnesses does with a continuous request.
+    double asked = -1.0;
+    L.actuatorApply = [&asked](const std::string &id, const ppcp_actuator_setting &want,
+                               ppcp_actuator_setting *achieved, std::string *) {
+        EXPECT_EQ(id, "act:lamp");
+        EXPECT_TRUE(want.has_level) << "I39 — a level Actuator was sent an on/off setting";
+        asked = want.level;
+        const double stepped = std::floor(want.level * 4.0) / 4.0;
+        EXPECT_EQ(ppcp_actuator_setting_level(achieved, stepped), PPCP_OK);
+        return true;
+    };
+
+    std::string err;
+    ASSERT_TRUE(L.live.setActuatorLevel("act:lamp", 0.90, &err)) << err;
+    // Still trap 3, one shape along: the click wrote nothing but "asking".
+    const PpcpLiveSession::ActuatorReading *r = L.live.actuatorReading("act:lamp");
+    ASSERT_NE(r, nullptr);
+    EXPECT_TRUE(r->commandPending);
+    EXPECT_FALSE(r->valid);
+
+    L.exchange();
+
+    EXPECT_DOUBLE_EQ(asked, 0.90) << "the device was not asked for what the host sent";
+    r = L.live.actuatorReading("act:lamp");
+    ASSERT_NE(r, nullptr);
+    EXPECT_FALSE(r->commandPending);
+    EXPECT_TRUE(r->valid);
+    ASSERT_TRUE(r->hasLevel);
+    // ⭐ THE ASSERTION.  0.75 is the DEVICE's number; 0.90 was ours.
+    EXPECT_DOUBLE_EQ(r->level, 0.75)
+        << "the host is showing the level it requested — 12.1c's echo, which was "
+           "the libppcp defect L30 removed";
+    EXPECT_FALSE(r->hasOn) << "12.1b/I39 — never both shapes in one setting";
+    EXPECT_TRUE(r->refusedReason.empty());
+}
+
+// ── 12.1b — a REFUSAL, which was equally unreachable while the engine acked ─
+//
+// The reason is a word the DEVICE chose, from 12.1b's open registry, and the
+// reading is LEFT ALONE: a "no" says the command did not apply and says nothing
+// about what the Actuator is doing.
+TEST(PpcpLiveSessionActuator, ARefusedCommandCarriesTheDevicesReasonAndNoState)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L));
+
+    L.actuatorApply = [](const std::string &, const ppcp_actuator_setting &,
+                         ppcp_actuator_setting *, std::string *reason) {
+        *reason = "thermal_limit";
+        return false;
+    };
+
+    std::string err;
+    ASSERT_TRUE(L.live.setActuator("act:torch", true, &err)) << err;
+    L.exchange();
+
+    const PpcpLiveSession::ActuatorReading *r = L.live.actuatorReading("act:torch");
+    ASSERT_NE(r, nullptr);
+    EXPECT_FALSE(r->commandPending);
+    EXPECT_EQ(r->refusedReason, "thermal_limit");
+    EXPECT_FALSE(r->valid) << "a refusal invented a state for an Actuator nobody moved";
+    EXPECT_FALSE(r->on);
+}
+
+// ── ⭐ H18 — THE PENDING FLAG TERMINATES, AND SAYS SO IN OUR OWN WORDS ──────
+//
+// Since L30 the engine writes no ack of its own, so a device that never answers
+// leaves `commandPending` set for the life of the link — a control stuck on
+// "asking" with nothing coming.  MSG 1c makes answering a Request a MUST, so
+// such a peer is NONCONFORMANT rather than slow; that is a reason to bound the
+// wait, not a reason to assume it cannot happen.  Modelled here by never moving
+// the bytes: from the host's side, silence is silence.
+TEST(PpcpLiveSessionActuator, ACommandNobodyAnswersStopsSayingAsking)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L));
+
+    std::string err;
+    ASSERT_TRUE(L.live.setActuator("act:torch", true, &err)) << err;
+    // ⚠ NO exchange() ANYWHERE BELOW.  The command sits on the host's queue and
+    // the device never sees it, which is exactly what a peer that answers
+    // nothing looks like from here.
+
+    // The stopwatch starts on the first pump, not on the click — the clock
+    // reaches this class in pump() and nowhere else.
+    L.advance(1);
+    L.live.pump(L.hostNowNs());
+    const PpcpLiveSession::ActuatorReading *r = L.live.actuatorReading("act:torch");
+    ASSERT_NE(r, nullptr);
+    EXPECT_TRUE(r->commandPending) << "one tick in and the wait is already over";
+    EXPECT_FALSE(r->commandStalled);
+
+    // Comfortably inside the deadline: still asking, and correctly so.
+    L.advance(PpcpLiveSession::kActuatorStallNs / 2);
+    L.live.pump(L.hostNowNs());
+    r = L.live.actuatorReading("act:torch");
+    EXPECT_TRUE(r->commandPending);
+    EXPECT_FALSE(r->commandStalled);
+
+    L.advance(PpcpLiveSession::kActuatorStallNs);
+    L.live.pump(L.hostNowNs());
+    r = L.live.actuatorReading("act:torch");
+    ASSERT_NE(r, nullptr);
+    EXPECT_FALSE(r->commandPending) << "the spinner can never stop — H18's whole question";
+    EXPECT_TRUE(r->commandStalled);
+    // ⛔ AND WE DID NOT PUT A WORD IN THE DEVICE'S MOUTH.  12.1b's reasons are
+    // the device's vocabulary; our own silence is not one of them.
+    EXPECT_TRUE(r->refusedReason.empty());
+    // Nor did we invent a state: "we do not know" is the honest reading.
+    EXPECT_FALSE(r->valid);
+}
+
+// And the other half of that rule: a device that was merely SLOW is described
+// by its answer, not by our stopwatch.
+TEST(PpcpLiveSessionActuator, ALateAnswerRetractsTheStall)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L));
+
+    std::string err;
+    ASSERT_TRUE(L.live.setActuator("act:torch", true, &err)) << err;
+    L.advance(1);
+    L.live.pump(L.hostNowNs());
+    L.advance(2 * PpcpLiveSession::kActuatorStallNs);
+    L.live.pump(L.hostNowNs());
+    ASSERT_TRUE(L.live.actuatorReading("act:torch")->commandStalled);
+
+    // The device finally gets the command, and answers it.
+    L.exchange();
+
+    const PpcpLiveSession::ActuatorReading *r = L.live.actuatorReading("act:torch");
+    ASSERT_NE(r, nullptr);
+    EXPECT_FALSE(r->commandStalled) << "our conclusion outlived the device's answer";
+    EXPECT_FALSE(r->commandPending);
+    EXPECT_TRUE(r->valid);
+    EXPECT_TRUE(r->on);
+}
+
+// ── 12.1a / I39 — a level sent to an on/off Actuator never reaches the wire ─
+TEST(PpcpLiveSessionActuator, ALevelSentToAnOnOffActuatorIsRefusedBeforeAByteIsQueued)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L, /*alsoLevel=*/true));
+
+    std::string err;
+    EXPECT_FALSE(L.live.setActuatorLevel("act:torch", 0.5, &err))
+        << "a level went to `control: on_off` — I39 is checked against the "
+           "counterpart's DECLARED control before a byte is queued";
+    EXPECT_FALSE(err.empty());
+    EXPECT_EQ(L.live.actuatorReading("act:torch"), nullptr);
+}
+
+// ── 12.1d — an Actuator the counterpart never declared is not commandable ───
+TEST(PpcpLiveSessionActuator, AnUndeclaredActuatorIsRefusedBeforeAByteIsQueued)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L));
+
+    std::string err;
+    EXPECT_FALSE(L.live.setActuator("act:nosuch", true, &err));
+    EXPECT_FALSE(err.empty());
+    // And nothing was recorded for it — a failed send is not a pending command.
+    EXPECT_EQ(L.live.actuatorReading("act:nosuch"), nullptr);
+}
+
+// ── ⭐ CB4 — `actuator_state` is a FIRST-CLASS INPUT, not an edge case ──────
+//
+// The case this models is the real one: the host turns the torch on, the device
+// acks `applied`, and some time later the phone's thermal governor puts it out
+// with nobody asking.  A host that only read acks would show a lit torch that
+// went out minutes ago.  On iOS this is the ONLY channel that carries it —
+// `setTorchModeOn(level:)` throws rather than clamping, so 12.1c's
+// achieved-inside-the-ack case does not arise on the shipping platform.
+TEST(PpcpLiveSessionActuator, AThermalCutoffArrivesAsActuatorStateLongAfterTheAck)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(buildWithTorch(L));
+
+    std::string err;
+    ASSERT_TRUE(L.live.setActuator("act:torch", true, &err)) << err;
+    L.exchange();
+    ASSERT_NE(L.live.actuatorReading("act:torch"), nullptr);
+    ASSERT_TRUE(L.live.actuatorReading("act:torch")->on);
+
+    // The device's torch goes out on its own.  12.2a: a reason OTHER than a
+    // command just acknowledged, broadcast rather than answered to anyone.
+    ppcp_actuator_setting off{};
+    ASSERT_EQ(ppcp_actuator_setting_on_off(&off, false), PPCP_OK);
+    ppcp_instant since{};
+    ASSERT_EQ(ppcp_instant_make(&since, L.dev.tb.c_str(), L.dev.tb.size(), L.dev.clockNs),
+              PPCP_OK);
+    ASSERT_EQ(ppcp_peer_actuator_state(L.dev.p, "act:torch", &off, &since), PPCP_OK);
+    L.exchange();
+
+    const PpcpLiveSession::ActuatorReading *r = L.live.actuatorReading("act:torch");
+    ASSERT_NE(r, nullptr);
+    EXPECT_TRUE(r->valid);
+    EXPECT_TRUE(r->hasOn);
+    EXPECT_FALSE(r->on) << "actuator_state did not supersede the ack";
+    // The instant travelled with its own timebase (I1) — a bare number here
+    // would be a reading of no particular clock.
+    EXPECT_EQ(r->sinceTimebase, L.dev.tb);
+}
+
+// ── ⛔ CB5 / trap 2 — `device_status` is keyed on `source_id` ───────────────
+//
+// The assertion that matters is the SECOND source.  In this application a PPCP
+// camera's `serialNumber` is the owning PEER id, so any implementation that
+// keyed on the peer — or on a `camIdent` derived from it — would fold both of
+// this device's Sources into one row and show the wrong one as down.
+TEST(PpcpLiveSessionDeviceStatus, TwoSourcesOfOnePeerKeepTwoSeparateRows)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(/*declareCameras=*/true));
+    ASSERT_NO_FATAL_FAILURE(L.hello());
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    PpcpLiveSession::Config cfg;
+    cfg.sessionId = kSession;
+    std::string err;
+    ASSERT_TRUE(L.live.open(cfg, &err)) << err;
+    L.exchange();
+
+    // Nothing said yet.  5.5a is push-on-change, so an empty list is "no Source
+    // has reported", NOT "everything is available".
+    EXPECT_TRUE(L.live.deviceStatuses().empty());
+
+    ppcp_instant at{};
+    ASSERT_EQ(ppcp_instant_make(&at, L.dev.tb.c_str(), L.dev.tb.size(), L.dev.clockNs),
+              PPCP_OK);
+    ppcp_device_status camDown{}, micUp{};
+    // 5.5b made structural: an unavailable Source carries a reason and an
+    // available one cannot be given a constructor that takes it.
+    ASSERT_EQ(ppcp_device_status_unavailable(&camDown, "src-cam", "in_use", &at), PPCP_OK);
+    ASSERT_EQ(ppcp_device_status_available(&micUp, "src-mic", &at), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_device_status(L.dev.p, &camDown), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_device_status(L.dev.p, &micUp), PPCP_OK);
+    L.exchange();
+
+    ASSERT_EQ(L.live.deviceStatuses().size(), 2u)
+        << "two Sources of one peer collapsed onto one identity — CB5";
+    const PpcpLiveSession::DeviceStatus *cam = nullptr, *mic = nullptr;
+    for (const PpcpLiveSession::DeviceStatus &d : L.live.deviceStatuses()) {
+        if (d.sourceId == "src-cam") cam = &d;
+        if (d.sourceId == "src-mic") mic = &d;
+    }
+    ASSERT_NE(cam, nullptr);
+    ASSERT_NE(mic, nullptr);
+    EXPECT_FALSE(cam->available);
+    EXPECT_EQ(cam->reason, "in_use");
+    EXPECT_TRUE(mic->available);
+    EXPECT_TRUE(mic->reason.empty()) << "5.5b — a reason iff unavailable";
+
+    // A later reading REPLACES the earlier one for the same Source rather than
+    // appending: this is a current standing state, not a log.
+    ppcp_device_status camBack{};
+    ASSERT_EQ(ppcp_device_status_available(&camBack, "src-cam", &at), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_device_status(L.dev.p, &camBack), PPCP_OK);
+    L.exchange();
+    EXPECT_EQ(L.live.deviceStatuses().size(), 2u);
+    for (const PpcpLiveSession::DeviceStatus &d : L.live.deviceStatuses())
+        if (d.sourceId == "src-cam") EXPECT_TRUE(d.available);
+}
+
+// ── MSG 5.6 / CORE 5.21 — the ring buffer's standing margin ────────────────
+TEST(PpcpLiveSessionBufferStatus, AShotWindowedStreamsMarginIsRecordedPerStream)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(/*declareCameras=*/true));
+    ASSERT_NO_FATAL_FAILURE(L.hello());
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    PpcpLiveSession::Config cfg;
+    cfg.sessionId = kSession;
+    std::string err;
+    ASSERT_TRUE(L.live.open(cfg, &err)) << err;
+    L.exchange();
+
+    // 5.21c confines `buffer_status` to a `shot_windowed` Stream, and the
+    // engine checks that against the Streams this peer has actually opened.
+    ppcp_instant at{};
+    ASSERT_EQ(ppcp_instant_make(&at, L.dev.tb.c_str(), L.dev.tb.size(), L.dev.clockNs),
+              PPCP_OK);
+    ppcp_stream st{};
+    ASSERT_EQ(ppcp_stream_make(&st, "str:cam", kSession, "src-cam", PPCP_STREAM_KIND_VIDEO,
+                               "p-cap", L.dev.tb.c_str(), PPCP_SHOT_WINDOWED, &at), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_stream_open(L.dev.p, &st), PPCP_OK);
+    L.exchange();
+
+    EXPECT_TRUE(L.live.bufferMargins().empty()) << "5.6c is push-on-change, not a poll";
+
+    ppcp_buffer_margin bm{};
+    ASSERT_EQ(ppcp_buffer_margin_make(&bm, "str:cam", &at, 17), PPCP_OK);
+    ASSERT_EQ(ppcp_buffer_margin_set_retention_target(&bm, 8LL * 1000 * 1000000), PPCP_OK);
+    ASSERT_EQ(ppcp_buffer_margin_set_last_discard(&bm, &at, 250LL * 1000000), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_buffer_status(L.dev.p, &bm), PPCP_OK);
+    L.exchange();
+
+    ASSERT_EQ(L.live.bufferMargins().size(), 1u);
+    const PpcpLiveSession::BufferMargin &m = L.live.bufferMargins()[0];
+    EXPECT_EQ(m.streamId, "str:cam");
+    EXPECT_EQ(m.discardedSinceOpen, 17u);
+    EXPECT_TRUE(m.hasRetentionTarget);
+    EXPECT_EQ(m.retentionTargetNs, 8LL * 1000 * 1000000);
+    EXPECT_TRUE(m.hasLastDiscard);
+    EXPECT_EQ(m.lastDiscardDurationNs, 250LL * 1000000);
+    // ⚠ Carried with the timebase it was stamped in — the DEVICE's, not this
+    // host's.  Nothing subtracts it from a host reading anywhere; the two
+    // counters share no epoch.
+    EXPECT_EQ(m.retainedFromTimebase, L.dev.tb);
+}
+
+// ── ⭐ CORE 5.10h / erratum E61 — `opened_at`, set once ─────────────────────
+TEST(PpcpLiveSession, OpenedAtIsStampedOnceAtOpenAndNeverRevised)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build());
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+
+    // Before the Session opens there is no such instant, and zero says so.
+    EXPECT_EQ(L.live.openedAtNs(), 0);
+
+    PpcpLiveSession::Config cfg;
+    cfg.sessionId = kSession;
+    std::string err;
+    ASSERT_TRUE(L.live.open(cfg, &err)) << err;
+    const std::int64_t stamped = L.live.openedAtNs();
+    EXPECT_NE(stamped, 0);
+
+    // Time passes and the session is pumped.  ⛔ 5.10h: SET ONCE, NEVER
+    // REVISED.  Recomputing it on a pump — or on a resume — is exactly the
+    // locally-invented instant the clause exists to prevent, and it would make
+    // "how long has this run" read zero forever.
+    for (int i = 0; i < 20; ++i) L.tick(100 * kMs);
+    EXPECT_EQ(L.live.openedAtNs(), stamped);
 }

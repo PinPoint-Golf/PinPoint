@@ -239,6 +239,152 @@ public:
     void setLinkStateCallback(LinkStateFn f) { m_onLinkState = std::move(f); }
     void setHealthCallback(HealthFn f) { m_onHealth = std::move(f); }
 
+    // ── CR-02 — the two measurements and the one control ───────────────────
+    //
+    // MSG 5.5 / CORE 5.20 — "can this Source be used right now", per Source.
+    //
+    // ⛔ KEYED ON THE WIRE'S `source_id` AND ON NOTHING ELSE (CB5).  This
+    // application sets a PPCP camera's `serialNumber` to the owning PEER id, so
+    // both cameras of a two-camera phone already collapse onto one identity in
+    // the folded device stats — a known open defect.  Keying this on the peer,
+    // or on a `camIdent` derived from it, would build the same defect a second
+    // time and it would be invisible until somebody attached two cameras.
+    struct DeviceStatus {
+        std::string  sourceId;
+        bool         available = true;
+        // 5.5b: present if and only if `!available`.  An open registry
+        // (`in_use`, `disconnected`, …) carried verbatim and never mapped onto
+        // a word this host already knows (10.3a / I13).
+        std::string  reason;
+        // When `available` last CHANGED, in the timebase the device stamped it
+        // in — carried with its own `tb` because a bare number would be I1's
+        // defect one layer above the wire.
+        std::string  sinceTimebase;
+        std::int64_t sinceNs = 0;
+    };
+    // Every Source this counterpart has reported on, newest reading per Source.
+    // Empty until one arrives: 5.5a is push-on-change, so "no reading" is the
+    // normal state of a Source that has never been unavailable and is NOT the
+    // same answer as `available: true`.
+    const std::vector<DeviceStatus> &deviceStatuses() const { return m_deviceStatus; }
+
+    // MSG 5.6 / CORE 5.21 — the ring buffer's standing margin, per Stream.
+    // ⚠ The gap histogram is deliberately not here: it is receiver-side
+    // aggregation over repeated readings and never crossed the wire.
+    struct BufferMargin {
+        std::string   streamId;
+        std::string   retainedFromTimebase;
+        std::int64_t  retainedFromNs = 0;
+        bool          hasRetentionTarget = false;
+        std::int64_t  retentionTargetNs = 0;
+        // 5.21a — only what NEVER became part of a Capture, per STREAM OPEN.
+        std::uint64_t discardedSinceOpen = 0;
+        bool          hasLastDiscard = false;
+        std::int64_t  lastDiscardSinceNs = 0;
+        std::int64_t  lastDiscardDurationNs = 0;
+    };
+    const std::vector<BufferMargin> &bufferMargins() const { return m_bufferMargins; }
+
+    // MSG §12 — what one Actuator is ACTUALLY DOING, as this host last learned
+    // it.
+    //
+    // ⛔ THERE IS NO FIELD HERE THAT A CLICK WRITES.  `commandPending` is the
+    // only thing `setActuator()` moves, and it says "we queued a command",
+    // which is what `ppcp_peer_actuator_command()` returning PPCP_OK actually
+    // means — the byte has not necessarily left.  `valid`, `on` and `level`
+    // are written by `actuator_command_ack` (12.1c) and by `actuator_state`
+    // (12.2a) and by nothing else, which is trap 3 made structural: a screen
+    // reading these cannot light on the click because the click never touches
+    // them.  This is the same discipline `armState()` carries for `arm`, and
+    // the same one `VideoInputPpcp::onStreamOpenAck` carries for `stream_open`
+    // — the third time this codebase has had to learn it.
+    struct ActuatorReading {
+        std::string  actuatorId;
+        // An ack or a state has arrived.  False is "we do not know what the
+        // torch is doing", which is a different answer from "off" and must not
+        // be rendered as one.
+        bool         valid = false;
+        bool         hasOn = false;
+        bool         on = false;
+        bool         hasLevel = false;
+        double       level = 0.0;
+        // A command is queued and neither ack nor state has answered it.
+        bool         commandPending = false;
+        // ⚠ THIS HOST'S CONCLUSION, NOT THE DEVICE'S STATEMENT — the same
+        // distinction `ArmState::Stalled` carries, and for the same reason.
+        // MSG 1c makes answering a Request a MUST, so a device that has said
+        // nothing for kActuatorStallNs is NONCONFORMANT rather than slow; but
+        // `commandPending` is what a control renders as "asking", and a
+        // spinner that can never stop is a lie told slowly.  So the pending
+        // flag is dropped and this is raised in its place.  Cleared by the
+        // next command, and by an ack or an `actuator_state` arriving late.
+        bool         commandStalled = false;
+        // 12.1b — set by a REFUSED ack, from the wire's open registry
+        // (`no_actuator`, `busy`, `thermal_limit`, `permission_denied`,
+        // `unsupported`).  Cleared when this host sends the next command, and
+        // never by anything else: a refusal an operator has not seen answered
+        // must not vanish because an unrelated reading moved.
+        std::string  refusedReason;
+        // `actuator_state`'s `since` (12.2a).  Zero where only an ack has
+        // arrived, which carries no instant of its own.
+        std::string  sinceTimebase;
+        std::int64_t sinceNs = 0;
+        // pump()'s stopwatch for the rule above, in the embedding's monotonic
+        // ns.  Zero while nothing is pending; stamped by the first pump() after
+        // a command, because this class is handed a clock only there.
+        std::int64_t commandAskedAtNs = 0;
+    };
+    // How long this host waits for the answer MSG 1c obliges the device to
+    // send.  An Actuator is a local operation on the far end — a torch, an
+    // LED — with no format renegotiation behind it, so this is nothing like
+    // kArmStallFloorNs: five seconds is already several orders of magnitude
+    // more than applying one takes, and a device slower than this has stopped
+    // being a device that is merely busy.
+    static constexpr std::int64_t kActuatorStallNs = 5LL * 1000 * 1000 * 1000;
+    const std::vector<ActuatorReading> &actuatorReadings() const { return m_actuators; }
+    // Null where this Actuator has never been commanded and has never reported.
+    const ActuatorReading *actuatorReading(const std::string &actuatorId) const;
+
+    // MSG 12.1 — command an on/off Actuator.  CB1: the phone's torch declares
+    // `control: on_off`, so this takes a bool; the `level` half is
+    // setActuatorLevel() below, named rather than overloaded so an integer
+    // argument cannot pick the wrong shape silently.  I39 is enforced by `ppcp_actuator_setting` having two constructors and no
+    // third shape, so a `level` sent to an `on_off` Actuator is unconstructible
+    // here rather than rejected downstream.
+    //
+    // ⚠ QUEUED IS NOT ACHIEVED, exactly as for arm() above.  `true` means the
+    // command is on this peer's queue.  The answer is an
+    // `actuator_command_ack`, and until it arrives `actuatorReading()` says
+    // `commandPending` and nothing about the torch.
+    bool setActuator(const std::string &actuatorId, bool on, std::string *err = nullptr);
+    // The `control: level` half.  DELIBERATELY NOT AN OVERLOAD: `setActuator(id, 1)`
+    // would bind to the bool one and silently send an on/off command, so the
+    // shape is in the NAME.  I39 is still enforced by construction — the two
+    // `ppcp_actuator_setting` constructors admit no third shape — and 12.1a is
+    // checked against the counterpart's DECLARED `control` inside
+    // `ppcp_peer_actuator_command()` before a byte is queued, so a level sent
+    // to an on/off Actuator is refused here rather than on the wire.
+    //
+    // ⚠ 12.1c: the level that comes BACK may not be the one sent.  A device
+    // that quantises or thermally caps reports the ACHIEVED value in the ack,
+    // and `actuatorReading()->level` is that value and never this argument.
+    bool setActuatorLevel(const std::string &actuatorId, double level,
+                          std::string *err = nullptr);
+
+    // 5.10h / erratum E61 — the instant this host opened the Session, in
+    // `timebase_ref`, set once by open() and never revised.  Zero before a
+    // Session is open.  This is what a "session has been running for" reading
+    // is computed from; before the field existed a consumer had to FABRICATE a
+    // start time from the first message it happened to see.
+    std::int64_t openedAtNs() const { return m_openedAtNs; }
+
+    using DeviceStatusFn = std::function<void(const DeviceStatus &)>;
+    using BufferStatusFn = std::function<void(const BufferMargin &)>;
+    using ActuatorFn     = std::function<void(const ActuatorReading &)>;
+    void setDeviceStatusCallback(DeviceStatusFn f) { m_onDeviceStatus = std::move(f); }
+    void setBufferStatusCallback(BufferStatusFn f) { m_onBufferStatus = std::move(f); }
+    void setActuatorCallback(ActuatorFn f) { m_onActuator = std::move(f); }
+
     // ── The relations, and the one scalar the camera seam can take ─────────
     //
     // CORE 5.4 — the relations this peer holds, measured and received.  Read
@@ -309,6 +455,14 @@ public:
 private:
     bool registerEstimators(std::string *err);
     void publishRelations();
+    // The one place a command is queued, shared by the on/off and the level
+    // entry points so the book-keeping either function leaves behind — the
+    // pending flag, the stopwatch, the cleared refusal — cannot drift apart.
+    bool sendActuatorCommand(const std::string &actuatorId,
+                             const ppcp_actuator_setting &setting, std::string *err);
+    // The reading for one Actuator, created on first mention.  Non-const
+    // because both the ack path and the command path write through it.
+    ActuatorReading &actuatorSlot(const std::string &actuatorId);
 
     ppcp_peer                   *m_peer = nullptr;
     const PpcpSourceDeclaration *m_declaration = nullptr;
@@ -332,6 +486,20 @@ private:
     ppcp_link_state              m_lastLinkState = PPCP_LINK_LIVE;
     LinkStateFn                  m_onLinkState;
     HealthFn                     m_onHealth;
+    // CR-02.  Vectors and not maps: a phone declares a handful of Sources, one
+    // or two Streams and one Actuator, and a linear scan over three entries is
+    // cheaper than a hash — and keeps the wire's arrival order, which is the
+    // order a panel shows them in.
+    std::vector<DeviceStatus>    m_deviceStatus;
+    std::vector<BufferMargin>    m_bufferMargins;
+    std::vector<ActuatorReading> m_actuators;
+    DeviceStatusFn               m_onDeviceStatus;
+    BufferStatusFn               m_onBufferStatus;
+    ActuatorFn                   m_onActuator;
+    // Stamped once in open() (5.10h) and cleared only by attach(), because a
+    // new conversation is a new Session.  There is no setter and pump() never
+    // touches it.
+    std::int64_t                 m_openedAtNs = 0;
     RelationsFn                  m_onRelations;
     Stats                        m_stats;
     // 6.1f is "publish the current estimate"; publishing one that has not moved

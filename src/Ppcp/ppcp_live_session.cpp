@@ -49,6 +49,14 @@ void PpcpLiveSession::attach(ppcp_peer *peer, const PpcpSourceDeclaration *decla
     m_armStalled = false;
     m_lastLinkState = PPCP_LINK_LIVE;
     m_publishedWith = 0;
+    // CR-02 — every reading below describes the conversation that just ended.
+    // A Source that was `in_use` on the last link says nothing about this one,
+    // and a torch reading carried across would be shown as current on the
+    // strength of an answer to a question nobody asked here.
+    m_deviceStatus.clear();
+    m_bufferMargins.clear();
+    m_actuators.clear();
+    m_openedAtNs = 0;
 }
 
 void PpcpLiveSession::detach()
@@ -117,9 +125,26 @@ bool PpcpLiveSession::open(const Config &cfg, std::string *err)
     // 5.10e made structural by libppcp: ppcp_session_make_hosted takes both
     // parameters and there is no setter, so a hosted Session cannot be built
     // without them and a hostless one cannot be given them.
+    // 5.10h / erratum E61 — `opened_at` is MANDATORY and is set ONCE, here,
+    // because here is where the Session actually opens.  This is not a
+    // fabricated instant of the kind 5.10h exists to prevent: the host is
+    // taking a reading of its OWN clock, `hostNowNs()`, at the moment it opens,
+    // and `timebase_ref` names exactly that clock (I1 — the reading and the
+    // timebase it is expressed in travel together).  It is never recomputed:
+    // there is no setter, and a resume re-opens nothing.
+    ppcp_instant openedAt{};
+    const std::int64_t openedAtNs = hostNowNs();
+    ppcp_result r = ppcp_instant_make(&openedAt, m_cfg.timebaseRef.c_str(),
+                                      m_cfg.timebaseRef.size(), openedAtNs);
+    if (r != PPCP_OK) {
+        if (err) *err = std::string("ppcp_instant_make(opened_at): ") + ppcp_result_str(r);
+        return false;
+    }
+
     ppcp_session s{};
-    ppcp_result r = ppcp_session_make_hosted(&s, m_cfg.sessionId.c_str(),
+    r = ppcp_session_make_hosted(&s, m_cfg.sessionId.c_str(),
                                              m_cfg.timebaseRef.c_str(),
+                                             &openedAt,
                                              m_cfg.coincidenceWindowNs,
                                              m_cfg.issueHoldNs);
     if (r != PPCP_OK) {
@@ -155,6 +180,10 @@ bool PpcpLiveSession::open(const Config &cfg, std::string *err)
     (void)ppcp_peer_sync_trigger(m_peer, PPCP_SYNC_ON_CONNECT);
 
     m_open = true;
+    // 5.10h — set ONCE, here, and never revised.  Kept beside `m_open` rather
+    // than re-read from the Session struct because ppcp_peer_session_open()
+    // copies the value and this class hands the pointer away.
+    m_openedAtNs = openedAtNs;
     return true;
 }
 
@@ -214,6 +243,28 @@ void PpcpLiveSession::pump(std::int64_t nowNs)
             }
             if (nowNs - m_armAskedAtNs > limit) m_armStalled = true;
         }
+    }
+
+    // MSG 12.1 / 1c — the same deadline discipline as the arm above, one
+    // message along.  Since libppcp L30 the DEVICE owes the `actuator_command_ack`
+    // and the engine writes none for it, so a device that never answers leaves
+    // `commandPending` set for the life of the link — a control stuck on
+    // "asking" with nothing coming.  1c makes that peer nonconformant rather
+    // than slow, and the honest rendering of a nonconformant silence is "we do
+    // not know", which is exactly the reading with `commandPending` cleared and
+    // no `state` written.
+    for (ActuatorReading &r : m_actuators) {
+        if (!r.commandPending) continue;
+        if (r.commandAskedAtNs == 0) { r.commandAskedAtNs = nowNs; continue; }
+        if (nowNs - r.commandAskedAtNs <= kActuatorStallNs) continue;
+        r.commandPending   = false;
+        r.commandStalled   = true;
+        r.commandAskedAtNs = 0;
+        // ⛔ `refusedReason` IS NOT WRITTEN.  12.1b's reasons are words the
+        // DEVICE chose and this application renders verbatim; manufacturing one
+        // out of our own silence would be putting our conclusion in the
+        // counterpart's mouth — the same rule ArmState::Stalled keeps.
+        if (m_onActuator) m_onActuator(r);
     }
 
     publishRelations();
@@ -329,6 +380,134 @@ void PpcpLiveSession::observe(const ppcp_event &ev)
         // relation rather than at the old one.
         if (m_onRelations) m_onRelations();
         break;
+    case PPCP_EVENT_DEVICE_STATUS: {
+        // MSG 5.5 / CORE 5.20.  ⛔ `source_id` IS THE KEY (CB5) — never
+        // `serialNumber`, never a peer-derived identity.  Both cameras of a
+        // two-camera phone share a `serialNumber` in this application, so
+        // keying here on anything but the wire's own Source id would fold two
+        // Sources' availability into one and show the wrong camera as down.
+        if (!ev.msg) break;
+        const ppcp_device_status &d = ev.msg->body.device_status.status;
+        DeviceStatus row;
+        row.sourceId  = idStr(d.source_id);
+        row.available = d.available;
+        // 5.5b: a reason iff unavailable.  The library has already refused any
+        // other shape, so this is a read and not a check.
+        row.reason    = d.has_reason ? idStr(d.reason) : std::string();
+        row.sinceTimebase = idStr(d.since.tb);
+        row.sinceNs   = d.since.ns;
+        DeviceStatus *slot = nullptr;
+        for (DeviceStatus &e : m_deviceStatus)
+            if (e.sourceId == row.sourceId) { slot = &e; break; }
+        if (slot) *slot = row; else { m_deviceStatus.push_back(row); slot = &m_deviceStatus.back(); }
+        if (m_onDeviceStatus) m_onDeviceStatus(*slot);
+        break;
+    }
+    case PPCP_EVENT_BUFFER_STATUS: {
+        // MSG 5.6 / CORE 5.21 — keyed on the Stream, because 5.21c confines it
+        // to a `shot_windowed` Stream and a Source can have more than one.
+        if (!ev.msg) break;
+        const ppcp_buffer_margin &b = ev.msg->body.buffer_status.margin;
+        BufferMargin row;
+        row.streamId             = idStr(b.stream_id);
+        row.retainedFromTimebase = idStr(b.retained_from.tb);
+        row.retainedFromNs       = b.retained_from.ns;
+        row.hasRetentionTarget   = b.has_retention_target;
+        row.retentionTargetNs    = b.retention_target_ns;
+        row.discardedSinceOpen   = b.discarded_since_open;
+        row.hasLastDiscard       = b.has_last_discard;
+        row.lastDiscardSinceNs   = b.last_discard_since.ns;
+        row.lastDiscardDurationNs = b.last_discard_duration_ns;
+        BufferMargin *slot = nullptr;
+        for (BufferMargin &e : m_bufferMargins)
+            if (e.streamId == row.streamId) { slot = &e; break; }
+        if (slot) *slot = row; else { m_bufferMargins.push_back(row); slot = &m_bufferMargins.back(); }
+        if (m_onBufferStatus) m_onBufferStatus(*slot);
+        break;
+    }
+    case PPCP_EVENT_ACTUATOR_COMMAND_ACK: {
+        // ⭐ 12.1 — THE ANSWER, and the only thing that may light a control.
+        if (!ev.msg) break;
+        const ppcp_body_actuator_command_ack &a = ev.msg->body.actuator_command_ack;
+        ActuatorReading &r = actuatorSlot(idStr(a.actuator_id));
+        r.commandPending = false;
+        // A late answer retracts our conclusion: the device was slow, not
+        // silent, and what it says now is better evidence than our stopwatch.
+        r.commandStalled = false;
+        r.commandAskedAtNs = 0;
+        if (a.verdict == PPCP_ACTUATOR_REFUSED) {
+            // 12.1b — a reason iff refused, from an open registry, rendered
+            // verbatim.  ⛔ THE READING IS LEFT ALONE.  A refusal says the
+            // command did not apply; it says nothing about what the Actuator is
+            // doing, and overwriting `on` here would be inventing a state out
+            // of a "no".
+            r.refusedReason = a.has_reason ? idStr(a.reason) : std::string();
+        } else {
+            r.refusedReason.clear();
+            // 12.1c — the ACHIEVED state, never an echo of the request.  If a
+            // conformant peer sent `applied` without one (12.1c1 requires it)
+            // we still do not know what the torch is doing, so `valid` stays
+            // where it was rather than being promoted on an empty ack.
+            if (a.has_state) {
+                r.valid    = true;
+                r.hasOn    = a.state.has_on;
+                r.on       = a.state.on;
+                r.hasLevel = a.state.has_level;
+                r.level    = a.state.level;
+            }
+        }
+        if (m_onActuator) m_onActuator(r);
+        break;
+    }
+    case PPCP_EVENT_ACTUATOR_STATE: {
+        // ⭐ CB4 — A FIRST-CLASS EXPECTED INPUT, NOT AN EDGE CASE.  On iOS
+        // `setTorchModeOn(level:)` THROWS rather than clamping, so 12.1c's
+        // "achieved differs from requested inside the ack" case does not occur
+        // on the platform PinPointCapture ships on.  The genuine drift — a
+        // thermal cutoff turning the torch off with nobody asking — arrives
+        // here, asynchronously, long after the ack that said `applied`.  A host
+        // that only read acks would show a lit torch that went out minutes ago.
+        if (!ev.msg) break;
+        const ppcp_body_actuator_state &a = ev.msg->body.actuator_state;
+        ActuatorReading &r = actuatorSlot(idStr(a.actuator_id));
+        // 12.2a is not an answer to a command — but it IS a statement about
+        // what this Actuator is doing, which is what a stalled reading is
+        // missing.  The stopwatch stops; `commandPending` does not, because
+        // the command it counts is still unanswered.
+        r.commandStalled = false;
+        r.valid    = true;
+        r.hasOn    = a.state.has_on;
+        r.on       = a.state.on;
+        r.hasLevel = a.state.has_level;
+        r.level    = a.state.level;
+        r.sinceTimebase = idStr(a.since.tb);
+        r.sinceNs  = a.since.ns;
+        // ⚠ `refusedReason` IS NOT CLEARED HERE.  It answers a command the
+        // operator issued and is cleared when the operator issues the next one;
+        // an unrelated thermal report must not silently retract it.
+        if (m_onActuator) m_onActuator(r);
+        break;
+    }
+    case PPCP_EVENT_ACTUATOR_COMMAND:
+        // 12a — only a host originates one, and this IS the host.  Seeing one
+        // inbound means a peer claimed a role it does not have, or that we are
+        // talking to a second host.
+        //
+        // ⚠ SINCE libppcp L30 THE ENGINE DOES NOT ALWAYS ANSWER.  It still
+        // answers by itself the three refusals that need no hardware — 12.1d
+        // (undeclared), 12.1a/I39 (wrong shape), 12a (a non-host sender) — and
+        // `ev.status != PPCP_OK` says it did.  PPCP_OK means the embedding owes
+        // the answer, and MSG 1c makes answering a MUST.  This host declares no
+        // Actuators today, so 12.1d catches every one of these before it gets
+        // here; the refusal below is what keeps that from being a silent
+        // nonconformance the day it declares one.
+        if (ev.status == PPCP_OK && ev.msg) {
+            const ppcp_body_actuator_command &c = ev.msg->body.actuator_command;
+            const std::string id = idStr(c.actuator_id);
+            (void)ppcp_peer_actuator_command_refused(m_peer, id.c_str(), "unsupported",
+                                                     ev.msg->env.msg_id);
+        }
+        break;
     default:
         break;
     }
@@ -394,6 +573,92 @@ bool PpcpLiveSession::disarm(const std::vector<std::string> &streamIds, std::str
 bool PpcpLiveSession::isArmed() const
 {
     return m_peer && ppcp_peer_is_armed(m_peer);
+}
+
+// ── MSG §12 — the one control this host originates ──────────────────────────
+
+PpcpLiveSession::ActuatorReading &PpcpLiveSession::actuatorSlot(const std::string &id)
+{
+    for (ActuatorReading &r : m_actuators)
+        if (r.actuatorId == id) return r;
+    ActuatorReading r;
+    r.actuatorId = id;
+    m_actuators.push_back(r);
+    return m_actuators.back();
+}
+
+const PpcpLiveSession::ActuatorReading *
+PpcpLiveSession::actuatorReading(const std::string &actuatorId) const
+{
+    for (const ActuatorReading &r : m_actuators)
+        if (r.actuatorId == actuatorId) return &r;
+    return nullptr;
+}
+
+bool PpcpLiveSession::setActuator(const std::string &actuatorId, bool on, std::string *err)
+{
+    if (!m_peer) { if (err) *err = "no peer attached"; return false; }
+
+    // CB1 / I39 — the phone's torch declares `control: on_off`, so the on/off
+    // constructor is the only one reachable from here.  There is no
+    // ppcp_actuator_setting_make(): the wrong shape is unconstructible rather
+    // than rejected, and 12.1d's check against the counterpart's DECLARED
+    // Actuator happens inside ppcp_peer_actuator_command() before a byte is
+    // queued.
+    ppcp_actuator_setting setting{};
+    ppcp_result r = ppcp_actuator_setting_on_off(&setting, on);
+    if (r != PPCP_OK) {
+        if (err) *err = std::string("ppcp_actuator_setting_on_off: ") + ppcp_result_str(r);
+        return false;
+    }
+    return sendActuatorCommand(actuatorId, setting, err);
+}
+
+bool PpcpLiveSession::setActuatorLevel(const std::string &actuatorId, double level,
+                                       std::string *err)
+{
+    if (!m_peer) { if (err) *err = "no peer attached"; return false; }
+
+    // The level constructor validates the 0..1 range, so an out-of-range
+    // argument is refused HERE rather than becoming a wire message a device has
+    // to reject.
+    ppcp_actuator_setting setting{};
+    ppcp_result r = ppcp_actuator_setting_level(&setting, level);
+    if (r != PPCP_OK) {
+        if (err) *err = std::string("ppcp_actuator_setting_level: ") + ppcp_result_str(r);
+        return false;
+    }
+    return sendActuatorCommand(actuatorId, setting, err);
+}
+
+bool PpcpLiveSession::sendActuatorCommand(const std::string &actuatorId,
+                                          const ppcp_actuator_setting &setting,
+                                          std::string *err)
+{
+    ppcp_result r = ppcp_peer_actuator_command(m_peer, actuatorId.c_str(), &setting);
+    if (r != PPCP_OK) {
+        if (err) *err = std::string("ppcp_peer_actuator_command: ") + ppcp_result_str(r);
+        return false;
+    }
+
+    // ⛔ TRAP 3, AND THE WHOLE POINT OF THIS FUNCTION'S SHAPE.  The call above
+    // returned PPCP_OK because the command is ON THE QUEUE.  Nothing has left
+    // the machine, no torch has moved, and the only honest thing to record is
+    // that we asked.  `valid`, `hasOn` and `on` are deliberately untouched —
+    // they are written by the ack and by `actuator_state`, in observe(), and by
+    // nothing else.  A control bound to them therefore CANNOT light on a click.
+    ActuatorReading &reading = actuatorSlot(actuatorId);
+    reading.commandPending = true;
+    // Stamped by the first pump() after this, not here: a clock is handed to
+    // this class in pump() and nowhere else, and inventing one here would be a
+    // second time source for one deadline.
+    reading.commandAskedAtNs = 0;
+    reading.commandStalled = false;
+    // The previous refusal answered the previous command.  This is a new
+    // question, so the stale "no" goes now — and only now.
+    reading.refusedReason.clear();
+    if (m_onActuator) m_onActuator(reading);
+    return true;
 }
 
 PpcpLiveSession::ArmState PpcpLiveSession::armState() const

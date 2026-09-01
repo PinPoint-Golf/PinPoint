@@ -58,6 +58,18 @@ using namespace Ppcp;
 
 namespace {
 
+// 5.10h — `opened_at` is mandatory on every Session constructor.  These
+// fixtures replay a RECORDED Session, so the honest value is a fixed literal in
+// the recording's own timebase: there is no live clock here to read, and a
+// reading taken at import time would be exactly the fabricated instant 5.10h
+// exists to prevent.
+ppcp_instant fixtureOpenedAt(const char *timebase)
+{
+    ppcp_instant in{};
+    EXPECT_EQ(ppcp_instant_make(&in, timebase, std::strlen(timebase), 1'000'000'000LL), PPCP_OK);
+    return in;
+}
+
 // ── A bundle, written through ppcp_bundle_writer ────────────────────────────
 
 class Bundle {
@@ -191,8 +203,10 @@ void writeSession(Bundle &b, const SessionSpec &spec)
     ppcp_session sess{};
     ppcp_msg m{};
     std::uint64_t id = 1;
+    const ppcp_instant openedAtSpec = fixtureOpenedAt(spec.timebase);
 
-    ASSERT_EQ(ppcp_session_make_hostless(&sess, spec.sessionId, spec.timebase), PPCP_OK);
+    ASSERT_EQ(ppcp_session_make_hostless(&sess, spec.sessionId, spec.timebase,
+                                         &openedAtSpec), PPCP_OK);
     ASSERT_EQ(ppcp_msg_init(&m, PPCP_MT_SESSION_OPEN, id++), PPCP_OK);
     m.body.session_open.session_id = sess.id;
     m.body.session_open.timebase_ref = sess.timebase_ref;
@@ -397,7 +411,8 @@ TEST(PpcpBundleImport, AWallClockStepChangesNothingAboutWhatIsImported)
         ppcp_session sess{};
         ppcp_msg m{};
         std::uint64_t id = 1;
-        ASSERT_EQ(ppcp_session_make_hostless(&sess, "sess:1", "tb:dev"), PPCP_OK);
+        const ppcp_instant openedAtDev = fixtureOpenedAt("tb:dev");
+        ASSERT_EQ(ppcp_session_make_hostless(&sess, "sess:1", "tb:dev", &openedAtDev), PPCP_OK);
         ASSERT_EQ(ppcp_msg_init(&m, PPCP_MT_SESSION_OPEN, id++), PPCP_OK);
         m.body.session_open.session_id = sess.id;
         m.body.session_open.timebase_ref = sess.timebase_ref;
@@ -480,13 +495,15 @@ TEST(PpcpBundleImport, ImportingCannotMoveASessionsTimebaseRef)
     Bundle b;
     ppcp_session sess{}, moved{};
     ppcp_msg m{};
-    ASSERT_EQ(ppcp_session_make_hostless(&sess, "sess:1", "tb:dev"), PPCP_OK);
+    const ppcp_instant openedAtDev = fixtureOpenedAt("tb:dev");
+    const ppcp_instant openedAtOther = fixtureOpenedAt("tb:other");
+    ASSERT_EQ(ppcp_session_make_hostless(&sess, "sess:1", "tb:dev", &openedAtDev), PPCP_OK);
     ASSERT_EQ(ppcp_msg_init(&m, PPCP_MT_SESSION_OPEN, 1), PPCP_OK);
     m.body.session_open.session_id = sess.id;
     m.body.session_open.timebase_ref = sess.timebase_ref;
     ASSERT_EQ(b.add(PPCP_CHANNEL_CONTROL, &m), PPCP_OK);
 
-    ASSERT_EQ(ppcp_session_make_hostless(&moved, "sess:1", "tb:other"), PPCP_OK);
+    ASSERT_EQ(ppcp_session_make_hostless(&moved, "sess:1", "tb:other", &openedAtOther), PPCP_OK);
     ASSERT_EQ(ppcp_msg_init(&m, PPCP_MT_SESSION_OPEN, 2), PPCP_OK);
     m.body.session_open.session_id = moved.id;
     m.body.session_open.timebase_ref = moved.timebase_ref;

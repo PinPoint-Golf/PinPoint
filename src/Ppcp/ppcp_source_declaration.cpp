@@ -263,8 +263,15 @@ const std::vector<std::string> &PpcpSourceDeclaration::studioProfiles()
     // Plan §2 / CORE §2.2.3.  NOT Mint: PinPointStudio arbitrates, it does not
     // mint, and CONF §1d makes the negative half of that a conformance
     // obligation — a peer that mints without declaring Mint fails.
+    // CR-02 / plan §2 — "actuate" because this host COMMANDS one (CORE
+    // §2.2.3): it originates `actuator_command` and consumes the ack and
+    // `actuator_state`.  CB2 keeps the other half out — PinPointStudio declares
+    // no Actuators of its own and emits no `device_status` for its own Sources,
+    // because nothing in a session consumes it and 5.5c permits emission
+    // without requiring it.
     static const std::vector<std::string> p = {
-        "core", "capture", "detect", "arbitrate", "live", "offline", "markup"
+        "core", "capture", "detect", "arbitrate", "live", "offline", "markup",
+        "actuate"
     };
     return p;
 }

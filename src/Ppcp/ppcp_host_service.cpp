@@ -423,6 +423,34 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err, bool liste
     // Phones on every heartbeat — see the signal's declaration.
     ph->peer->liveSession().setHealthCallback(
         [this](const PpcpLiveSession::PeerHealth &) { emit phoneHealthChanged(); });
+    // ── CR-02 — three more readings, on the same signal and for the same
+    // reason.  ⛔ EVERY ONE OF THEM IS phoneHealthChanged(), NEVER
+    // phonesChanged().  `device_status`, `buffer_status` and an actuator ack
+    // are READINGS moving; they do not change which phones exist.  Trap 1 is
+    // the mistake this codebase has already made once with the heartbeat and
+    // once with `relation_update`, and it cost an operator the alias field they
+    // were typing into.
+    ph->peer->liveSession().setDeviceStatusCallback(
+        [this, ph](const PpcpLiveSession::DeviceStatus &d) {
+            // 5.5a is push-on-change, so this fires when something a person
+            // would want to know about actually happened.
+            if (!d.available)
+                ppWarn() << "[ppcp]" << ph->name << "source" << d.sourceId.c_str()
+                         << "unavailable —"
+                         << (d.reason.empty() ? "no reason given" : d.reason.c_str());
+            emit phoneHealthChanged();
+        });
+    ph->peer->liveSession().setBufferStatusCallback(
+        [this](const PpcpLiveSession::BufferMargin &) { emit phoneHealthChanged(); });
+    ph->peer->liveSession().setActuatorCallback(
+        [this, ph](const PpcpLiveSession::ActuatorReading &r) {
+            // 12.1b — a refusal is a word the DEVICE chose and this host renders
+            // it verbatim rather than mapping it onto one it already knows.
+            if (!r.refusedReason.empty())
+                ppWarn() << "[ppcp]" << ph->name << "refused" << r.actuatorId.c_str()
+                         << "—" << r.refusedReason.c_str();
+            emit phoneHealthChanged();
+        });
     // 5.2a — the device answered `arm`.  This is the half that turns "we sent a
     // message" into "the device says it is ready", and until it existed nothing
     // consumed `readiness` at all.
@@ -631,6 +659,104 @@ bool PpcpHostService::disarmAll()
     emit phonesChanged();
     setStatus(tr("Disarmed."));
     return all;
+}
+
+// ── MSG §12 / CR-02 — the torch ─────────────────────────────────────────────
+//
+// ⛔ WHAT `true` MEANS HERE.  The same thing `armAll()` returning true means:
+// the command reached this peer's queue.  It is NOT "the torch is on".  The
+// answer is an `actuator_command_ack`, which arrives later and which
+// `PpcpLiveSession::observe()` is the only writer of the state this function's
+// caller reads back.  Nothing below writes a lit state.
+bool PpcpHostService::setPhoneActuator(const QString &pairingId, const QString &actuatorId,
+                                       bool on)
+{
+    Phone *ph = phoneByPairing(pairingId);
+    if (!ph || !ph->peer) {
+        ppWarn() << "[ppcp] actuator command for a phone that is not connected:" << pairingId;
+        return false;
+    }
+    return commandActuator(ph, actuatorId, on);
+}
+
+bool PpcpHostService::setActuatorForTest(std::size_t index, const QString &actuatorId, bool on)
+{
+    if (index >= m_phones.size()) return false;
+    return commandActuator(m_phones[index].get(), actuatorId, on);
+}
+
+bool PpcpHostService::commandActuator(Phone *ph, const QString &actuatorId, bool on)
+{
+    if (!ph || !ph->peer) return false;
+    // 12.1d, one layer above the library's own check: an Actuator this phone
+    // never declared is not ours to command, and 5.19c makes an empty list a
+    // perfectly ordinary declaration rather than a fault.
+    bool declared = false;
+    for (const Phone::DeclaredActuator &a : ph->actuators)
+        if (a.id == actuatorId) { declared = true; break; }
+    if (!declared) {
+        ppWarn() << "[ppcp]" << ph->name << "declared no actuator" << actuatorId;
+        return false;
+    }
+    std::string err;
+    if (!ph->peer->liveSession().setActuator(actuatorId.toStdString(), on, &err)) {
+        ppWarn() << "[ppcp] actuator command refused for" << ph->name << "-" << err.c_str();
+        // Still a reading change: `commandPending` did not move, so a control
+        // that had gone busy on an earlier attempt must be told to re-read.
+        emit phoneHealthChanged();
+        return false;
+    }
+    // ⛔ phoneHealthChanged(), NOT phonesChanged() — trap 1.  Asking is a
+    // reading moving (`commandPending` went true); the phone list is unchanged.
+    emit phoneHealthChanged();
+    return true;
+}
+
+// One row per DECLARED Actuator, with what we actually know about it.
+//
+// ⭐ THE ONLY WRITERS OF `state` ARE THE ACK AND `actuator_state`.  Read the
+// three cases below against `PpcpLiveSession::ActuatorReading`: `state` comes
+// from `valid` + `on`, both of which `setActuator()` deliberately leaves alone.
+// `pending` is the click, and it is published as a SEPARATE field precisely so
+// a control can show "asking" without showing "on".
+QVariantList PpcpHostService::actuatorRowsFor(const Phone *ph) const
+{
+    QVariantList out;
+    if (!ph || !ph->peer) return out;
+    const PpcpLiveSession &ls = ph->peer->liveSession();
+    for (const Phone::DeclaredActuator &a : ph->actuators) {
+        QVariantMap m;
+        m[QStringLiteral("id")]      = a.id;
+        m[QStringLiteral("kind")]    = a.kind;
+        m[QStringLiteral("control")] = a.control;
+        m[QStringLiteral("label")]   = a.label;
+
+        const PpcpLiveSession::ActuatorReading *r =
+            ls.actuatorReading(a.id.toStdString());
+        // "unknown" is a READING, not a stub: 12.2 is push, so an Actuator
+        // nobody has commanded and that has not moved has told us nothing, and
+        // that is a different answer from "off".  A control must render it as
+        // an indeterminate state rather than as a dark bulb.
+        QString state = QStringLiteral("unknown");
+        if (r && r->valid && r->hasOn) state = r->on ? QStringLiteral("on")
+                                                     : QStringLiteral("off");
+        m[QStringLiteral("state")]   = state;
+        m[QStringLiteral("level")]   = (r && r->valid && r->hasLevel) ? r->level : -1.0;
+        m[QStringLiteral("pending")] = r ? r->commandPending : false;
+        // H18 — OUR conclusion that a command went unanswered past
+        // `kActuatorStallNs`, kept apart from `refusedReason` (which is a word
+        // the DEVICE chose).  MSG 1c makes answering a MUST, so this is a
+        // nonconformant peer and not a busy one; `pending` has already gone
+        // false so the control stops saying "asking", and `state` stays at
+        // whatever we last actually knew.
+        m[QStringLiteral("stalled")] = r ? r->commandStalled : false;
+        // 12.1b's open registry, verbatim.  Empty where the last command was
+        // applied or none has been sent.
+        m[QStringLiteral("refusedReason")] =
+            r ? QString::fromStdString(r->refusedReason) : QString();
+        out.append(m);
+    }
+    return out;
 }
 
 QString PpcpHostService::armState() const
@@ -870,7 +996,15 @@ void PpcpHostService::adoptLinkForTest(std::unique_ptr<PeerConnection> link,
     adoptLink(std::move(link), resolvedPairingId);
 }
 
-bool PpcpHostService::declareForTest(std::size_t index, const QString &counterpartId)
+Ppcp::PpcpLiveSession *PpcpHostService::liveSessionForTest(std::size_t index)
+{
+    if (index >= m_phones.size() || !m_phones[index]->peer) return nullptr;
+    return &m_phones[index]->peer->liveSession();
+}
+
+bool PpcpHostService::declareForTest(std::size_t index, const QString &counterpartId,
+                                    const QString &actuatorKind,
+                                    const QString &actuatorControl)
 {
     if (index >= m_phones.size()) return false;
     ppcp_peer_desc desc{};
@@ -878,6 +1012,21 @@ bool PpcpHostService::declareForTest(std::size_t index, const QString &counterpa
     if (ppcp_id_set(&desc.id, id.constData(), static_cast<std::size_t>(id.size())) != PPCP_OK)
         return false;
     ppcp_id_set_z(&desc.product.model, "test phone");
+    // CORE 5.19c / erratum E66 — a top-level sibling of `sources`, and omitted
+    // entirely by a peer owning none.  ⚠ `act` must outlive the onDeclare()
+    // call below: `ppcp_peer_desc` borrows, and the copy out is what makes that
+    // safe for the caller.
+    ppcp_actuator act{};
+    if (!actuatorKind.isEmpty()) {
+        const QByteArray kind = actuatorKind.toUtf8();
+        const QByteArray control = actuatorControl.isEmpty()
+                                       ? QByteArray(PPCP_ACTUATOR_CONTROL_ON_OFF)
+                                       : actuatorControl.toUtf8();
+        if (ppcp_actuator_make(&act, "act:test", id.constData(), kind.constData(),
+                               control.constData()) != PPCP_OK)
+            return false;
+        if (ppcp_peer_desc_set_actuators(&desc, &act, 1) != PPCP_OK) return false;
+    }
     onDeclare(m_phones[index].get(), &desc);
     return true;
 }
@@ -1153,6 +1302,31 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
     const int n = VideoInputFactory::registerPpcpPeer(desc);
 
     ph->counterpartId = incomingId;
+
+    // CORE 5.19c / erratum E66 — `actuators` travels as a TOP-LEVEL key of
+    // `declare`, a sibling of `sources`, and libppcp has already parsed it into
+    // `desc->actuators`.  Copied out here because `desc` is borrowed: its
+    // strings point into the decode arena and are gone the moment this returns.
+    //
+    // ⚠ A FRESH DECLARATION REPLACES THE LIST WHOLESALE.  A phone that
+    // re-declares with no torch has no torch, and keeping the previous entry
+    // would leave a control on screen for something that is no longer there.
+    ph->actuators.clear();
+    for (std::size_t i = 0; i < desc->actuator_count; ++i) {
+        const ppcp_actuator &a = desc->actuators[i];
+        Phone::DeclaredActuator da;
+        da.id      = QString::fromUtf8(a.id.v, static_cast<int>(a.id.len));
+        da.kind    = QString::fromUtf8(a.kind.v, static_cast<int>(a.kind.len));
+        da.control = QString::fromUtf8(a.control.v, static_cast<int>(a.control.len));
+        da.label   = a.has_label
+                     ? QString::fromUtf8(a.label.v, static_cast<int>(a.label.len))
+                     : QString();
+        ph->actuators.push_back(da);
+    }
+    if (!ph->actuators.isEmpty())
+        ppWarn() << "[ppcp]" << incomingId << "declared" << ph->actuators.size()
+                 << "actuator(s)";
+
     // 4.4d's habit of mind, one layer in: a counterpart's product strings are
     // display text and are never an identifier or a trust signal.
     ph->name = QString::fromUtf8(desc->product.model.v,
@@ -1733,6 +1907,77 @@ QVariantMap PpcpHostService::ppcpStats() const
         one[QStringLiteral("channels")]    =
             p->link ? static_cast<int>(p->link->channels().size()) : 0;
         one[QStringLiteral("sessionOpen")] = p->peer->liveSession().isOpen();
+
+        // ── CR-02 §5.10h — how long this Session has been open ─────────────
+        //
+        // ⭐ THE HOST OPENED IT, SO THE HOST KNOWS.  `openedAtNs()` is the
+        // reading `PpcpLiveSession::open()` took of `tb:host` at the moment it
+        // sent `session_open`, set once and never revised; `hostNowNs()` is a
+        // reading of the SAME clock now, so the subtraction stays inside one
+        // timebase and needs no relation.  Before E61 a consumer asking this
+        // had to fabricate a start time from the first message it happened to
+        // see, which is exactly what 5.10h exists to prevent.
+        //
+        // ⚠ There is NO wire carrier for `opened_at` (plan §10 item 3), so
+        // this is only computable BECAUSE we are the host.  -1 where no Session
+        // is open, which is the same "no reading" sentinel every other
+        // per-phone number here uses.
+        const PpcpLiveSession &ls = p->peer->liveSession();
+        one[QStringLiteral("sessionForMs")] =
+            (ls.isOpen() && ls.openedAtNs() != 0)
+            ? static_cast<qlonglong>((Ppcp::hostNowNs() - ls.openedAtNs()) / 1000000)
+            : qlonglong(-1);
+
+        // ── MSG 5.5 — per-Source availability ──────────────────────────────
+        //
+        // ⛔ KEYED ON `source_id` (CB5).  Published as its own list rather than
+        // folded into `inputs` because a Source can report unavailable with no
+        // VideoInputPpcp consumer attached at all — a camera taken by another
+        // app before anybody opened a Stream on it is precisely the case
+        // `in_use` exists for, and folding would drop it.
+        QVariantList devStatus;
+        for (const PpcpLiveSession::DeviceStatus &d : ls.deviceStatuses()) {
+            QVariantMap e;
+            e[QStringLiteral("sourceId")]  = QString::fromStdString(d.sourceId);
+            e[QStringLiteral("available")] = d.available;
+            e[QStringLiteral("reason")]    = QString::fromStdString(d.reason);
+            e[QStringLiteral("sinceNs")]   = static_cast<qlonglong>(d.sinceNs);
+            e[QStringLiteral("sinceTimebase")] = QString::fromStdString(d.sinceTimebase);
+            devStatus.append(e);
+        }
+        one[QStringLiteral("deviceStatus")] = devStatus;
+
+        // ── MSG 5.6 — the ring buffer's standing margin, per Stream ─────────
+        //
+        // ⚠ `retainedFromNs` IS IN THE DEVICE'S OWN TIMEBASE and is carried
+        // with the `tb` it was stamped in.  It is NOT subtracted from a host
+        // reading anywhere: that would mix two clocks with no shared epoch,
+        // which is the exact defect `offsetToRefNs()`'s header records finding
+        // live on 27 August.  A retained WINDOW would need the device's own
+        // "now" and nothing on this wire carries one, so the panel shows the
+        // target, the discard count and the last discard span instead.
+        QVariantList bufStatus;
+        for (const PpcpLiveSession::BufferMargin &b : ls.bufferMargins()) {
+            QVariantMap e;
+            e[QStringLiteral("streamId")]       = QString::fromStdString(b.streamId);
+            e[QStringLiteral("retainedFromNs")] = static_cast<qlonglong>(b.retainedFromNs);
+            e[QStringLiteral("retainedFromTimebase")] =
+                QString::fromStdString(b.retainedFromTimebase);
+            e[QStringLiteral("retentionTargetMs")] = b.hasRetentionTarget
+                ? static_cast<qlonglong>(b.retentionTargetNs / 1000000) : qlonglong(-1);
+            e[QStringLiteral("discardedSinceOpen")] =
+                static_cast<qlonglong>(b.discardedSinceOpen);
+            e[QStringLiteral("lastDiscardDurationMs")] = b.hasLastDiscard
+                ? static_cast<qlonglong>(b.lastDiscardDurationNs / 1000000) : qlonglong(-1);
+            e[QStringLiteral("lastDiscardSinceNs")] = b.hasLastDiscard
+                ? static_cast<qlonglong>(b.lastDiscardSinceNs) : qlonglong(0);
+            bufStatus.append(e);
+        }
+        one[QStringLiteral("bufferStatus")] = bufStatus;
+
+        // Same builder the two phone-row readers use.
+        one[QStringLiteral("actuators")] = actuatorRowsFor(p.get());
+
         // The camera side of the same link — where a preview actually stops.
         one[QStringLiteral("inputs")] = VideoInputPpcp::countersFor(p->counterpartId);
         perPhone.append(one);
@@ -1779,8 +2024,21 @@ QVariantMap PpcpHostService::phoneHealth(const QString &pairingId) const
     out[QStringLiteral("thermal")] = health.valid
         ? QString::fromStdString(ppcp_thermal_level_str(health.thermal))
         : QString();
+    // The other two readings the same `heartbeat_ack` carries, parsed since
+    // H4 and displayed nowhere until CR-02's statistics tab (CB3).  Same "no
+    // reading yet" sentinel as the battery: -1, never a plausible-looking 0.
+    out[QStringLiteral("charging")] = (health.valid && health.hasCharging)
+                                     ? (health.charging ? 1 : 0) : -1;
+    out[QStringLiteral("storageFreeBytes")] = health.valid
+        ? static_cast<qlonglong>(health.storageFreeBytes) : qlonglong(-1);
     out[QStringLiteral("syncSigmaMs")] = isLive
         ? worstSyncSigmaMsFor(live->peer->liveSession()) : -1.0;
+    // CR-02 — published here AND in phones(), from the same builder, so the
+    // torch control can refresh on `phoneHealthChanged()` without re-reading
+    // the phone list and rebuilding every row (trap 1).  Empty for a phone that
+    // is not connected: a remembered pairing has no declaration and therefore
+    // no Actuators, which is not the same as a phone that declared none.
+    out[QStringLiteral("actuators")] = actuatorRowsFor(live);
     return out;
 }
 
@@ -1868,6 +2126,15 @@ QVariantList PpcpHostService::phones() const
         dev[QStringLiteral("thermal")] = health.valid
             ? QString::fromStdString(ppcp_thermal_level_str(health.thermal))
             : QString();
+        // ⚠ Published here AND in phoneHealth() above, from the same struct,
+        // for the same reason battery and thermal are: a panel refreshing one
+        // reading must not have to re-read this whole list.  -1 is "no ack
+        // yet" for both — charging is tri-state (-1 unknown / 0 / 1) because
+        // `has_charging` is optional on the wire.
+        dev[QStringLiteral("charging")] = (health.valid && health.hasCharging)
+                                         ? (health.charging ? 1 : 0) : -1;
+        dev[QStringLiteral("storageFreeBytes")] = health.valid
+            ? static_cast<qlonglong>(health.storageFreeBytes) : qlonglong(-1);
 
         // Design §6.1 — "surface which path a phone is on ... an operator who
         // cannot see that the cable did nothing cannot act on it."  ⚠ It is a
@@ -1908,6 +2175,13 @@ QVariantList PpcpHostService::phones() const
         dev[QStringLiteral("armState")]        = armStr;
         dev[QStringLiteral("armBlockedReason")] = armBlocked;
         dev[QStringLiteral("armReadyMs")]      = armReadyMs;
+
+        // CORE 5.19c / MSG §12 — what this phone declared it can be TOLD to do.
+        // ⚠ An empty list is a complete answer (5.19c): a phone owning no
+        // Actuators omits the key from `declare` entirely, and the Cameras
+        // pill simply shows no control rather than a disabled one.  Same
+        // builder as phoneHealth() so the two cannot drift.
+        dev[QStringLiteral("actuators")] = actuatorRowsFor(live);
 
         dev[QStringLiteral("hasWarning")]  = false;
         out.append(dev);

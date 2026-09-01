@@ -65,6 +65,19 @@ struct DevicePeer {
     std::vector<ppcp_source>          sources;
     std::vector<ppcp_timebase>        timebases;
     std::vector<ppcp_id>              declared;
+    // CORE 5.19c / erratum E66 — OPT-IN, so every suite that already uses this
+    // harness declares exactly what it declared before.  A phone owning no
+    // Actuators omits the key from `declare` entirely and that is a complete
+    // declaration, which is precisely what the default here is.
+    std::vector<ppcp_actuator>        actuators;
+    bool                              withActuator = false;
+    // ⭐ 12.1c's CLAMP CASE, AND THE ONLY SHAPE IT IS EXPRESSIBLE IN.  An
+    // `on_off` switch has nothing between on and off, so a device that
+    // "achieved something other than what was asked" cannot be told apart from
+    // one that echoed.  A `level` Actuator can, and since libppcp L30 the
+    // engine no longer answers for us — the device below does — so the case
+    // C2 reported as unreachable is reachable here and nowhere else.
+    bool                              withLevelActuator = false;
     ppcp_peer_desc                    desc{};
     std::string                       peerId = "dev-1";
     std::string                       tb     = "tb:dev";
@@ -160,10 +173,41 @@ struct DevicePeer {
             ASSERT_EQ(ppcp_id_set_z(&id, n), PPCP_OK);
             declared.push_back(id);
         }
+        if (withActuator || withLevelActuator) {
+            // CORE §2.2.3 — a peer that OWNS one declares Actuate.
+            ppcp_id id{};
+            ASSERT_EQ(ppcp_id_set_z(&id, PPCP_PROFILE_ACTUATE), PPCP_OK);
+            declared.push_back(id);
+        }
         ASSERT_EQ(ppcp_peer_desc_make(&desc, peerId.c_str(), PPCP_ROLE_CAPTURE,
                                       ppcp_wire_version(), declared.data(), declared.size(),
                                       timebases.data(), timebases.size()), PPCP_OK);
         ASSERT_EQ(ppcp_peer_desc_set_sources(&desc, sources.data(), sources.size()), PPCP_OK);
+        if (withActuator || withLevelActuator) {
+            // CB1 — the phone's torch is `control: on_off`, and 5.19b keeps
+            // Actuator kinds disjoint from Source kinds: this is NOT a flag on
+            // `src-cam`, it is its own entity beside it.
+            ppcp_actuator torch{};
+            ASSERT_EQ(ppcp_actuator_make(&torch, "act:torch", peerId.c_str(),
+                                         PPCP_ACTUATOR_KIND_TORCH,
+                                         PPCP_ACTUATOR_CONTROL_ON_OFF), PPCP_OK);
+            ASSERT_EQ(ppcp_actuator_set_label(&torch, "rear torch"), PPCP_OK);
+            if (withActuator) actuators.push_back(torch);
+            if (withLevelActuator) {
+                // A dimmable lamp beside it.  `control: level` is what makes a
+                // CLAMP sayable: 12.1c's `state` carries the ACHIEVED value,
+                // and a driver that quantises 0.9 to 0.6 is reporting a
+                // different number from the one it was handed.
+                ppcp_actuator lamp{};
+                ASSERT_EQ(ppcp_actuator_make(&lamp, "act:lamp", peerId.c_str(),
+                                             PPCP_ACTUATOR_KIND_TORCH,
+                                             PPCP_ACTUATOR_CONTROL_LEVEL), PPCP_OK);
+                ASSERT_EQ(ppcp_actuator_set_label(&lamp, "dimmable lamp"), PPCP_OK);
+                actuators.push_back(lamp);
+            }
+            ASSERT_EQ(ppcp_peer_desc_set_actuators(&desc, actuators.data(), actuators.size()),
+                      PPCP_OK);
+        }
         ASSERT_EQ(ppcp_peer_desc_set_product(&desc, "PinPoint", "Capture", "1.0"), PPCP_OK);
 
         std::vector<const char *> names;
@@ -250,6 +294,51 @@ inline void pipe(ppcp_peer *from, ppcp_peer *to, std::uint8_t ch,
         }
     }
     if (sink) drainEvents(to, sink);
+}
+
+// ── ⭐ MSG 12.1c — THE DEVICE OWES THE ANSWER, SINCE libppcp L30 ────────────
+//
+// The engine used to write the `applied` ack itself, ECHOING the request.  That
+// was the defect PinPointStudio's C2 report and libppcp package L30 both
+// landed on: 12.1c says `state` is what the Actuator is ACTUALLY doing, and a
+// sans-I/O library owns no hardware, so an ack it wrote could only ever be the
+// echo the clause forbids.  A well-formed, declared, host-originated command is
+// now raised as PPCP_EVENT_ACTUATOR_COMMAND with `status == PPCP_OK` meaning
+// "you owe an answer", and this is the device end of that obligation.
+//
+// ⚠ `status != PPCP_OK` MEANS THE ENGINE ALREADY ANSWERED — 12.1d
+// (`not_declared`), I39 (`malformed`), 12a (a non-host sender) — and answering
+// again would put two responses on the wire for one Request.
+//
+// `apply` IS THE SIMULATED DRIVER.  Returning true acks `applied` with whatever
+// it wrote into `achieved` — which is seeded with the request, so a driver that
+// does nothing models a device that did exactly what it was told.  Returning
+// false refuses (12.1b) with `reason`.  Absent, every command is applied
+// exactly: an honest torch, not an engine echo.
+using ActuatorApply = std::function<bool(const std::string &actuatorId,
+                                         const ppcp_actuator_setting &requested,
+                                         ppcp_actuator_setting *achieved,
+                                         std::string *refuseReason)>;
+
+inline void answerActuatorCommand(ppcp_peer *p, const ppcp_event &ev,
+                                  const ActuatorApply &apply)
+{
+    if (!p || ev.kind != PPCP_EVENT_ACTUATOR_COMMAND || !ev.msg) return;
+    if (ev.status != PPCP_OK) return;   // the engine has already answered it
+    const ppcp_body_actuator_command &c = ev.msg->body.actuator_command;
+    const std::string id = idStr(c.actuator_id);
+    ppcp_actuator_setting achieved = c.setting;
+    std::string reason;
+    const bool ok = apply ? apply(id, c.setting, &achieved, &reason) : true;
+    // MSG 1c — one of the two, never silence.  Asserted rather than ignored:
+    // a refused answer would leave the host pending forever and the test
+    // hanging on an ack that is never coming, which is a confusing way to fail.
+    if (ok)
+        EXPECT_EQ(ppcp_peer_actuator_command_applied(p, id.c_str(), &achieved,
+                                                     ev.msg->env.msg_id), PPCP_OK);
+    else
+        EXPECT_EQ(ppcp_peer_actuator_command_refused(p, id.c_str(), reason.c_str(),
+                                                     ev.msg->env.msg_id), PPCP_OK);
 }
 
 }  // namespace pptest

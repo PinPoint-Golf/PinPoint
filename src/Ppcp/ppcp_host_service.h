@@ -71,6 +71,7 @@
 
 #include "ppcp_bootstrap.h"
 #include <QVariantList>
+#include <QVector>
 
 #include "ppcp_discovery.h"
 #include "ppcp_engine.h"
@@ -297,7 +298,26 @@ public:
     // known at `onDeclare()`, which needs a `declare` off a real wire.  Drives
     // the same function the engine drives, with a synthetic counterpart id.
     // Returns false if `index` names no phone.
-    bool declareForTest(std::size_t index, const QString &counterpartId);
+    // `actuatorKind` is CR-02's addition: non-empty declares ONE Actuator of
+    // that kind, so the suite can exercise the torch path without a counterpart
+    // it is never going to have.  Empty — the default — declares none, which
+    // 5.19c makes a complete declaration and not a degenerate one.
+    // `actuatorControl` is `on_off` (CB1) unless a caller asks for `level`,
+    // which is the only shape 12.1c's ACHIEVED-differs-from-REQUESTED case is
+    // expressible in — see the H18 note on `liveSessionForTest()`.
+    bool declareForTest(std::size_t index, const QString &counterpartId,
+                        const QString &actuatorKind = QString(),
+                        const QString &actuatorControl = QString());
+
+    // ⚠ TEST SEAM, H18.  This suite links `ppcp_host_service_stubs.cpp` and
+    // never accepts a link from a real engine, so no `actuator_command_ack`
+    // can ever ARRIVE here — and 12.1c's achieved value is carried by nothing
+    // else.  The wire round trip (two engines, the device answering with a
+    // CLAMPED level) is asserted in `ppcp_live_session_test`; what this seam
+    // buys is the other half — that whatever the reading holds is what
+    // `actuatorRowsFor()` publishes to QML, unaltered.  Null where `index`
+    // names no phone or the phone holds no peer.
+    Ppcp::PpcpLiveSession *liveSessionForTest(std::size_t index);
 
     // RV §4 — publish a code.  Fresh psk and sid per code (7.3d), every
     // reachable address in `ep` (4.3d), `mu: 1` (7.3a) and a short `exp`
@@ -481,6 +501,27 @@ public:
     Q_INVOKABLE bool armAll();
     Q_INVOKABLE bool disarmAll();
 
+    // ── MSG §12 / CR-02 — the torch, and anything else a phone declares ─────
+    //
+    // Modelled on armAll() above, and carrying the same discipline for the same
+    // reason: a `true` here means the command reached this peer's QUEUE.  It is
+    // NOT the torch coming on.  The control that reads it back — the Cameras
+    // pill's popup — binds to `actuators` in phones()/phoneHealth(), whose
+    // `state` is written by `actuator_command_ack` and `actuator_state` only.
+    //
+    // `pairingId` names the phone the way every other per-phone invokable here
+    // does; `actuatorId` is the wire id the phone declared, which is why the
+    // caller reads it out of that same `actuators` list rather than composing
+    // one.  False where the phone is not connected, declares no such Actuator,
+    // or the library refused the command (12.1d, I39, 12a).
+    Q_INVOKABLE bool setPhoneActuator(const QString &pairingId, const QString &actuatorId,
+                                      bool on);
+    // ⚠ TEST SEAM, for the reason declareForTest() above is one: this suite
+    // links `ppcp_host_service_stubs.cpp` and never accepts a link, so there is
+    // no connected phone to command.  Drives the same per-phone call
+    // setPhoneActuator() drives, by index.
+    bool setActuatorForTest(std::size_t index, const QString &actuatorId, bool on);
+
     // The aggregate a screen reads: the LEAST ready of the connected phones, so
     // one phone that is blocked or still coming up cannot be hidden behind
     // another that is ready.  Empty string with nothing connected.
@@ -585,6 +626,24 @@ private:
         // Its declared `Peer.id`, which is what `VideoInputPpcp` keys cameras
         // and timebase relations by.
         QString counterpartId;
+
+        // CORE 5.19c / erratum E66 — the Actuators this phone declared, as a
+        // top-level sibling of `sources` in `declare` and NOT nested in the
+        // `peer` head.  Copied out of the borrowed `ppcp_peer_desc` at
+        // `onDeclare()` because that struct's strings live in the decode arena
+        // and are gone by the time a panel asks.
+        //
+        // ⚠ EMPTY IS A LEGAL DECLARATION (5.19c), on exactly the terms an empty
+        // `sources` is, and a peer owning none omits the key entirely.  So a
+        // phone with no torch is not a phone that failed to declare one, and
+        // the control is simply absent rather than shown disabled.
+        struct DeclaredActuator {
+            QString id;
+            QString kind;      // open registry: torch, indicator_led, …
+            QString control;   // open registry: on_off, level
+            QString label;     // informational, may be empty
+        };
+        QVector<DeclaredActuator> actuators;
         // What it called itself in MSG 3.3.  Display text from an untrusted
         // counterpart (4.4d): it names a row and is never an identifier.
         QString name;
@@ -681,6 +740,17 @@ private:
     // Is any connected phone paired on this pairing id?
     Phone *phoneByPairing(const QString &pairingId);
     const Phone *phoneByPairing(const QString &pairingId) const;
+
+    // CR-02 — one entry per DECLARED Actuator, merged with what the ack and
+    // `actuator_state` have said about it.  Published on BOTH phones() and
+    // phoneHealth() from this one function, for the reason `charging` and
+    // `storageFreeBytes` are: two hand-written copies of the same reading drift,
+    // and the panel that refreshes a torch must not have to re-read the whole
+    // phone list to do it (trap 1).
+    QVariantList actuatorRowsFor(const Phone *ph) const;
+    // The one place a command is actually issued; both the Q_INVOKABLE and the
+    // test seam funnel through it so neither can drift from the other.
+    bool commandActuator(Phone *ph, const QString &actuatorId, bool on);
     void setStatus(const QString &s);
     // Records a failure and builds its user-facing sentence.  One place, so the
     // rule above about what may be named lives in one place too.

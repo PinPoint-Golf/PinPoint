@@ -25,10 +25,132 @@ Item {
 
     signal navigateToSettings(int panelIndex)
 
-    // Bottom log area is tabbed: 0 = Message Log, 1 = Stats History, 2 = Analysis Runs.
+    // Bottom log area is tabbed: 0 = Message Log, 1 = Stats History,
+    // 2 = Analysis Runs, 3 = PinPointCapture (CR-02 goal (a)).
     // Always reset to Message Log when the screen is (re)entered.
     property int logTab: 0
     onVisibleChanged: if (visible) logTab = 0
+    // Nothing polls the phones until their tab is actually in front.
+    onLogTabChanged: if (logTab === 3) refreshPpcp()
+
+    // ── The PinPointCapture tab's data ───────────────────────────────────────
+    //
+    // ⛔ READ IN QML, STRAIGHT OFF `ppcpHost`.  ResourceMonitorController must
+    // not gain a PPCP include — `HAVE_PPCP_TRANSPORT` is defined for some
+    // translation units and not others, which is why it already reaches phones
+    // through a duck-typed property read rather than a header.  This tab needs
+    // no C++ seam at all: `ppcpStats()` is Q_INVOKABLE and `phones` is a
+    // Q_PROPERTY, so the whole tab is a QML read on the existing 500 ms timer
+    // and adds no signal (a *reading* must never emit `phonesChanged()`).
+    //
+    // `ppcpHost` exists only where libppcp AND OpenSSL are both present (H0) —
+    // the same guard ScreenSettings.qml and PhonesPanel.qml use.
+    readonly property bool ppcpAvailable: (typeof ppcpHost !== "undefined")
+    property var ppcpStatsData: ({})
+    property var ppcpRows: []
+
+    // One row per camera SOURCE for a phone, folded from `perPhone[].inputs`.
+    //
+    // ⛔ KEYED ON `source_id`, NEVER ON `serialNumber`.  A PPCP camera's
+    // `serialNumber` IS the owning peer's id, so a two-camera phone collapses
+    // onto ONE identity anywhere that is used as a key — the known defect in
+    // the folded device stats, which CR-02 CB5 forbids repeating.  The row also
+    // carries the full device id VideoInputPpcp::deviceIdFor() builds.
+    //
+    // ⚠ `inputs` IS PER CONSUMER, NOT PER CAMERA.  A host-owned preview
+    // consumer (alive from `declare`) and a session tile are two live
+    // VideoInputPpcp objects for the SAME Source, so the entries are summed
+    // into one row per Source — otherwise one camera would show up twice while
+    // the second camera of a two-camera phone still looked like a duplicate.
+    function ppcpCamerasFor(peerId, stat) {
+        var inputs = (stat && stat.inputs) ? stat.inputs : []
+        var order  = []
+        var bySource = ({})
+        for (var i = 0; i < inputs.length; i++) {
+            var e   = inputs[i]
+            var sid = e.sourceId
+            var row = bySource[sid]
+            if (row === undefined) {
+                row = { sourceId: sid,
+                        deviceId: "ppcp:" + peerId + "/" + sid,
+                        consumers: 0, attached: false, previewOnly: true,
+                        previewFrames: 0, streamsOpened: 0, streamsRefused: 0,
+                        decodeFailures: 0, absentSegments: 0, lastStreamError: "" }
+                bySource[sid] = row
+                order.push(row)
+            }
+            row.consumers      += 1
+            row.attached        = row.attached || e.attached
+            if (!e.previewOnly) row.previewOnly = false
+            row.previewFrames  += e.previewFrames
+            row.streamsOpened  += e.streamsOpened
+            row.streamsRefused += e.streamsRefused
+            row.decodeFailures += e.decodeFailures
+            row.absentSegments += e.absentSegments
+            if (row.lastStreamError === "" && e.lastStreamError)
+                row.lastStreamError = e.lastStreamError
+        }
+
+        // ── MSG 5.5 — per-Source availability, merged in on `source_id` ─────
+        //
+        // ⛔ THE SAME KEY, AND A ROW MAY BE CREATED HERE.  A `device_status`
+        // can name a Source with NO live consumer — a camera another
+        // application took before anybody opened a Stream on it is exactly what
+        // `in_use` is for — so the merge adds a row rather than only decorating
+        // one.  Anything else would drop the reading that matters most.
+        //
+        // ⚠ `avail: ""` IS "NOTHING HAS BEEN SAID", not "available". 5.5a is
+        // push-on-change, so a Source that has never had a problem has never
+        // been reported on, and rendering that as a green "yes" would be
+        // inventing a measurement.
+        var ds = (stat && stat.deviceStatus) ? stat.deviceStatus : []
+        for (var k = 0; k < ds.length; k++) {
+            var d    = ds[k]
+            var drow = bySource[d.sourceId]
+            if (drow === undefined) {
+                drow = { sourceId: d.sourceId,
+                         deviceId: "ppcp:" + peerId + "/" + d.sourceId,
+                         consumers: 0, attached: false, previewOnly: true,
+                         previewFrames: 0, streamsOpened: 0, streamsRefused: 0,
+                         decodeFailures: 0, absentSegments: 0, lastStreamError: "",
+                         avail: "", availReason: "" }
+                bySource[d.sourceId] = drow
+                order.push(drow)
+            }
+            drow.avail       = d.available ? "yes" : "no"
+            // 5.5b — a reason iff unavailable, from an open registry, carried
+            // verbatim and never mapped onto a word this host already knows.
+            drow.availReason = d.available ? "" : (d.reason ? d.reason : "")
+        }
+        for (var m = 0; m < order.length; m++) {
+            if (order[m].avail === undefined) { order[m].avail = ""; order[m].availReason = "" }
+        }
+        return order
+    }
+
+    // Merge the two reads into one row per phone.  `phones` is the outer list
+    // because a remembered-but-disconnected phone has NO `perPhone` entry and
+    // must still appear — with every reading as an em dash, which is the honest
+    // answer and not a fault.
+    function refreshPpcp() {
+        if (!ppcpAvailable) { ppcpStatsData = ({}); ppcpRows = []; return }
+        var stats  = ppcpHost.ppcpStats()
+        var per    = stats.perPhone ? stats.perPhone : []
+        var byPeer = ({})
+        for (var i = 0; i < per.length; i++) byPeer[per[i].peerId] = per[i]
+
+        var phones = ppcpHost.phones
+        var rows   = []
+        for (var j = 0; j < phones.length; j++) {
+            var ph = phones[j]
+            var st = (ph.counterpartId && byPeer[ph.counterpartId] !== undefined)
+                     ? byPeer[ph.counterpartId] : null
+            rows.push({ phone: ph, stat: st,
+                        cameras: ppcpCamerasFor(ph.counterpartId, st) })
+        }
+        ppcpStatsData = stats
+        ppcpRows      = rows
+    }
 
     // Refresh data every 500ms, but only while this screen is visible.
     // StackLayout sets non-active children to visible: false, so running: visible
@@ -40,6 +162,9 @@ Item {
         onTriggered: {
             resourceMonitor.refresh()
             if (profiler.available) profiler.refresh()
+            // Only while its own tab is in front: two QVariant reads a second
+            // for a tab nobody is looking at is work for nothing.
+            if (root.logTab === 3) root.refreshPpcp()
         }
     }
 
@@ -1340,6 +1465,41 @@ Item {
                     TapHandler   { id: anTabTap; onTapped: root.logTab = 2 }
                     HoverHandler { id: anTabHover; cursorShape: Qt.PointingHandCursor }
                 }
+
+                // PinPointCapture tab — the phones, their links and their
+                // cameras.  Gated on `ppcpHost` existing the way the two tabs
+                // above are gated on the profiler being compiled in: a build
+                // without libppcp/OpenSSL has no phones to report and shows
+                // three tabs, exactly as it does today.
+                Item {
+                    visible: root.ppcpAvailable
+                    width: ppcpTabLbl.implicitWidth
+                    height: Theme.sp(24)
+                    transformOrigin: Item.Left
+                    scale: ppcpTabTap.pressed ? 0.97 : ppcpTabHover.hovered ? 1.02 : 1.0
+                    Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Easing.OutCubic } }
+
+                    Text {
+                        id: ppcpTabLbl
+                        anchors { left: parent.left; top: parent.top; topMargin: Theme.sp(3) }
+                        text: qsTr("PINPOINTCAPTURE")
+                        font.family: Theme.fontBody
+                        font.pixelSize: Theme.fontSzMicro
+                        font.letterSpacing: Theme.trackingMicro
+                        color: root.logTab === 3 ? Theme.colorText2
+                             : ppcpTabHover.hovered ? Theme.colorText2 : Theme.colorText3
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                    }
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: Theme.sp(2)
+                        radius: 1
+                        color: Theme.colorAccent
+                        visible: root.logTab === 3
+                    }
+                    TapHandler   { id: ppcpTabTap; onTapped: root.logTab = 3 }
+                    HoverHandler { id: ppcpTabHover; cursorShape: Qt.PointingHandCursor }
+                }
             }
 
             // ── Message log (grows downward; lives at bottom) ─────────────────
@@ -2100,6 +2260,109 @@ Item {
                         runData: modelData
                         isAlternate: index % 2 === 1
                         width: parent.width
+                    }
+                }
+            }
+
+            // ── PinPointCapture (CR-02 goal (a)) ──────────────────────────
+            //
+            // Fed by ScreenResourceMonitor's own `refreshPpcp()`, which merges
+            // `ppcpHost.ppcpStats()` — a large already-built dataset whose only
+            // consumer until now was the automated harness — with the per-phone
+            // readings `ppcpHost.phones` publishes.
+            Column {
+                id: ppcpCol
+                visible: root.logTab === 3 && root.ppcpAvailable
+                width: parent.width - 40
+                spacing: Theme.sp(10)
+
+                // Header: the listener, and the arbitration counters summed
+                // across every phone.
+                Item {
+                    width: parent.width
+                    height: Theme.sp(32)
+
+                    Text {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        text: {
+                            var st = root.ppcpStatsData
+                            if (!st || st.listening === undefined) return qsTr("not listening")
+                            return st.listening
+                                 ? qsTr("listening on port %1 · %2 phone(s)").arg(st.port).arg(st.phones)
+                                 : qsTr("not listening")
+                        }
+                        font.family: Theme.fontData
+                        font.pixelSize: Theme.sp(10)
+                        color: Theme.colorText3
+                    }
+
+                    Text {
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        text: {
+                            var st = root.ppcpStatsData
+                            if (!st || st.nominated === undefined) return ""
+                            // ⚠ `unarbitrated` is the one that says a device
+                            // nominated a shot and nobody was listening.
+                            return qsTr("shots  nominated %1 · issued %2 · adopted %3 · excluded %4 · unarbitrated %5")
+                                   .arg(st.nominated).arg(st.issued).arg(st.adopted)
+                                   .arg(st.excluded).arg(st.unarbitrated)
+                        }
+                        font.family: Theme.fontData
+                        font.pixelSize: Theme.sp(9)
+                        color: (root.ppcpStatsData && root.ppcpStatsData.unarbitrated > 0)
+                               ? Theme.colorWarn : Theme.colorText3
+                    }
+                }
+
+                // Empty state — a build WITH ppcp that has never been paired.
+                Rectangle {
+                    visible: root.ppcpRows.length === 0
+                    width: parent.width
+                    height: Theme.sp(40)
+                    color: Theme.colorSurface
+                    radius: Theme.radius
+                    border.width: 1
+                    border.color: Theme.colorBorderMid
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("No phones — pair one from Settings → Phones")
+                        font.family: Theme.fontBody
+                        font.pixelSize: Theme.fontSzBody2
+                        color: Theme.colorText3
+                    }
+                }
+
+                // ⚠ MODELLED ON THE COUNT, NOT THE ARRAY.  `ppcpRows` is rebuilt
+                // every 500 ms; a Repeater bound to the array itself would
+                // destroy and recreate every card twice a second.  Bound to the
+                // length, the cards stand and only their readings move — the
+                // same discipline `phoneHealthChanged()` exists to enforce on
+                // the C++ side.
+                Repeater {
+                    model: root.ppcpRows.length
+                    RmPpcpPhoneCard {
+                        width: parent.width
+                        rowData: root.ppcpRows[index]
+                    }
+                }
+
+                // What the import ledger owes — MSG 9.1, already counted.
+                Item {
+                    width: parent.width
+                    height: Theme.sp(24)
+                    visible: root.ppcpStatsData && root.ppcpStatsData.importCaptures !== undefined
+
+                    Text {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        text: {
+                            var st = root.ppcpStatsData
+                            if (!st || st.importCaptures === undefined) return ""
+                            return qsTr("imported  %1 capture(s) over %2 session(s) · %3 commit(s) owed")
+                                   .arg(st.importCaptures).arg(st.importSessions).arg(st.commitsOwed)
+                        }
+                        font.family: Theme.fontData
+                        font.pixelSize: Theme.sp(9)
+                        color: Theme.colorText3
                     }
                 }
             }
