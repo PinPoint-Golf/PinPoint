@@ -1,7 +1,8 @@
 # Live capture collection — the missing swing-video leg
 
-**Status**: design, approved for implementation. **Phase 0 (H-g, H-h) is built and committed
-(`f595eb9`).** Phases 1–3 are not started.
+**Status**: Phases 0–2 built and committed. ⛔ **The video leg is NOT proven end to end — no
+clip has ever been filed. Read §10 before believing any commit message here.** Phase 3 not
+started.
 **Written**: 1 September 2026, from the manual PPS + PPC wrist session of that afternoon.
 **Amended**: 1 September 2026 — see §0.5. Seven statements below were wrong or have been overtaken;
 they are corrected in place and listed there.
@@ -10,7 +11,8 @@ the core loop (§3), and the two items once listed against them are hardware ver
 
 > **This document is self-contained.** It is written to be picked up by a session with no prior
 > context: §0 orients, §1–§4 establish the problem and the evidence, §5–§7 are the design, §8
-> is the work broken down with acceptance criteria, §9 lists what is genuinely unresolved.
+> is the work broken down with acceptance criteria, §9 lists what is genuinely unresolved, and
+> **§10 is where it actually stands after the first hardware session — start there.**
 > Every file reference was verified against the tree at commit `06e92fe`.
 
 ---
@@ -709,3 +711,146 @@ still not working.
 6. **Does a landed clip re-open the swing for the user mid-session?** Re-analysis takes 15–40 s
    and the golfer is probably hitting again. Proposal: update the row silently, never steal the
    stage. Unresolved.
+
+---
+
+## 10. Where this actually stands — hardware session, 1 September 2026
+
+> **Read this before believing §8's commit messages.** Phases 0–2 are committed. The video leg
+> is **NOT proven end to end**, and the Phase 2 commit (`48dfc7e`, "The phone is finally asked
+> for the swing, and the answer is kept") overstates it: what is proven is the **asking**.
+
+### 10.1 The one number that matters
+
+**No clip has ever been filed.** Checked against the artefacts, not against recollection, at the
+end of the session:
+
+| | |
+|---|---|
+| `phone video landed` lines, all runs | **0** |
+| Video files in any swing folder from that day | **0** |
+| Ledger `captures` / `sessions` / `pending_commits` | **0 / 0 / 0** |
+| `swing.json` files written that day | **0** |
+
+One run showed `bulk 242550681/1596` on link teardown — 242 MB genuinely crossed the wire. It is
+easy to read that as success and it is not: those payloads arrived for Captures whose
+`capture_announce` had not registered, so `onPayloadBegin` refused them (no stream, no profile,
+no `achieved_frames`) and they were dropped before reaching `PpcpClipFiler`. Bytes moving is not
+a swing you can open.
+
+### 10.2 What IS established on hardware
+
+- **H-c works.** `capture_request` goes out naming genuinely-open `shot_windowed` Streams, read
+  from the peer's own Stream table, with `pre_ms 2000 post_ms 1000`.
+- **The phone answers correctly.** `capture_announce` arrives anchored to the right `shot_id`
+  (I27), on `str:video:src:camera:wide`.
+- **And says it has not sent.** `completeness: partial` (1), `transfer: pending` (0) — libppcp's
+  own words for *"held locally, unsent"*. No payload follows.
+- Everything downstream in PPS — admit, write, `frames.t_us`, `origin`, `capture_committed`,
+  re-analysis — is written and unit-tested and **has never run against a real clip**.
+
+### 10.3 The blocking problem for the next session
+
+⛔ **The automated hardware loop cannot reach a Session, and fixing that unblocks everything
+else.**
+
+`DeviceSessionTests.aHostedSwingProducesAClip` ("Test 1 of the hardware list, automated") is the
+right tool: it arms through `model.arm()` and injects a swing through `SyntheticAudio.oneSwing`,
+so it needs **neither a person's hands nor a real impact**. Run with `make test-device` against a
+running PinPointStudio.
+
+It fails identically every time at `#require(await link.hostSession)` — `session_open` never
+arrives — because the host refuses its link:
+
+```
+this phone already has a link — keeping the one it has and closing the newcomer.
+One phone, one link (design §6.1)
+```
+
+Something already holds a link when the test dials. Tried and did **not** fix it: suppressing the
+app's own auto-search under test (`AppModel.isUnderTest`, uncommitted), and
+`PINPOINT_PPCP_WIRED=0` on the host. The first link's owner is still unidentified — that is the
+next thing to find. It is a harness fault, not a product fault, and until it is fixed every
+hardware answer needs a person in the room.
+
+### 10.4 The leading hypothesis for the missing payload
+
+Unproven, but it fits both observations — including why one run moved 242 MB and the others moved
+nothing.
+
+`RecordingSession.startTransferring()` is called from **exactly one place**
+(`AppModel.swift`, the arm path), and it captures `hosted` from `control`, which is `public let`
+— immutable for the life of the session. Nothing re-calls it on reconnect. A link that changes
+under a live RecordingSession therefore leaves the drain loop bound to a stale context, pumping a
+queue nothing enqueues to.
+
+The run that moved bytes had armed **after** its last reconnect. The runs that moved none had
+not.
+
+⚠ And the loop swallowed every error: `let sent = (try? await …) ?? 0`, then a 20 ms sleep, for
+ever. A clip that could never encode retried silently fifty times a second. Instrumented now (see
+10.6) but never read, because the phone's stdout was unavailable — see 10.5.
+
+### 10.5 Environment, and the traps that cost hours
+
+- ⛔ **`devicectl … --console` re-enumerates the phone.** The kernel logs
+  `setConfigurationGated` with `AMPDeviceDiscoveryAgent` on its heels, the device number
+  increments, and every usbmux tunnel dies — reported by PPS as `Broken pipe` and by PPC as
+  `channelClosed(peerClosed)`. §8 already warned this tunnel is a confound; it is worse than a
+  confound, it is the cause. **Zero re-enumerations in the run that did not use it.**
+- ⚠ **`idevicesyslog` does NOT carry `PpcpLog`.** It reads the legacy syslog relay, not the
+  unified log, so the `Logger` half of `PpcpLog.emit` is invisible through it. Only
+  `devicectl --console` bridges the `print()` half — which is the tool that destabilises USB.
+  **Getting the phone's diagnostics without breaking the link is an unsolved problem**; a
+  file-based sink pulled with `devicectl device copy from` would settle it.
+- The "iPhone USB" tether service is still correctly disabled; that earlier fix held.
+- `PINPOINT_PPCP_ACCEPT_ALL=1` (new, host) records uncorroborated Shots so a desk test is
+  possible. ⛔ Never in a real session. It warns on every Shot it lets through.
+- Corroboration refusing 12 of 15 desk Shots is **the rule working**, not a fault: the phone's
+  impact detector fires on handling the Mac's microphone never hears, giving deltas of 0.6–3.4 s.
+- A shot with no local camera and no IMU produces `window captured — 1 entries, 0 camera
+  track(s)`, fails both analysis and export, and leaves an **empty swing folder** — no
+  `swing.json` at all. That is the shot a phone clip matters most for.
+
+### 10.6 Uncommitted work at handoff
+
+Both trees are dirty. None of it is speculative; all of it was written against an observed
+failure.
+
+**PinPointStudio** — `swing_doc.{h,cpp}`, `ppcp_clip_filer.cpp`, `shot_controller.cpp`,
+`VideoInputPpcp.cpp`, `ppcp_clip_filer_test.cpp`:
+- Silent payload drops in `onPayloadBegin` now name which precondition failed. ⚠ Suppressed for
+  un-announced captures, which arrive at preview rate — the first version logged **9205 lines in
+  one short session**.
+- `capture_announce` logged once per accepted non-preview announce.
+- The filer creates a `swing.json` when a clip lands and the pipeline left none — never
+  speculatively, only when there are real bytes.
+- `frames.t_us` written, rebased on the clip's own first frame. **Without it the file is
+  unopenable**: `SwingDiskLoader` and `DiskReplaySource` both skip a video element with no
+  frames. ⚠ Not rebased to the shot's `t0`, deliberately — that needs a TimebaseRelation, and
+  evaluating one outside its domain fabricated a 460 ms sigma in August.
+- `PINPOINT_PPCP_ACCEPT_ALL`.
+- A test case for the empty-folder path. ⚠ The earlier tests all wrote a document first, which is
+  exactly why they missed it.
+
+**PinPointCapture** — `PpcpLog.swift`, `RecordingSession.swift`, `LiveDetectionSink.swift`,
+`HostedSessionContext.swift`, `AppModel.swift`:
+- A `ppcp.transfer` log category, because the payload transfer had no voice at all.
+- The drain loop's `try?` replaced with a caught, logged error, plus `drain started` /
+  `drain stopped` / `NOT started` / `STALLED (n jobs queued, nothing sent for 5s)`.
+- An announce with no payload provider says so — from the host it is indistinguishable from a
+  transfer that has not started.
+- `AppModel.isUnderTest` suppressing the app's auto-search. **Did not fix the duplicate link**;
+  keep or discard on the evidence.
+
+### 10.7 What to do first
+
+1. **Find who holds the first link** when `make test-device` dials, and stop it. Nothing else can
+   be answered repeatably until the automated loop reaches a Session.
+2. **Get the phone's diagnostics off the device without `devicectl --console`** — most likely a
+   file sink plus `devicectl device copy from`. 10.4's hypothesis is one log line away from
+   settled, and that line cannot currently be read.
+3. Then re-run the loop and read `ppcp.transfer`. If it says `NOT started` or `STALLED`, 10.4 is
+   the answer and the fix is to re-arm the drain on reconnect.
+4. **Write a test for `serveCaptureRequest`** — the phone's whole serve-the-host path has none,
+   which is the same hole `requestCapture` had on the host side.

@@ -25,6 +25,8 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QFileInfo>
 #include <QSaveFile>
 
@@ -103,6 +105,15 @@ void PpcpClipFiler::onSwingReady(const QString &swingDir)
         o.streamId  = a.streamId;
         o.transfer  = QStringLiteral("requested");
         QString err;
+        // ⚠ Only where a document already exists.  A shot that produced nothing
+        // has an empty folder, and inventing a swing.json for a clip that may
+        // never arrive would put an empty swing in the library.  The document is
+        // created when the BYTES land and not before (see ensureSwingDocument).
+        if (!QFileInfo::exists(swingDir + QStringLiteral("/swing.json"))) {
+            ppDebug() << "[ppcp] no swing.json yet on" << swingDir
+                      << "— the pending clip is recorded when it arrives";
+            continue;
+        }
         if (!SwingDocWriter::updateStreamOrigin(swingDir, a.alias, o, &err))
             ppWarn() << "[ppcp] could not record a pending clip on" << swingDir << "—" << err;
     }
@@ -144,8 +155,20 @@ void PpcpClipFiler::onClipReady(const PpcpClip &clip)
     // there is no swing it can belong to, and guessing from arrival order is
     // exactly what a second phone or a re-request breaks.
     if (clip.shotId.isEmpty()) {
-        ppWarn() << "[ppcp] clip" << clip.captureId
-                 << "is anchored to no Shot — not filed against any swing";
+        // ⚠ ppDebug, NOT ppWarn.  I27 allows a Capture to be anchored to a
+        // Candidate or to a segment of its own Stream, and neither belongs to a
+        // swing — so this is an ordinary outcome, not a fault, and at preview
+        // rate a warning here buries the log (1777 lines in 64 s, measured).
+        //
+        // ⚠ IT IS ALSO WHERE A MISCLASSIFIED PREVIEW LANDS.  deliver() emits
+        // clipReady only for preview == false, so anything arriving here at
+        // ~30/s is a preview Capture that was not recognised as one — the exact
+        // "frames that claim to be capture and are not" §5.6 is about.  Nothing
+        // is filed either way, because a clip with no Shot has no swing; the
+        // stream id is logged so the misclassification can be traced.
+        ppDebug() << "[ppcp] clip" << clip.captureId << "on stream" << clip.streamId
+                  << "source" << clip.sourceId
+                  << "is anchored to no Shot — not filed against any swing";
         return;
     }
     Shot *s = find(clip.shotId);
@@ -166,6 +189,34 @@ void PpcpClipFiler::onClipReady(const PpcpClip &clip)
         return;
     }
     file(*s, clip);
+}
+
+// ⛔ A SHOT CAN LEAVE AN EMPTY FOLDER, AND A CLIP STILL BELONGS IN IT.
+// ShotProcessor writes swing.json only when the export succeeded OR the analysis
+// did (shot_processor.cpp, maybeJoin) -- so a shot with no local camera and no
+// IMU allocates a directory and writes NOTHING into it.  Measured on hardware
+// 1 Sept: three shots, three empty folders, "window captured - 1 entries, 0
+// camera track(s)".
+//
+// That is exactly the shot a phone clip is most valuable for: the host saw
+// nothing, and the phone saw the swing.  So when the bytes arrive and there is
+// no document, one is created.  Minimal and honest -- schema and an empty
+// streams[] -- and only ever when there is real content to put in it, never
+// speculatively.
+static bool ensureSwingDocument(const QString &swingDir)
+{
+    if (QFileInfo::exists(swingDir + QStringLiteral("/swing.json"))) return true;
+    QJsonObject m;
+    m[QStringLiteral("schema")]  = QStringLiteral("pinpoint.swing/1");
+    m[QStringLiteral("streams")] = QJsonArray{};
+    QString err;
+    if (SwingDocWriter::writeSwingJson(swingDir, m, nullptr, &err)) {
+        ppInfo() << "[ppcp] no swing.json for" << swingDir
+                 << "— the pipeline produced none; writing one for the phone clip";
+        return true;
+    }
+    ppWarn() << "[ppcp] could not create a swing.json for the phone clip —" << err;
+    return false;
 }
 
 bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
@@ -190,6 +241,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
     // completeness `absent` with a reason, and the receiver records it rather
     // than retrying or reporting an error.
     if (clip.completeness == PPCP_ABSENT || clip.payload.isEmpty()) {
+        ensureSwingDocument(s.swingDir);
         o.transfer     = QStringLiteral("absent");
         o.absentReason = clip.absentReason.isEmpty() ? QStringLiteral("outside_buffer")
                                                      : clip.absentReason;
@@ -269,12 +321,36 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
 
     o.transfer    = QStringLiteral("complete");
     o.committedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+
+    // ⛔ WITHOUT `frames.t_us` THE FILE IS UNOPENABLE.  SwingDiskLoader and
+    // DiskReplaySource both SKIP a video element whose frames are empty, so a
+    // clip written without them is bytes on disk that replay will never show
+    // and re-analysis will never read.
+    //
+    // ⚠ REBASED ON THE CLIP'S OWN FIRST FRAME, not on the shot's t0.  The
+    // canonical instants are in the DEVICE's timebase (§6.1 applied at the
+    // nominator), and expressing them against the host's t0 means evaluating a
+    // TimebaseRelation -- the conversion that fabricated a 460 ms sigma against
+    // a real phone in August.  First-frame-relative is exact, monotonic and
+    // correctly spaced, which is everything playback needs; true alignment to
+    // t0 is a separate job that has to do the relation properly.
+    QVector<qint64> frameTUs;
+    if (!clip.canonicalNs.isEmpty()) {
+        const qint64 first = clip.canonicalNs.front();
+        frameTUs.reserve(clip.canonicalNs.size());
+        for (qint64 ns : clip.canonicalNs) frameTUs.append((ns - first) / 1000);
+    } else {
+        ppWarn() << "[ppcp] clip" << clip.captureId
+                 << "has no per-frame instants — replay will not show it";
+    }
+
+    ensureSwingDocument(s.swingDir);
     QString err;
     // ⚠ AND THE FILE, or the element says `complete` while naming nothing and no
     // reader can open it.  Relative to the swing folder, as every other stream's
     // `file` is.
     if (!SwingDocWriter::updateStreamOrigin(s.swingDir, alias, o, &err,
-                                            QFileInfo(path).fileName()))
+                                            QFileInfo(path).fileName(), frameTUs))
         ppWarn() << "[ppcp] clip landed but swing.json was not updated —" << err;
 
     ppInfo() << "[ppcp] phone video landed:" << path << clip.payload.size() << "bytes, shot"

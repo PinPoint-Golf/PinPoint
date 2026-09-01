@@ -178,9 +178,16 @@ public:
     // stream no reader can open, which is worse than one that says it is still
     // arriving.  Left alone on a pending or absent update, so a later state
     // change never erases a file that has already landed.
+    // `frameTUs` are the per-frame timestamps in microseconds, in the same
+    // window-relative convention every other video stream uses.  Written only
+    // when non-empty, and REQUIRED for the stream to be usable: SwingDiskLoader
+    // and DiskReplaySource both skip a video element whose `frames.t_us` is
+    // empty, so a clip that lands without them is a file on disk that nothing
+    // will ever open.
     static bool updateStreamOrigin(const QString &swingDir, const QString &alias,
                                    const StreamOrigin &origin, QString *error = nullptr,
-                                   const QString &fileName = QString());
+                                   const QString &fileName = QString(),
+                                   const QVector<qint64> &frameTUs = {});
 
     // Who the shot belongs to and where it sits — everything a device-only document
     // needs that the reading itself cannot supply.

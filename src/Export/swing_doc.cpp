@@ -895,6 +895,18 @@ QJsonObject originToJson(const SwingDocWriter::StreamOrigin &o)
     return j;
 }
 
+// The same `frames` shape every other video stream uses, so no reader needs to
+// learn a second one.
+QJsonObject framesToJson(const QVector<qint64> &tUs)
+{
+    QJsonArray a;
+    for (qint64 t : tUs) a.append(double(t));
+    QJsonObject f;
+    f[QStringLiteral("count")] = int(tUs.size());
+    f[QStringLiteral("t_us")]  = a;
+    return f;
+}
+
 SwingDocWriter::StreamOrigin originFromJson(const QJsonObject &j)
 {
     SwingDocWriter::StreamOrigin o;
@@ -914,7 +926,8 @@ SwingDocWriter::StreamOrigin originFromJson(const QJsonObject &j)
 
 bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &alias,
                                         const StreamOrigin &origin, QString *error,
-                                        const QString &fileName)
+                                        const QString &fileName,
+                                        const QVector<qint64> &frameTUs)
 {
     if (alias.isEmpty()) {
         if (error) *error = QStringLiteral("updateStreamOrigin needs a stream alias");
@@ -947,6 +960,7 @@ bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &
         if (el.value(QStringLiteral("alias")).toString() != alias) continue;
         el[QStringLiteral("origin")] = originToJson(origin);
         if (!fileName.isEmpty()) el[QStringLiteral("file")] = fileName;
+        if (!frameTUs.isEmpty()) el[QStringLiteral("frames")] = framesToJson(frameTUs);
         streams.replace(i, el);
         found = true;
         break;
@@ -964,6 +978,7 @@ bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &
         el[QStringLiteral("alias")]  = alias;
         el[QStringLiteral("origin")] = originToJson(origin);
         if (!fileName.isEmpty()) el[QStringLiteral("file")] = fileName;
+        if (!frameTUs.isEmpty()) el[QStringLiteral("frames")] = framesToJson(frameTUs);
         streams.append(el);
     }
     root[QStringLiteral("streams")] = streams;

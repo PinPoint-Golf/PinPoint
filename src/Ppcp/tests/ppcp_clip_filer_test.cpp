@@ -176,6 +176,59 @@ int main(int argc, char **argv)
               "…and completes in place, one element not two");
     }
 
+    // ── The shot that produced NOTHING, which is the one that matters most ─
+    {
+        std::printf("\n-- a swing folder with no swing.json still takes the clip --\n");
+        // ⚠ THIS IS THE CASE EVERY TEST ABOVE WAS TOO KIND TO CATCH.  They all
+        // wrote a document first.  On hardware, a shot with no local camera and
+        // no IMU allocates a folder and writes NOTHING into it -- three empty
+        // folders, measured -- and that is exactly the shot a phone clip is most
+        // valuable for: the host saw nothing and the phone saw the swing.
+        QTemporaryDir tmp;
+        Ppcp::PpcpImportLedger led;
+        led.setPath(QDir(tmp.path()).filePath("ppcp-ledger.json").toStdString());
+        PpcpClipFiler filer;
+        filer.setLedger(&led);
+        int filed = 0;
+        QObject::connect(&filer, &PpcpClipFiler::clipFiled,
+                         [&](const QString &, const QString &) { ++filed; });
+
+        // A folder and nothing in it — what maybeJoin leaves behind when both
+        // the export and the analysis fail.
+        const QString dir = tmp.path() + QStringLiteral("/2026-09-01_Mark_Wrist_01/swing_0011");
+        QDir().mkpath(dir);
+        check(!QFile::exists(dir + QStringLiteral("/swing.json")), "no document, as the pipeline left it");
+
+        filer.onCaptureAsked(QStringLiteral("shot:6"), QStringLiteral("peer:phone-1"),
+                             QStringLiteral("src:cam-wide"),
+                             QStringLiteral("st:abcdef0123456789:video"), kAlias);
+        filer.onSwingReady(dir);
+        check(!QFile::exists(dir + QStringLiteral("/swing.json")),
+              "…and still none: a document is not invented for a clip that may never come");
+
+        PpcpClip c = makeClip(QStringLiteral("shot:6"), QStringLiteral("cap:h"),
+                              QByteArray(4096, 'H'));
+        c.canonicalNs = { 1000000, 5000000, 9000000 };   // §6.1 instants, device timebase
+        filer.onClipReady(c);
+
+        check(filed == 1, "the clip is filed anyway");
+        check(QFile::exists(dir + QStringLiteral("/swing.json")),
+              "…and a document is created for it, once there are real bytes");
+        check(QFile::exists(dir + QStringLiteral("/") + kAlias + QStringLiteral(".mov")),
+              "…with the video beside it");
+
+        const QJsonObject el = streamElement(dir, kAlias);
+        const QJsonObject fr = el.value(QStringLiteral("frames")).toObject();
+        check(fr.value(QStringLiteral("count")).toInt() == 3, "frames.count written");
+        const QJsonArray t = fr.value(QStringLiteral("t_us")).toArray();
+        check(t.size() == 3 && t.at(0).toInt() == 0 && t.at(1).toInt() == 4000
+                            && t.at(2).toInt() == 8000,
+              "…t_us rebased on the clip's own first frame, in microseconds");
+        // Without frames the loader and the replay source both skip the element,
+        // so a clip written without them is a file nothing will ever open.
+        check(!fr.isEmpty(), "frames present — otherwise replay never shows it");
+    }
+
     // ── `absent` is an answer, not a failure ──────────────────────────────
     {
         std::printf("\n-- absent is a first-class ANSWER (I10, 7.3b) --\n");

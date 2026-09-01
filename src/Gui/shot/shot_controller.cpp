@@ -476,11 +476,32 @@ void ShotController::commitArbitratedShot(qint64 t0HostNs, const QString &shotId
     // ── The corroboration rule ─────────────────────────────────────────────
     ++m_counters.arbitratedSeen;
     QString why;
-    const bool ok = corroborated(tUs, &why);
+    bool ok = corroborated(tUs, &why);
     m_lastVerdict = QStringLiteral("%1 shot=%2 t0_us=%3 — %4")
                         .arg(ok ? QStringLiteral("PASS") : QStringLiteral("FAIL"),
                              shotId, QString::number(tUs), why);
     if (ok) ++m_counters.corroboratePass; else ++m_counters.corroborateFail;
+
+    // ⚠ A BENCH OVERRIDE, AND IT IS NOT A DEFAULT.  `PINPOINT_PPCP_ACCEPT_ALL=1`
+    // makes this host record every arbitrated Shot regardless of whether one of
+    // its own detectors agreed.  It exists because the corroboration rule is
+    // doing its job on a desk -- the phone's impact detector fires on handling
+    // and desk noise the Mac's microphone never hears, so 12 of 15 Shots were
+    // refused with deltas of 0.6-3.4 s -- and a video-transfer test should not
+    // be gated on staging a convincing golf impact.
+    //
+    // ⛔ NEVER SET THIS IN A REAL SESSION.  The rule is what stops a phone that
+    // heard a door slam from putting a swing in the library, and 8.2 makes the
+    // host the arbiter precisely so something can say no.  Off unless the
+    // environment asks for it, said out loud every time it fires.
+    static const bool acceptAll =
+        qEnvironmentVariable("PINPOINT_PPCP_ACCEPT_ALL") == QLatin1String("1");
+    if (!ok && acceptAll) {
+        ppWarn() << "[ppcp] ⚠ PINPOINT_PPCP_ACCEPT_ALL — recording an UNCORROBORATED shot"
+                 << shotId << "— t0_us" << tUs << "—" << why
+                 << "— this must not be set in a real session";
+        ok = true;
+    }
     // ⚠ ppDebug, AND THAT IS THE POINT.  It is compiled away below log level 3,
     // so the full decision — every available detector and its delta — is there
     // while we are testing and absent from a release build.

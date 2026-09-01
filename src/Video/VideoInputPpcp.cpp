@@ -1430,6 +1430,19 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
     // anchored to a Candidate or to its own Stream belongs to no swing.
     if (c.anchor.kind == PPCP_ANCHOR_SHOT)
         m_captureShot.emplace_back(capId, idStr(c.anchor.id));
+
+    // ⚠ ONE LINE PER ACCEPTED NON-PREVIEW ANNOUNCE, WHICH IS ONE PER SHOT PER
+    // STREAM AND NOT A TORRENT.  Payloads were arriving for capture ids no
+    // announce had ever named -- 2059 of them in one session -- and with no
+    // record of what WAS announced there was no way to tell whether the
+    // announces never came, were refused above, or named something else.
+    if (!preview)
+        ppInfo() << "[ppcp] capture announced" << capId << "on stream" << streamId
+                 << "anchor" << (c.anchor.kind == PPCP_ANCHOR_SHOT     ? "shot"
+                               : c.anchor.kind == PPCP_ANCHOR_CANDIDATE ? "candidate"
+                                                                        : "stream")
+                 << idStr(c.anchor.id)
+                 << "completeness" << int(c.completeness) << "transfer" << int(c.transfer);
 }
 
 void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
@@ -1472,11 +1485,33 @@ void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
     // through the counterpart's declaration.  Not from a product string, not
     // from a role, not from a platform (CT-S3 assertion 3), and not from this
     // host's own cameras' convention (5.6.1).
+    //
+    // ⛔ AND EVERY REFUSAL BELOW IS SAID OUT LOUD.  These three returns used to
+    // move a counter and nothing else, so a Capture could arrive whole -- 243 MB
+    // of it, measured on hardware 1 Sept -- and be dropped on the floor with
+    // NOTHING red anywhere.  That is the same shape of failure as the leg this
+    // work exists to build: bytes crossing the wire and no one saying they went
+    // nowhere.  The clip is still refused rather than guessed at; it is just no
+    // longer refused in silence.
+    // ⚠ AND ONLY FOR A CAPTURE WE WERE TOLD ABOUT.  An empty `streamId` means no
+    // `capture_announce` for this id ever reached us -- a preview Capture
+    // refused under 5.11j, or a payload for something this instance does not
+    // own -- and those arrive at preview rate.  Warning on each produced 9205
+    // lines in one short session, measured, which buries the drops that matter
+    // as thoroughly as saying nothing did.  Counted, said quietly, and left
+    // alone.
+    const bool announced = !m_open.clip.streamId.isEmpty();
     if (!b.has_achieved_frames) {
         // 5.8d makes AchievedFrames mandatory on any camera Capture that has
         // frames; 5.8j exempts a preview Stream from the EXPOSURE requirement,
         // never from `frames`.  Absent altogether, there is nothing to convert.
         ++m_counters.unconvertible;
+        if (announced)
+            ppWarn() << "[ppcp] clip" << capId << "on stream" << m_open.clip.streamId
+                     << "DROPPED — no achieved_frames on payload_begin (5.8d), so its"
+                     << "per-frame instants cannot be converted";
+        else
+            ppDebug() << "[ppcp] payload for un-announced capture" << capId << "— ignored";
         return;
     }
     const ppcp_capture_profile *p = profileForStream(m_open.clip.streamId);
@@ -1484,6 +1519,9 @@ void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
         // No profile, no `timing`, no conversion.  Recorded, never guessed: a
         // fallback convention here would be the hardcoding I19 exists to stop.
         ++m_counters.unconvertible;
+        ppWarn() << "[ppcp] clip" << capId << "DROPPED — no CaptureProfile resolves"
+                 << "for stream" << m_open.clip.streamId
+                 << "so there is no `timing` to convert its instants with";
         return;
     }
 
@@ -1495,6 +1533,9 @@ void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
         ppcp_instant out{};
         if (ppcp_achieved_frames_canonical_at(&af, &p->timing, i, &out) != PPCP_OK) {
             ++m_counters.unconvertible;
+            ppWarn() << "[ppcp] clip" << capId << "DROPPED — §6.1 conversion failed at frame"
+                     << int(i) << "of" << int(af.frame_count) << "on stream"
+                     << m_open.clip.streamId;
             m_open.clip.canonicalNs.clear();
             break;
         }
