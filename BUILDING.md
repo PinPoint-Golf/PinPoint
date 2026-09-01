@@ -8,6 +8,7 @@ This document outlines the dependencies and steps required to build PinPoint Stu
 - **Qt 6.11**: Quick, QuickControls2, Quick3D, SerialPort, Bluetooth, Multimedia, Network, WebSockets, Concurrent, ShaderTools, GuiPrivate, CorePrivate (the Private modules back the RHI Bayer-demosaic video item).
 - **C++ Compiler**: C++20 capable (`CMAKE_CXX_STANDARD 20`, required) — GCC 10+, Clang 12+, or MSVC 2022.
 - **OpenCV**: 3.0+ (required on all platforms — pose preprocessing, swing export demosaic).
+- **OpenSSL** 1.1.1+ and **libppcp** (optional, but both or neither): the PPCP capture-device link — TLS 1.3 with an external pre-shared key — that lets a phone running PinPoint Capture join a session as a camera. Missing either one, the build warns and produces an app with no phone support; it never falls back to an unencrypted link. Two further pieces are per-platform *capabilities* on top: a DNS-SD provider for reconnection discovery, and a usbmux provider for the wired (USB) link. Per-platform instructions below.
 - **FFmpeg** (optional): libavcodec/libavformat/libavutil/libswscale dev libraries with **libx264**, located via `pkg-config`. Powers the swing-export H.264/MP4 encoder. Without it the app still builds and runs, but swing video export is disabled. GPL FFmpeg builds are fine — the project is GPLv2+.
 
 ---
@@ -48,12 +49,37 @@ sudo apt install libespeak-ng-dev
 
 # PPCP capture-device link (TLS pre-shared key) — needed for src/Ppcp
 sudo apt install libssl-dev
+
+# PPCP reconnection discovery (DNS-SD via Avahi's Bonjour compatibility layer)
+sudo apt install libavahi-compat-libdnssd-dev
+
+# PPCP wired (USB) capture — runtime only, no headers needed
+sudo apt install usbmuxd
 ```
 
 Without `libssl-dev` the build still configures and succeeds; it warns, and the
 resulting app has no PPCP transport, so it cannot link to a capture device. It
 never falls back to an unencrypted link — `PPCP-RV` 5.2f forbids that under any
 circumstance and there is no code path in `src/Ppcp` that could.
+
+`libssl-dev` is only half of the PPCP requirement: the transport also needs
+**libppcp**, which is a sibling checkout rather than a package — see
+[Co-developing libppcp](#co-developing-libppcp) below. With one of the two
+missing the build prints a warning naming which, and the app has no phone
+support.
+
+The other two lines are **capabilities, not prerequisites** — a box without them
+builds and runs identically, minus one feature each, and CMake says so with a
+`STATUS` line rather than a warning:
+
+- **`libavahi-compat-libdnssd-dev`** buys reconnection discovery, so a remembered
+  phone finds this computer again without a fresh pairing code. It exposes the
+  same `dns_sd.h` API as Apple's own, so there is one code path on all three
+  platforms. Without it, pairing by code still works (`PPCP-RV` 3.6b).
+- **`usbmuxd`** is the daemon that carries the wired link (`/var/run/usbmuxd`);
+  it is a *runtime* dependency of the finished app, not a build one — the usbmux
+  client in `src/Ppcp/ppcp_usbmux.cpp` is first-party and needs no library. The
+  socket's permissions may need a group membership on some distributions.
 
 ### 4. GPU Acceleration (Optional)
 
@@ -97,6 +123,18 @@ than relying on the default search — otherwise it would find LibreSSL, which h
 no external-PSK session callbacks at all. Omit it and the build succeeds with a
 warning and no PPCP transport; it never falls back to an unencrypted link.
 CMake injects the Homebrew prefix into `PKG_CONFIG_PATH` automatically, so `ffmpeg` is found without any extra configuration.
+
+The rest of PPCP needs nothing installed on macOS. DNS-SD (reconnection
+discovery) comes free from libSystem, and the wired link talks to Apple's own
+`usbmuxd` at `/var/run/usbmuxd`, which is always present. The transport does
+still need **libppcp** beside this repository — see
+[Co-developing libppcp](#co-developing-libppcp).
+
+> ⚠ **A cabled phone that keeps dropping is an OS setting, not a bug.** macOS's
+> "iPhone USB" tethering service can flap and force a USB re-configuration that
+> tears down every usbmux tunnel. The symptom, the diagnosis and the one-line
+> fix are in the README's
+> [Phone capture troubleshooting](README.md#troubleshooting--a-wired-link-that-keeps-dropping-macos).
 
 ### 2. Install Qt 6.11
 Use the [Qt Online Installer](https://www.qt.io/download-qt-installer) or:
@@ -205,6 +243,20 @@ cmake -U "FFMPEG*" -U "__pkg_config_checked_FFMPEG" <builddir>
 vcpkg install openssl:x64-windows
 ```
 then configure with `-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`, or point CMake at an existing installation with `-DOPENSSL_ROOT_DIR=C:\path\to\openssl`. Omit it and the build succeeds with a warning and no PPCP transport; it never falls back to an unencrypted link.
+
+OpenSSL is linked shared and its two DLLs (`libssl-*.dll`, `libcrypto-*.dll`) are copied next to the executable at POST_BUILD, so nothing has to be on PATH. The transport also needs **libppcp** beside this repository — see [Co-developing libppcp](#co-developing-libppcp).
+
+### 9. Bonjour SDK for Windows (Optional — PPCP reconnection discovery)
+`src/Ppcp` uses DNS-SD so a remembered phone can find this computer again without a fresh pairing code. Windows has no built-in provider, so the [Bonjour SDK for Windows](https://developer.apple.com/bonjour/) supplies the same `dns_sd.h` API that macOS and Avahi do — one code path, no second backend.
+
+Install it to the default `C:\Program Files\Bonjour SDK`, or set `BONJOUR_SDK_HOME` if it lives elsewhere. Absence is **not** an error: CMake prints a `STATUS` line, the two discovery factories keep returning null, and pairing by code is unaffected (`PPCP-RV` 3.6b).
+
+> `dnssd.lib` is not a conventional import library — every entry point does its own `LoadLibrary` on `dnssd.dll` at call time, so a build machine with the SDK produces a binary that still runs on a machine without Bonjour installed. The **end user** needs `dnssd.dll` (from the *Apple Devices* app, iTunes, or Bonjour Print Services) only if they want reconnection discovery.
+
+### 10. Apple Devices (Runtime only — PPCP wired capture)
+The wired link talks to `AppleMobileDeviceService` on `127.0.0.1:27015`, which ships with the Microsoft Store **Apple Devices** app or with iTunes. Nothing is needed at build time — the usbmux client in `src/Ppcp/ppcp_usbmux.cpp` is first-party — and it cannot be redistributed, so an installed build detects its absence and says so in Settings → Phones rather than failing. Loopback needs no firewall rule.
+
+> **The listener does need one.** PPCP over WiFi accepts an incoming TCP connection from the phone, so Windows raises a Security Alert on first run; declining it breaks pairing until the rule is corrected by hand.
 
 ---
 
@@ -506,6 +558,7 @@ The following are fetched at `cmake ..` time — no manual steps required:
 If a download fails, the affected feature is disabled but the rest of the build continues normally. Re-run CMake to retry failed downloads.
 
 > **Not downloaded at build time:**
+> - **libppcp** — the PPCP protocol library needs a sibling `../libppcp` checkout; auto-fetch is off while the repository is private. See [Co-developing libppcp](#co-developing-libppcp).
 > - The local LLM model (Phi-4-mini) is fetched by the app itself on first run — into the per-user app-data directory, and only when a compatible GPU is present.
 > - **ViTPose++-L wholebody** (`vitpose-l-wholebody.onnx`, ~1.2 GB) — the "High" motion-capture-quality pose model. Deliberately never built or packaged; the app downloads it on demand (with an explicit size warning) when the user selects the **High** tier in Settings → General, into `AppLocalDataLocation/models/vitpose/`. "High" runs ViTPose++-L; "Low"/"Medium" run the packaged ViTPose-B.
 
@@ -537,6 +590,28 @@ override; `ctest -R hackmotion` runs the link/ABI check.
 
 The dependency tracks `main` deliberately while the HackMotion integration lands. It reverts to a
 tag pin once the library stabilises.
+
+### Co-developing libppcp
+
+[libppcp](https://github.com/PinPoint-Golf/libppcp) is the sans-I/O C11 implementation of the
+PinPoint Capture Protocol, shared between PinPoint Studio and the PinPoint Capture phone app. It
+is embedded exactly as libwrist is, with one difference that matters today:
+
+⚠ **It is not fetched automatically.** `PP_LIBPPCP_FETCH` defaults **OFF** while the repository is
+private, so libppcp resolves *only* from a sibling checkout:
+
+```bash
+git clone https://github.com/PinPoint-Golf/libppcp   # beside this repository
+```
+
+With no sibling checkout, CMake prints `libppcp: not embedded` and — regardless of OpenSSL — the
+PPCP transport is not built, so the app has no phone support. Pass `-DPP_LIBPPCP_FETCH=ON` to take
+`main` from GitHub instead (the default flips to ON once the repository is public), or
+`-DPP_LIBPPCP_LOCAL=OFF` to ignore a sibling checkout and always take upstream.
+
+The same fix-and-push rule as libwrist applies: edit the sibling clone, never the fetched copy
+under `build/*/_deps/`. The resolved version and commit appear in the About box and in the
+configure log (`PPCP transport: OpenSSL …, libppcp …`).
 
 ---
 
