@@ -865,6 +865,13 @@ int main(int argc, char *argv[])
     // the pairing code carries whatever port we ended up with (4.3d).
     static PpcpHostService ppcpHost;
     ppcpHost.setOfferController(&ppcpOfferController);
+
+    // ⛔ ONE LEDGER OVER ONE FILE.  The file-import path used to build its own
+    // in-memory copy of the ledger the host service already has loaded, and
+    // neither reloaded before saving — so an import during a live session had
+    // its records overwritten by the next flush from here, and the same bundle
+    // then re-imported as if it were new.  It borrows this one now.
+    ppcpImportController.setSharedLedger(&ppcpHost.ledger());
     // MSG 3.3 — a peer's cameras exist the moment it declares.  The registry
     // has already been told by then; CameraManager snapshots at construction
     // and merges only on enumerate(), so it is the one that has to be asked.
@@ -954,6 +961,12 @@ int main(int argc, char *argv[])
     // (`ppcpHost` is a static, so it is named directly rather than captured.)
     QObject::connect(&app, &QGuiApplication::aboutToQuit, [&eventBuffer, &updateController]() {
 #ifdef HAVE_PPCP_TRANSPORT
+        // ⚠ AND DROP THE BORROWED LEDGER, FOR THE SAME REASON THE STOP IS HERE.
+        // `ppcpImportController` is a function-local static constructed BEFORE
+        // `ppcpHost`, so it is destroyed AFTER it: a reference to the host's
+        // ledger held past this point outlives its owner.  Dropped while both
+        // are still alive.
+        ppcpImportController.setSharedLedger(nullptr);
         ppcpHost.stop();
 #endif
         updateController.shutdownUpdater();

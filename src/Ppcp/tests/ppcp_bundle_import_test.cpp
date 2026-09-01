@@ -822,3 +822,131 @@ TEST(PpcpImportLedgerPersistence, EverythingSurvivesAReloadIncludingWhatIsOwed)
     ASSERT_TRUE(reloaded.seedIndex(&ix));
     EXPECT_EQ(ppcp_capture_index_count(&ix), 2u);
 }
+
+// ── H-a: the link to the swing library, and the move to one ledger ─────────
+
+// CORE 8.5a/8.5b — reconciliation CREATES LINKS and "no entity is rewritten or
+// merged".  A live capture lands in a swing folder, so the ledger has to be able
+// to say WHICH swing without either identity swallowing the other.
+TEST(PpcpImportLedgerPersistence, ASwingRefRoundTripsAndBundlesCarryNone)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const std::string file = QDir(tmp.path()).filePath("ppcp-ledger.json").toStdString();
+
+    const CaptureKey live{ "peer:phone", "ses:live", "cap:live-1" };
+    const CaptureKey bundled{ "peer:phone", "ses:live", "cap:from-bundle" };
+
+    {
+        PpcpImportLedger led;
+        led.setPath(file);
+        ASSERT_EQ(led.admit({ live,    "", Completeness::Complete, "" }),
+                  PpcpImportLedger::Admission::Recorded);
+        ASSERT_EQ(led.admit({ bundled, "", Completeness::Complete, "" }),
+                  PpcpImportLedger::Admission::Recorded);
+
+        EXPECT_TRUE(led.setLocalPath(live, "/lib/2026-09-01_Mark_Wrist_01/swing_0007/phoneWide.mp4"));
+        EXPECT_TRUE(led.setSwingRef(live,
+            SwingRef{ "2026-09-01_Mark_Wrist_01", "swing_0007", "phoneWide" }));
+        // The bundled one gets a path and NO swingRef — it is not in a swing.
+        EXPECT_TRUE(led.setLocalPath(bundled, "/lib/PPCP Imports/peer/ses/cap.mov"));
+        EXPECT_TRUE(led.save());
+    }
+
+    PpcpImportLedger reloaded;
+    ASSERT_TRUE(reloaded.load(file));
+
+    const auto *l = reloaded.capture(live);
+    ASSERT_NE(l, nullptr);
+    EXPECT_EQ(l->swingRef.sessionDir,  "2026-09-01_Mark_Wrist_01");
+    EXPECT_EQ(l->swingRef.swingId,     "swing_0007");
+    EXPECT_EQ(l->swingRef.streamAlias, "phoneWide");
+    EXPECT_FALSE(l->swingRef.empty());
+
+    const auto *b = reloaded.capture(bundled);
+    ASSERT_NE(b, nullptr);
+    EXPECT_TRUE(b->swingRef.empty()) << "a bundle capture is not in a swing";
+    EXPECT_FALSE(b->localPath.empty()) << "but it still landed somewhere";
+
+    // ⚠ The opaque identity is untouched by the link.  I34 is the invariant the
+    // whole arrangement exists to keep.
+    EXPECT_EQ(l->key.peerId,    "peer:phone");
+    EXPECT_EQ(l->key.captureId, "cap:live-1");
+}
+
+// The ledger moved out of `PPCP Imports/` because it now covers two landing
+// sites.  Nothing already taken in may be forgotten by that move, and running
+// the migration twice must not double anything.
+TEST(PpcpImportLedgerPersistence, TheLegacyLedgerFoldsInIdempotentlyAndSurvives)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString legacyDir = QDir(tmp.path()).filePath("PPCP Imports");
+    ASSERT_TRUE(QDir().mkpath(legacyDir));
+    const std::string legacy = QDir(legacyDir).filePath("ppcp-import.json").toStdString();
+    const std::string modern = QDir(tmp.path()).filePath("ppcp-ledger.json").toStdString();
+
+    const CaptureKey old1{ "peer:dev", "ses:old", "cap:a" };
+    const CaptureKey old2{ "peer:dev", "ses:old", "cap:b" };
+    {
+        PpcpImportLedger before;
+        before.setPath(legacy);
+        before.noteSession("peer:dev", "ses:old", true, Completeness::Complete, false, "/old/dir");
+        ASSERT_EQ(before.admit({ old1, "", Completeness::Complete, "/old/a.mov" }),
+                  PpcpImportLedger::Admission::Recorded);
+        ASSERT_EQ(before.admit({ old2, "", Completeness::Absent, "" }),
+                  PpcpImportLedger::Admission::Recorded);
+        before.queueCommitted(old1, "");
+        ASSERT_TRUE(before.save());
+    }
+
+    PpcpImportLedger led;
+    ASSERT_TRUE(led.load(modern));
+    EXPECT_EQ(led.captureCount(), 0u) << "a fresh ledger at the new path";
+
+    EXPECT_EQ(led.foldIn(legacy), 2u);
+    EXPECT_EQ(led.captureCount(), 2u);
+    EXPECT_EQ(led.sessionCount(), 1u);
+    EXPECT_TRUE(led.holds(old1));
+    EXPECT_TRUE(led.holds(old2));
+    // ⭐ What was owed is still owed: a device that can never reach `confirmed`
+    // can never evict under I38, so losing these across the move would fill a
+    // phone across a season.
+    EXPECT_EQ(led.pendingCommits("peer:dev").size(), 1u);
+    // Legacy records are in no swing, and that is correct rather than missing.
+    ASSERT_NE(led.capture(old1), nullptr);
+    EXPECT_TRUE(led.capture(old1)->swingRef.empty());
+    EXPECT_EQ(led.capture(old1)->localPath, "/old/a.mov");
+
+    // Idempotent: this runs on every launch.
+    EXPECT_EQ(led.foldIn(legacy), 0u);
+    EXPECT_EQ(led.captureCount(), 2u);
+    EXPECT_EQ(led.pendingCommits("peer:dev").size(), 1u);
+
+    // ⚠ The old file is LEFT IN PLACE, so a downgrade still finds it.
+    EXPECT_TRUE(QFile::exists(QString::fromStdString(legacy)));
+
+    // And a record already held in the new ledger wins over the legacy copy:
+    // admit() does not rewrite (I9, CORE 8.5a).
+    PpcpImportLedger fresh;
+    ASSERT_TRUE(fresh.load(QDir(tmp.path()).filePath("other.json").toStdString()));
+    ASSERT_EQ(fresh.admit({ old1, "", Completeness::Complete, "/new/place.mov" }),
+              PpcpImportLedger::Admission::Recorded);
+    EXPECT_EQ(fresh.foldIn(legacy), 1u) << "only cap:b was new";
+    ASSERT_NE(fresh.capture(old1), nullptr);
+    EXPECT_EQ(fresh.capture(old1)->localPath, "/new/place.mov") << "held record not rewritten";
+}
+
+// foldIn is a no-op where there is nothing to fold, which is every launch after
+// the first and every install that never had a legacy ledger.
+TEST(PpcpImportLedgerPersistence, FoldingInNothingIsSafe)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    PpcpImportLedger led;
+    ASSERT_TRUE(led.load(QDir(tmp.path()).filePath("ppcp-ledger.json").toStdString()));
+    EXPECT_EQ(led.foldIn(QDir(tmp.path()).filePath("nope.json").toStdString()), 0u);
+    EXPECT_EQ(led.foldIn(""), 0u);
+    EXPECT_EQ(led.foldIn(led.path()), 0u) << "folding a ledger into itself";
+    EXPECT_EQ(led.captureCount(), 0u);
+}

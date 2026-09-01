@@ -93,6 +93,34 @@ const char *completenessStr(Completeness c);
 // case, an owner that had not computed one.
 bool digestFromHex(const std::string &hex, ppcp_digest *out);
 
+// ⭐ THE LINK, AND THE WHOLE REASON THIS CLASS EXTENDS TO THE LIVE PATH.
+//
+// PPCP identity is OPAQUE and minted by the device: a Capture is `Capture.id`
+// scoped by `Session.id` and the minting `Peer.id` (I34, CORE 8.5c), and the
+// spec is explicit that the digest is not the identifier.  PinPoint Studio's
+// identity is DERIVED: `SwingPaths::allocateSwingDir()` composes a folder from
+// athlete, date and a naming pattern, and it changes if the user changes a
+// preference.  Neither can be expressed in the other.
+//
+// So they are LINKED, not merged — CORE 8.5a/8.5b: reconciliation creates links
+// and "no entity is rewritten or merged".  The opaque key stays authoritative
+// on the PPCP side, the derived one on the library side, and this record relates
+// them.  Each side can be rebuilt from the other: a lost ledger can be walked
+// back out of the swing.json files, and a lost swing.json still leaves the
+// ledger able to refuse a duplicate.  That redundancy is the point.
+//
+// Empty for a bundle import, correctly: those captures are not in a swing.
+struct SwingRef {
+    std::string sessionDir;    // "2026-09-01_Mark-Liversedge_Wrist_01"
+    std::string swingId;       // "swing_0007"
+    std::string streamAlias;   // "phoneWide" — which streams[] element it is
+
+    bool empty() const
+    {
+        return sessionDir.empty() && swingId.empty() && streamAlias.empty();
+    }
+};
+
 class PpcpImportLedger {
 public:
     struct CaptureRecord {
@@ -100,6 +128,7 @@ public:
         std::string digestHex;       // empty where the owner had not computed one
         Completeness completeness = Completeness::Complete;
         std::string localPath;       // where the clip landed, alongside swing.json
+        SwingRef    swingRef;        // the derived identity; empty for bundles
     };
 
     struct SessionRecord {
@@ -128,6 +157,22 @@ public:
 
     bool load(const std::string &path);
     bool save() const;
+
+    // ── The move to one ledger for both landing sites ─────────────────────
+    //
+    // The ledger used to live at `<library>/PPCP Imports/ppcp-import.json`,
+    // which was right while bundles were the only thing it recorded and wrong
+    // as soon as a live capture lands in the swing library instead.  It is now
+    // `<library>/ppcp-ledger.json`, and `localPath` points wherever the bytes
+    // actually went.  One ledger, two landing sites, one identity rule.
+    //
+    // Folds a legacy file into this one and answers how many records it added.
+    // ⚠ THE LEGACY FILE IS LEFT IN PLACE.  Deleting it would make the migration
+    // irreversible on a version downgrade, and it costs a few hundred bytes.
+    // Records already held win: admit() never rewrites one (I9, CORE 8.5a), so
+    // folding the same file in twice is a no-op and this is safe to call on
+    // every launch.  Legacy records carry no `swingRef`, correctly.
+    std::size_t foldIn(const std::string &legacyPath);
     const std::string &path() const { return m_path; }
     void setPath(std::string p) { m_path = std::move(p); }
 
@@ -158,6 +203,14 @@ public:
     // the entity — it is this host's note of where it put the bytes.
     bool setLocalPath(const CaptureKey &k, const std::string &path,
                       const std::string &digestHex = {});
+
+    // The other half of the link, and separate from setLocalPath() for the same
+    // reason that one is separate from admit(): where the bytes went and which
+    // swing they belong to are two different notes this host makes ABOUT a
+    // Capture, neither of them part of the entity.  A live capture sets both; a
+    // bundle import sets only the path.
+    bool setSwingRef(const CaptureKey &k, const SwingRef &ref);
+
     const CaptureRecord *capture(const CaptureKey &k) const;
 
     // ── capture_committed, owed on the owner's next connection ────────────

@@ -487,6 +487,23 @@ public:
     // papered over, because the failure is otherwise silent.
     Ppcp::PpcpShotBridge *activeShotBridge();
 
+    // ── The one ledger, borrowed rather than copied ────────────────────────
+    //
+    // ⛔ THERE MUST BE EXACTLY ONE IN-MEMORY LEDGER OVER THE FILE.  This class
+    // loads it at construction and flushes owed commits from it on every tick;
+    // `PpcpImportController` used to build a SECOND one, function-local, over
+    // the very same JSON.  Neither reloaded before saving, so an import during a
+    // live session wrote its records and the next flush from here overwrote the
+    // file wholesale — the import's receipts gone, and the same bundle
+    // duplicated on re-import.  Harmless only while nothing live was recorded in
+    // it; a data-loss bug the moment live clips land there.
+    //
+    // So the file-import path borrows this one.  ⚠ `PpcpHostService` is a
+    // function-local static in main(), constructed AFTER the import controller
+    // and therefore destroyed BEFORE it — main.cpp drops the borrowed reference
+    // in the `aboutToQuit` handler that already exists for this exact hazard.
+    Ppcp::PpcpImportLedger &ledger() { return m_importLedger; }
+
     // ── CORE 7.3a / MSG 5.2 — arming, from the host ────────────────────────
     //
     // ⚠ NOT PART OF THE MVP, AND DELIBERATELY SO.  A capture device arms itself

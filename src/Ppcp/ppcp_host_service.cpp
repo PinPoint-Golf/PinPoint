@@ -210,18 +210,39 @@ PpcpHostService::PpcpHostService(QObject *parent)
     // is the same one the file-import path uses, read out of the shared INI
     // rather than through AppSettings, because nothing in src/Ppcp may depend
     // on src/Gui.
+    //
+    // ⭐ IT IS NO LONGER UNDER `PPCP Imports/`.  That was right while bundles
+    // were the only thing it recorded and wrong the moment a live capture lands
+    // in the swing library instead: the ledger is the link between an opaque
+    // PPCP identity and a derived swing identity, and it belongs above both
+    // landing sites rather than inside one of them.  `<library>/ppcp-ledger.json`
+    // now covers both, with `localPath` pointing wherever the bytes went.
     {
         QString root = ppSettings().value(QStringLiteral("General/athleteLibraryPath"))
                            .toString();
         if (root.isEmpty())
             root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-        const QString importRoot = QDir(root).filePath(QStringLiteral("PPCP Imports"));
-        QDir().mkpath(importRoot);
+        QDir().mkpath(root);
         m_importLedger.load(
-            QDir(importRoot).filePath(QStringLiteral("ppcp-import.json")).toStdString());
-        ppWarn() << "[ppcp] import ledger:" << m_importLedger.captureCount()
+            QDir(root).filePath(QStringLiteral("ppcp-ledger.json")).toStdString());
+
+        // The migration, run on every launch because it is idempotent: admit()
+        // refuses to rewrite a held record, so a second fold adds nothing.  The
+        // old file is left where it is.
+        const QString legacy = QDir(root).filePath(
+            QStringLiteral("PPCP Imports/ppcp-import.json"));
+        const std::size_t folded = m_importLedger.foldIn(legacy.toStdString());
+        if (folded > 0) {
+            ppWarn() << "[ppcp] folded" << folded
+                     << "capture(s) in from the legacy ledger at" << legacy
+                     << "— the old file is left in place";
+            m_importLedger.save();
+        }
+
+        ppWarn() << "[ppcp] ledger:" << m_importLedger.captureCount()
                  << "capture(s)," << m_importLedger.sessionCount() << "session(s),"
-                 << m_importLedger.pendingCommitCount() << "commit(s) owed";
+                 << m_importLedger.pendingCommitCount() << "commit(s) owed —"
+                 << QString::fromStdString(m_importLedger.path());
     }
 }
 

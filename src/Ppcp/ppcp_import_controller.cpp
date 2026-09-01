@@ -72,8 +72,19 @@ bool PpcpImportController::importSession(const QUrl &file)
     // loaded before the walk so a re-import can be a no-op rather than a
     // duplicate, and saved after so a crash between the two costs an import
     // rather than a library.
-    Ppcp::PpcpImportLedger ledger;
-    ledger.load(QDir(importRoot).filePath(QStringLiteral("ppcp-import.json")).toStdString());
+    //
+    // ⛔ BORROWED WHERE THERE IS ONE TO BORROW.  Building a private ledger over
+    // a file another object already has open is how an import's records used to
+    // be lost: two in-memory copies, one file, and whichever saved last won.
+    // `fallback` is used only when nothing shared was injected — a build with no
+    // PPCP transport, or a test — where there is no second writer to race.
+    Ppcp::PpcpImportLedger  fallback;
+    Ppcp::PpcpImportLedger &ledger = m_sharedLedger ? *m_sharedLedger : fallback;
+    if (!m_sharedLedger) {
+        fallback.load(QDir(root).filePath(QStringLiteral("ppcp-ledger.json")).toStdString());
+        fallback.foldIn(
+            QDir(importRoot).filePath(QStringLiteral("ppcp-import.json")).toStdString());
+    }
 
     // ⚠ THE SAME ENGINE A SOCKET GETS, FROM THE SAME FACTORY. Plan A10 and
     // CORE 9a: "a consumer gains a file transport, NOT an importer". If this

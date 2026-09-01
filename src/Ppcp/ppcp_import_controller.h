@@ -48,7 +48,7 @@
 #include <QUrl>
 #include <memory>
 
-namespace Ppcp { class PpcpEngine; }
+namespace Ppcp { class PpcpEngine; class PpcpImportLedger; }
 
 class PpcpImportController : public QObject
 {
@@ -77,6 +77,22 @@ public:
     // the app data location so an import works before a library is chosen.
     Q_INVOKABLE void setLibraryRoot(const QString &root);
 
+    // ⛔ THE SHARED LEDGER, AND WHY THIS IS NOT OPTIONAL POLISH.  This class used
+    // to build its own function-local PpcpImportLedger over the same JSON file
+    // PpcpHostService keeps loaded.  Two in-memory copies, one file, neither
+    // reloading before it saved: an import during a live session wrote its
+    // records and the host's next flush overwrote them, so the same bundle
+    // imported clean a second time and duplicated everything in it.
+    //
+    // Set by main.cpp to PpcpHostService::ledger().  When null — a build with no
+    // PPCP transport, or a test — the old private-ledger behaviour stands, which
+    // is correct because then there is no second writer to race.
+    //
+    // ⚠ CLEARED IN main.cpp's aboutToQuit HANDLER.  The owner is a function-local
+    // static constructed after this one, so it is destroyed first; the reference
+    // is dropped while it is still alive.
+    void setSharedLedger(Ppcp::PpcpImportLedger *ledger) { m_sharedLedger = ledger; }
+
 signals:
     void statusChanged();
     void busyChanged();
@@ -87,6 +103,7 @@ private:
 
     QString m_status;
     QString m_libraryRoot;
+    Ppcp::PpcpImportLedger *m_sharedLedger = nullptr;   // borrowed, never owned
     // CORE 5.1a — this host's own stable Id. A placeholder until H4 mints and
     // persists one; it is never derived from mutable local state.
     QString m_peerId = QStringLiteral("peer:pinpointstudio");

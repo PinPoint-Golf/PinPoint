@@ -199,6 +199,16 @@ bool PpcpImportLedger::setLocalPath(const CaptureKey &k, const std::string &path
     return false;
 }
 
+bool PpcpImportLedger::setSwingRef(const CaptureKey &k, const SwingRef &ref)
+{
+    for (CaptureRecord &held : m_captures) {
+        if (!(held.key == k)) continue;
+        held.swingRef = ref;
+        return true;
+    }
+    return false;
+}
+
 void PpcpImportLedger::queueCommitted(const CaptureKey &k, const std::string &digestHex)
 {
     // MSG 8.4a — the receiver says this only when it holds the payload DURABLY,
@@ -298,6 +308,13 @@ bool PpcpImportLedger::load(const std::string &path)
         r.digestHex = s(o.value("digest").toString());
         r.completeness = completenessFrom(o.value("completeness").toString());
         r.localPath = s(o.value("path").toString());
+        // Absent on every legacy record, correctly — a bundle capture is not in
+        // a swing.  A reader that predates this block simply ignores it, which
+        // is what keeps the file readable by an older build.
+        const QJsonObject sr = o.value("swing_ref").toObject();
+        r.swingRef.sessionDir  = s(sr.value("session_dir").toString());
+        r.swingRef.swingId     = s(sr.value("swing_id").toString());
+        r.swingRef.streamAlias = s(sr.value("stream_alias").toString());
         m_captures.push_back(r);
     }
     for (const QJsonValue &v : root.value("pending_commits").toArray()) {
@@ -336,6 +353,16 @@ bool PpcpImportLedger::save() const
         o["digest"] = q(r.digestHex);
         o["completeness"] = completenessStr(r.completeness);
         o["path"] = q(r.localPath);
+        // Omitted entirely when empty rather than written as three empty
+        // strings: a bundle capture has no swing, and saying so with an absent
+        // key is the honest encoding of that.
+        if (!r.swingRef.empty()) {
+            QJsonObject sr;
+            sr["session_dir"]  = q(r.swingRef.sessionDir);
+            sr["swing_id"]     = q(r.swingRef.swingId);
+            sr["stream_alias"] = q(r.swingRef.streamAlias);
+            o["swing_ref"] = sr;
+        }
         captures.append(o);
     }
     QJsonArray pending;
@@ -361,6 +388,43 @@ bool PpcpImportLedger::save() const
     if (!f.open(QIODevice::WriteOnly)) return false;
     f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
     return f.commit();
+}
+
+std::size_t PpcpImportLedger::foldIn(const std::string &legacyPath)
+{
+    if (legacyPath.empty() || legacyPath == m_path) return 0;
+    if (!QFile::exists(q(legacyPath))) return 0;
+
+    // Read the legacy file through a ledger of its own rather than parsing it
+    // here: one JSON reader for one format, and the legacy file IS this format
+    // — only its location changed.
+    PpcpImportLedger legacy;
+    if (!legacy.load(legacyPath)) return 0;
+
+    std::size_t added = 0;
+
+    // ⚠ ADMIT, NOT PUSH.  admit() is the identity decision and it refuses to
+    // rewrite a held record (I9, CORE 8.5a), so a record already in the new
+    // ledger wins and folding the same file in twice adds nothing.  That is
+    // what makes this safe to run on every launch rather than once behind a
+    // flag we would then have to remember to remove.
+    for (const CaptureRecord &r : legacy.m_captures)
+        if (admit(r) == Admission::Recorded) ++added;
+
+    for (const SessionRecord &r : legacy.m_sessions) {
+        if (holdsSession(r.peerId, r.sessionId)) continue;
+        m_sessions.push_back(r);
+    }
+
+    // What was owed is still owed.  A commit queued before the move and not yet
+    // sent must survive it, or the owning device can never reach `confirmed`
+    // for those captures and I38 leaves it unable to evict them — the exact
+    // storage trap this ledger's own header argues against.
+    for (const PendingCommit &p : legacy.m_pending)
+        queueCommitted(p.key, p.digestHex);
+
+    // ⚠ The legacy file is deliberately NOT removed.  See the header.
+    return added;
 }
 
 std::vector<ppcp_digest> PpcpImportLedger::heldDigests(const std::string &peerId,
