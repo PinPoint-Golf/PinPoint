@@ -1,8 +1,10 @@
 # Live capture collection — the missing swing-video leg
 
 **Status**: Phases 0–2 built and committed. ⛔ **The video leg is NOT proven end to end — no
-clip has ever been filed. Read §10 before believing any commit message here.** Phase 3 not
-started.
+clip has ever been filed.**
+➡ **START AT `live_capture_handover.md`**, beside this file. It states the one remaining open
+question, the diagnostic that settles it, three theories already disproved by measurement, and
+how to run the automated rig. This document is the design; that one is the current position.
 **Written**: 1 September 2026, from the manual PPS + PPC wrist session of that afternoon.
 **Amended**: 1 September 2026 — see §0.5. Seven statements below were wrong or have been overtaken;
 they are corrected in place and listed there.
