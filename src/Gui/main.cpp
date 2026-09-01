@@ -28,6 +28,8 @@
 #ifdef HAVE_PPCP_TRANSPORT
 #include "../Ppcp/ppcp_host_service.h"
 #endif
+#include <QDir>
+#include <QLocale>
 #include <QQmlContext>
 #include <QQuickStyle>
 
@@ -36,6 +38,7 @@
 #include "pp_debug.h"
 #include "pp_colorspace_pin.h"
 #include "app_settings.h"
+#include "notification_center.h"
 #include "app_info.h"
 #ifdef HAVE_OPENCV
 #  include <opencv2/core.hpp>
@@ -245,6 +248,10 @@ int main(int argc, char *argv[])
     AthleteController       athleteController;
     // Live lead-wrist metrics (vs neutral) for the wizard "Check your sensor" overlay.
     LiveWristAngles         liveWrist(&imuManager, &appSettings, &athleteController);
+    // The one sink every session- and shot-scoped notification posts to.
+    // Constructed before the objects that post to it; see notification_center.h
+    // for why identity (a stable id) is the whole mechanism.
+    NotificationCenter      notificationCenter;
     SessionController       sessionController(&athleteController);
     NavigationController    navController(&athleteController, &sessionController);
     // In-app updater façade: Linux AppImage engine, WinSparkle on Windows, Sparkle on
@@ -421,6 +428,224 @@ int main(int argc, char *argv[])
         reanalysisController.setLiveBusy(shotProcessor.busy());
     });
 
+    // ── Notifications: the act-now half of the one log ─────────────────
+    //
+    // These four wirings used to live as `Connections` blocks in Main.qml, each
+    // driving its own hand-placed PpToast.  They are here now for the reason
+    // every other cross-object join is here: the policy is C++'s, and the view
+    // should only draw.  What each one carries that it did not before is a
+    // STABLE ID — see notification_center.h.
+    //
+    // ⚠ The ids are the contract.  "swing.save.no-directory" is named as the
+    // `cause` of the consequences below it, and the preflight raises that SAME
+    // id before the first shot, so the shot-time occurrence coalesces into the
+    // notification already on screen instead of starting a second story.
+    {
+        using N = NotificationCenter;
+
+        QObject::connect(&shotProcessor, &ShotProcessor::swingSaveBlocked,
+                         &notificationCenter, [&notificationCenter](const QString &detail) {
+            N::Notification n;
+            n.id          = QStringLiteral("swing.save.no-directory");
+            n.severity    = N::Error;
+            n.kind        = N::Condition;   // a state of the machine, not news
+            n.title       = QObject::tr("Swings are not being saved");
+            n.detail      = detail;
+            // When the preflight has already said the library root is
+            // unwritable, this is the same news in different words — R2 keeps it
+            // in the log.  When the root IS fine and only the folder failed,
+            // nothing suppresses it and it is shown on its own merits.
+            n.cause       = QStringLiteral("library.unwritable");
+            n.actionLabel = QObject::tr("Open Storage settings");
+            n.actionId    = QStringLiteral("settings.storage");
+            notificationCenter.post(n);
+        });
+
+        QObject::connect(&shotProcessor, &ShotProcessor::swingSaveFailed,
+                         &notificationCenter, [&notificationCenter](const QString &error) {
+            N::Notification n;
+            n.id       = QStringLiteral("swing.save.failed");
+            n.severity = N::Error;
+            n.kind     = N::Event;          // this export failed; the next may not
+            n.title    = QObject::tr("Swing save failed");
+            n.detail   = error;
+            n.cause    = QStringLiteral("swing.save.no-directory");
+            notificationCenter.post(n);
+        });
+
+        QObject::connect(&shotProcessor, &ShotProcessor::analysisFailed,
+                         &notificationCenter, [&notificationCenter](const QString &error) {
+            N::Notification n;
+            n.id       = QStringLiteral("shot.analysis.failed");
+            n.severity = N::Warn;
+            n.kind     = N::Event;
+            n.title    = QObject::tr("Shot analysis failed");
+            n.detail   = error;
+            // A degraded analysis is a CONSEQUENCE of there being nowhere to
+            // save: while that condition is on screen this stays in the log.
+            n.cause    = QStringLiteral("swing.save.no-directory");
+            notificationCenter.post(n);
+        });
+
+        QObject::connect(&shotController, &ShotController::shotRefused,
+                         &notificationCenter,
+                         [&notificationCenter](const QString &reason, const QString &id) {
+            N::Notification n;
+            n.id       = id;                // the controller names which fault this is
+            n.severity = N::Warn;
+            n.kind     = N::Event;
+            n.title    = reason;            // already translated, already a sentence
+            n.glyph    = QStringLiteral("⊘");
+            notificationCenter.post(n);
+        });
+
+        // §7.5 R4 — the terminal statement.  Silence when everything worked:
+        // the carousel row IS the feedback, and a toast per successful shot is
+        // noise a golfer hitting a bucket would drown in.
+        QObject::connect(&shotProcessor, &ShotProcessor::shotOutcome,
+                         &notificationCenter,
+                         [&notificationCenter](int ordinal, bool exportOk, bool analysisOk) {
+            if (exportOk && analysisOk) return;
+
+            N::Notification n;
+            n.kind  = N::Event;
+            n.glyph = QStringLiteral("◎");
+            const QString shot = ordinal > 0 ? QObject::tr("Shot %1").arg(ordinal)
+                                             : QObject::tr("The shot");
+            if (!exportOk) {
+                n.id       = QStringLiteral("shot.not-saved");
+                n.severity = N::Error;
+                n.title    = QObject::tr("%1 not saved").arg(shot);
+                // Names the condition, so while "swings are not being saved" is
+                // on screen this stays in the log instead of repeating it once
+                // per shot — which is exactly what happened ten times over.
+                n.cause    = QStringLiteral("swing.save.no-directory");
+            } else {
+                n.id       = QStringLiteral("shot.analysis.incomplete");
+                n.severity = N::Warn;
+                n.title    = QObject::tr("%1 saved — analysis incomplete").arg(shot);
+                n.cause    = QStringLiteral("swing.save.no-directory");
+            }
+            notificationCenter.post(n);
+        });
+
+        QObject::connect(&launchMonitorController, &LaunchMonitorController::deviceOnlyShotSaved,
+                         &notificationCenter, [&notificationCenter](const QString &) {
+            // ⚠ REPLACES the analysis failure rather than stacking under it, as
+            // the old deviceOnlyToast deliberately did: "Shot analysis failed"
+            // describes the pipeline, and telling somebody their shot failed
+            // when it was in fact saved is the wrong sentence in the one place
+            // they look.
+            notificationCenter.dismiss(QStringLiteral("shot.analysis.failed"));
+            notificationCenter.dismiss(QStringLiteral("shot.analysis.incomplete"));
+
+            N::Notification n;
+            n.id       = QStringLiteral("shot.saved.device-only");
+            n.severity = N::Info;
+            n.kind     = N::Event;
+            n.title    = QObject::tr("Launch monitor only — shot saved without video or analysis");
+            n.glyph    = QStringLiteral("◎");
+            notificationCenter.post(n);
+        });
+    }
+
+    // ── Session-start preflight (design §7.7) ────────────────────────
+    //
+    // ⛔ A SESSION MUST NOT START INTO A STATE WHERE EVERY SHOT IS GUARANTEED TO
+    // FAIL.  Every fault of 1 September 2026 was knowable before the golfer
+    // swung: the library root is resolvable at session start and whether it is
+    // writable is one mkpath of a probe directory.  Ten identical toasts
+    // afterwards were the symptom; not asking beforehand was the defect.
+    //
+    // Hung off SessionController::sessionStarted because BOTH start paths — the
+    // wizard and the toolbar's Capture button — run beginSessionFolder() and
+    // then start(), so this needs no QML change and never goes near
+    // ScreenSessionWizard.qml.
+    QObject::connect(&sessionController, &SessionController::sessionStarted,
+                     &notificationCenter, [&]( int) {
+        using N = NotificationCenter;
+        const QString root = appSettings.athleteLibraryPath().trimmed();
+
+        // Resolved conditions first: a session starting is the moment to retire
+        // last session's verdict, so a fixed path stops shouting on its own.
+        for (const char *id : { "library.path-unset", "library.unwritable",
+                                "library.low-space", "swing.save.no-directory" })
+            notificationCenter.resolve(QLatin1String(id));
+
+        if (root.isEmpty()) {
+            // swing_paths.cpp silently redirects to AppDataLocation here, which
+            // means the swings are somewhere the user did not choose and will
+            // not think to look.
+            N::Notification n;
+            n.id          = QStringLiteral("library.path-unset");
+            n.severity    = N::Warn;
+            n.kind        = N::Condition;
+            n.title       = QObject::tr("No athlete library folder is set");
+            n.detail      = QObject::tr("Swings will be saved to the application data folder.");
+            n.actionLabel = QObject::tr("Open Storage settings");
+            n.actionId    = QStringLiteral("settings.storage");
+            notificationCenter.post(n);
+        } else {
+            // §7.7's one mkpath: cheap, and it answers the only question that
+            // matters — can this session write where it is about to write.
+            const QString probe = root + QStringLiteral("/.pinpoint-write-probe");
+            QDir          probeDir(probe);
+            const bool    writable = QDir().mkpath(probe);
+            if (writable) probeDir.removeRecursively();
+
+            if (!writable) {
+                N::Notification n;
+                n.id          = QStringLiteral("library.unwritable");
+                n.severity    = N::Error;
+                n.kind        = N::Condition;
+                n.title       = QObject::tr("Swings cannot be saved");
+                n.detail      = QObject::tr("%1 is not writable.").arg(root);
+                n.actionLabel = QObject::tr("Open Storage settings");
+                n.actionId    = QStringLiteral("settings.storage");
+                notificationCenter.post(n);
+            }
+        }
+
+        // The folder allocation itself — the return value beginSessionFolder()
+        // used to discard.  Same id the shot-time failure raises, so the two
+        // coalesce into one story rather than two.
+        if (!shotProcessor.sessionFolderReady()) {
+            N::Notification n;
+            n.id          = QStringLiteral("swing.save.no-directory");
+            n.severity    = N::Error;
+            n.kind        = N::Condition;
+            n.title       = QObject::tr("Swings are not being saved");
+            n.detail      = QObject::tr("The session folder could not be created under %1.")
+                                .arg(root.isEmpty() ? QObject::tr("the library folder") : root);
+            // ⚠ One fault, one sentence.  An unwritable root and a session
+            // folder that could not be created are the same problem told twice,
+            // and two near-identical errors on screen is the cascade §7 is
+            // about.  Naming the cause means whichever was raised first is the
+            // one the user reads.
+            n.cause       = root.isEmpty() ? QStringLiteral("library.path-unset")
+                                           : QStringLiteral("library.unwritable");
+            n.actionLabel = QObject::tr("Open Storage settings");
+            n.actionId    = QStringLiteral("settings.storage");
+            notificationCenter.post(n);
+        }
+
+        // Headroom, from the reading the Storage panel already takes.
+        const StorageInfo si = appSettings.queryStorageInfo();
+        constexpr qint64 kLowSpaceBytes = 2LL * 1024 * 1024 * 1024;   // 2 GiB
+        if (si.totalBytes > 0 && si.freeBytes < kLowSpaceBytes) {
+            N::Notification n;
+            n.id          = QStringLiteral("library.low-space");
+            n.severity    = N::Warn;
+            n.kind        = N::Condition;
+            n.title       = QObject::tr("Low disk space");
+            n.detail      = QObject::tr("%1 free on %2.")
+                                .arg(QLocale().formattedDataSize(si.freeBytes), si.volumeName);
+            n.actionLabel = QObject::tr("Open Storage settings");
+            n.actionId    = QStringLiteral("settings.storage");
+            notificationCenter.post(n);
+        }
+    });
+
     // IMU impact auto-detection (shot detection P1, re-pointed at the P3
     // arbiter): candidates funnel through reportCandidate's hold/fuse window
     // rather than committing directly. Gated behind the autoDetectSwing
@@ -590,6 +815,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("resourceMonitor"),  &resourceMonitor);
     engine.rootContext()->setContextProperty(QStringLiteral("profiler"),         &profilerController);
     engine.rootContext()->setContextProperty(QStringLiteral("sessionController"), &sessionController);
+    engine.rootContext()->setContextProperty(QStringLiteral("notifications"),     &notificationCenter);
     engine.rootContext()->setContextProperty(QStringLiteral("updateController"),   &updateController);
     engine.rootContext()->setContextProperty(QStringLiteral("cudaRuntime"),        &cudaRuntime);
 

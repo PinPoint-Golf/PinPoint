@@ -181,6 +181,7 @@ set(PP_QML_FILES
     src/Gui/review/PpChartSummary.qml
     src/Gui/review/PpSpeedSelector.qml
     src/Gui/components/PpToast.qml
+    src/Gui/components/PpNotificationHost.qml
     src/Gui/review/PpDataViewer.qml
     src/Gui/review/PpCoverageStrip.qml
     src/Gui/review/PpPropertiesPanel.qml

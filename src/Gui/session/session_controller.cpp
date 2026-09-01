@@ -67,6 +67,15 @@ void SessionController::start(int sessionType)
     if (!m_running) { m_running = true; emit runningChanged(); }
     tick();
     m_ticker.start();
+
+    // ⚠ LAST, AND AFTER THE FOLDER IS ALLOCATED.  Both start paths — the wizard
+    // (Main.qml) and the toolbar's Capture button (PpSessionToolbar.qml) — call
+    // shotProcessor.beginSessionFolder() and then this, so this is the one
+    // funnel a session-start preflight can hang off without touching either of
+    // them, and by here the folder allocation has already succeeded or failed
+    // for real.  main.cpp owns what the preflight then checks; this class knows
+    // only that a session began.
+    emit sessionStarted(static_cast<int>(m_sessionType));
 }
 
 void SessionController::endSession()

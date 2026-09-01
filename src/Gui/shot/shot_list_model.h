@@ -186,6 +186,15 @@ private:
         QString      lmDeviceKind;    // which device measured it; only reloaded shots carry it
     };
 
+public:
+    // The number the carousel SHOWS for this shot.  Deliberately not the id:
+    // addShot() answers a monotonic id and the ordinal is a per-session count,
+    // and the two diverge the moment a shot is trashed.  A notification saying
+    // "Shot 7" must mean the row the user can see.  0 when the id is unknown.
+    int ordinalForId(int id) const;
+
+private:
+
     int  rowForId(int id) const;
     void persistReview(int row);   // write-through rating/note/club to swing.json
 

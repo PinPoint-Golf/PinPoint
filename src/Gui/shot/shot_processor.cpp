@@ -1249,8 +1249,8 @@ void ShotProcessor::startSwingSave()
     if (job.swingDir.isEmpty()) {
         ppWarn() << "[SwingExport] could not allocate a swing directory — not saving";
         m_exportOutcome = Outcome::Skipped;
-        emit swingSaveFailed(tr("could not create the swing folder — check the athlete "
-                                "library path in Settings"));
+        emit swingSaveBlocked(tr("The swing folder could not be created — check the "
+                                 "athlete library path in Settings"));
         return;
     }
     if (job.cameras.empty()) {
@@ -1695,13 +1695,22 @@ QString ShotProcessor::todaySessionDir(int sessionType)
 void ShotProcessor::beginSessionFolder(int sessionType, bool extend)
 {
     m_sessionType = sessionType;   // so a shot's folder base uses the right type
+    // ⚠ THE RETURN VALUE IS THE POINT.  beginSession() answers {} when it could
+    // not create the session folder (swing_paths.cpp: mkpath failed), and this
+    // function used to throw that away — so a session started happily on an
+    // unwritable library and the first thing the golfer learned was a toast
+    // after a swing had already been lost.  That is precisely what happened on
+    // 1 September 2026 with /mnt/swingdata unmounted.  Keep it; the
+    // session-start preflight reads it through sessionFolderReady().
+    m_sessionFolderReady = false;
     if (m_appSettings && m_athlete)
-        m_swingPaths.beginSession(m_appSettings->athleteLibraryPath(),
-                                  m_athlete->currentName(),
-                                  m_athlete->currentUuid(),
-                                  m_appSettings->sessionNamingPattern(),
-                                  sessionTypeLabel(sessionType),
-                                  extend);
+        m_sessionFolderReady =
+            !m_swingPaths.beginSession(m_appSettings->athleteLibraryPath(),
+                                       m_athlete->currentName(),
+                                       m_athlete->currentUuid(),
+                                       m_appSettings->sessionNamingPattern(),
+                                       sessionTypeLabel(sessionType),
+                                       extend).isEmpty();
     emit activeSessionDirChanged();
 }
 
@@ -1938,6 +1947,18 @@ void ShotProcessor::maybeJoin()
     else
         emit shotFailed(!analysisOk ? m_analysisResult.error
                                     : QStringLiteral("export failed or skipped"));
+
+    // ⭐ §7.5 R4 — ONE TERMINAL STATEMENT PER SHOT, NOT ONE PER STAGE.
+    // The stages above each announced themselves and the user had to assemble
+    // the verdict; worse, the one that means "this shot produced nothing at
+    // all" — shotFailed — reached a controller that discarded its message and
+    // raised nothing on screen, so it has never once been said out loud.  The
+    // fold is already computed here; this is only saying what it came to.
+    // Stage detail keeps going to the app log, which is where it belongs.
+    // The carousel's number, not the model's id — they diverge once a shot is
+    // trashed, and "Shot 7" has to mean the row the user can point at.
+    const int ordinal = (m_shotModel && newShotId >= 0) ? m_shotModel->ordinalForId(newShotId) : 0;
+    emit shotOutcome(ordinal, exportOk, analysisOk);
 
     // Post-shot playback now lives on the Review stage: a reviewable shot is auto-
     // promoted into Review (disk replay) by the UI from shotProcessed(), so skip the

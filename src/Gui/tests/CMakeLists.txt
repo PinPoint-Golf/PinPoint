@@ -99,6 +99,17 @@ pp_add_test(reanalysis_controller_test
     INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core ${SRC}/LaunchMonitor
     LINK    Qt6::Qml Qt6::Concurrent  AUTOMOC)
 
+# NotificationCenter — the one notification sink: stable ids, coalescing,
+# cause-suppression and condition latching (design doc §7.4-7.5, item H-g).
+# Drives a clock it owns, so the 7 s dwell and 30 s grace window cost nothing.
+pp_add_test(notification_center_test
+    SOURCES notification_center_test.cpp
+            ${GUI}/app/notification_center.cpp
+            ${SRC}/Core/pp_log_stream.cpp
+            ${SRC}/Core/PpMessageLog.cpp
+    INCLUDE ${GUI} ${SRC} ${SRC}/Core
+    LINK    Qt6::Qml  AUTOMOC)
+
 # No binding may subscribe to a dependency it does not USE.
 #
 # A revision counter named on a line of its own is an expression statement whose value is discarded;

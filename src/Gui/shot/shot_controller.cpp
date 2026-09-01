@@ -496,7 +496,8 @@ void ShotController::commitArbitratedShot(qint64 t0HostNs, const QString &shotId
         // host does not record a swing for it.  The device is not told, because
         // PPCP has no way to say it; that is an open request to the PPC team.
         emit shotRefused(
-            tr("Shot from the phone was not recorded — nothing here confirmed it."));
+            tr("Shot from the phone was not recorded — nothing here confirmed it."),
+            QStringLiteral("shot.corroboration.refused"));
         return;
     }
 
@@ -529,7 +530,8 @@ void ShotController::commitShot(Source source, qint64 timestampUs)
             ppWarn() << "[ppcp] arbitrated shot DROPPED — still processing the previous shot"
                      << "— t0_us" << timestampUs;
             emit shotRefused(
-                tr("Shot from the phone was missed — still working on the previous one."));
+                tr("Shot from the phone was missed — still working on the previous one."),
+                QStringLiteral("shot.dropped.busy"));
             return;
         }
 #endif

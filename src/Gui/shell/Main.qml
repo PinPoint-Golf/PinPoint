@@ -776,62 +776,29 @@ ApplicationWindow {
         }
     }
 
-    // ── Shot-pipeline failure toasts ─────────────────────────────────────────
-    // Window-level overlays so a failure surfaces on whatever screen is
-    // active, instead of dying quietly in the message log. Two independent
-    // toasts because the workers run in parallel and can both fail: save
-    // failure loses data (error red); analysis failure degrades the shot to
-    // no-score (warn amber) but the media still lands. The copy action
-    // carries the full error for bug reports.
-    PpToast {
-        id: saveErrorToast
+    // ── The one notification surface ─────────────────────────────────────────
+    // Was four PpToast instances wired to four signals and positioned by hand
+    // against each other — three of them computing the SAME y, so any two
+    // visible at once overlapped, and each restarting its own hide timer so ten
+    // failures showed as one. Identity, counting, cause-suppression and
+    // latching are all NotificationCenter's now (C++, main.cpp wires the
+    // posters); this is only the surface they draw on.
+    PpNotificationHost {
+        id: notificationHost
         anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(parent.width - Theme.sp(96), Theme.sp(620))
         y: parent.height - height - Theme.sp(24)
         z: 100
-        glyph: "⚠"
-        severity: "error"
-        showUndo: false
-    }
-    PpToast {
-        id: analysisErrorToast
-        anchors.horizontalCenter: parent.horizontalCenter
-        // Stacks above the save toast when both are visible.
-        y: saveErrorToast.y - (saveErrorToast.visible ? height + Theme.sp(10) : 0)
-        z: 100
-        glyph: "⚠"
-        severity: "warn"
-        showUndo: false
     }
     Connections {
-        target: shotProcessor
-        function onSwingSaveFailed(error) {
-            saveErrorToast.copyText = error
-            saveErrorToast.show(qsTr("Swing save failed — %1").arg(error))
-        }
-        function onAnalysisFailed(error) {
-            analysisErrorToast.copyText = error
-            analysisErrorToast.show(qsTr("Shot analysis failed — %1").arg(error))
-        }
-    }
-
-    // A shot the capture pipeline could not record, saved from the monitor's reading
-    // alone. This REPLACES the analysis-failure toast rather than stacking under it:
-    // "Shot analysis failed" describes the pipeline, and telling somebody their shot
-    // failed when it was in fact saved is the wrong sentence in the one place they look.
-    PpToast {
-        id: deviceOnlyToast
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: saveErrorToast.y - (saveErrorToast.visible ? height + Theme.sp(10) : 0)
-        z: 101
-        glyph: "◎"
-        severity: "info"
-        showUndo: false
-    }
-    Connections {
-        target: launchMonitor
-        function onDeviceOnlyShotSaved(swingDir) {
-            analysisErrorToast.visible = false
-            deviceOnlyToast.show(qsTr("Launch monitor only — shot saved without video or analysis"))
+        target: notifications
+        // The centre owns no navigation, so the one action it can ask for is
+        // resolved here — in-app, never a menu or a native dialog.
+        function onActionRequested(actionId) {
+            if (actionId === "settings.storage") {
+                settingsScreen.activeNavIndex = 8      // Storage
+                navController.navigate(root.screenSettings)
+            }
         }
     }
 
@@ -843,9 +810,8 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         width: Math.min(parent.width - Theme.sp(96), Theme.sp(620))
         allowed: navController.currentIndex !== root.screenWizard
-        y: (analysisErrorToast.visible ? analysisErrorToast.y
-            : saveErrorToast.visible   ? saveErrorToast.y
-            : parent.height) - height - Theme.sp(12)
+        y: (notificationHost.count > 0 ? notificationHost.y : parent.height)
+           - height - Theme.sp(12)
         z: 100
     }
 
@@ -866,21 +832,12 @@ ApplicationWindow {
     // WHY — every detector and its delta — is on the app log and only in a
     // testing build; this is the act-now half.
     TingPlayer { id: refusedTing; frequency: 220.0; volume: 0.7 }
-    PpToast {
-        id: shotRefusedToast
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: saveErrorToast.y - (saveErrorToast.visible ? height + Theme.sp(10) : 0)
-        z: 101
-        glyph: "⊘"
-        severity: "warn"
-        showUndo: false
-    }
     Connections {
         target: shotController
-        function onShotRefused(reason) {
-            refusedTing.play()
-            shotRefusedToast.show(reason)
-        }
+        // The sentence itself now goes through the notification centre (main.cpp
+        // posts it under the id the controller names); this keeps the audible
+        // half, which is the part that reaches a golfer who is not looking.
+        function onShotRefused(reason, id) { refusedTing.play() }
     }
 
     // ── The probe hook — the standing verify-by-probing tool, dark by default ────────────────

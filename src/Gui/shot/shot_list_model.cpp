@@ -94,6 +94,12 @@ int ShotListModel::rowForId(int id) const
     return -1;
 }
 
+int ShotListModel::ordinalForId(int id) const
+{
+    const int row = rowForId(id);
+    return row < 0 ? 0 : m_shots[row].ordinal;
+}
+
 int ShotListModel::addShot(const QString &swingDir, const QString &timestampLabel,
                            const QString &club, bool hasVideo, const QUrl &thumbnailSource,
                            const QVariantList &tracePoints, int score,

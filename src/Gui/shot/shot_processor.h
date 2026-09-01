@@ -117,6 +117,10 @@ public:
     QVariantMap replayAnalysisDetail() const { return m_replayAnalysisDetail; }
     double  analysisProgress() const { return m_analysisProgress; }
     QString activeSessionDir() const { return m_swingPaths.currentSessionDir(); }
+    // False when beginSessionFolder() could not create the session folder — the
+    // state a session used to start into silently.  Read by the session-start
+    // preflight in main.cpp.
+    bool    sessionFolderReady() const { return m_sessionFolderReady; }
     // The folder allocated for the shot being processed, or the last one processed.
     // Set BEFORE the export runs, so it survives a shot that produced no document at
     // all — which is exactly when a launch monitor reading has somewhere to go and the
@@ -172,10 +176,23 @@ signals:
     void shotFailed(const QString &error);
     void swingSaved(const QString &path);
     void swingSaveFailed(const QString &error);
+    // ⚠ A CONDITION, NOT AN EVENT, AND A DIFFERENT FAULT FROM THE ABOVE.
+    // swingSaveFailed says one export failed; this says swings are not being
+    // saved AT ALL, because the swing folder could not be created — a state of
+    // the machine that does not stop being true when a timer expires, and that
+    // every subsequent shot will hit again.  They used to share one signal and
+    // one toast, which is why ten occurrences of this on 1 September 2026 read
+    // as one piece of news.
+    void swingSaveBlocked(const QString &detail);
     // Analyzer returned !ok — the shot degrades to no-score/no-metrics but the
     // pipeline continues. Surfaced as a window-level toast (Main.qml), not a
     // log line: the user must see why a shot has no analysis.
     void analysisFailed(const QString &error);
+    // §7.5 R4 — what the shot BECAME, once, at the join.  `ordinal` is the
+    // carousel row's 1-based number (0 when it never reached the carousel).
+    // The three stage signals above stay, because the log still wants them;
+    // this is the one the user is told.
+    void shotOutcome(int ordinal, bool exportOk, bool analysisOk);
 
 private slots:
     void onPostRollExpired();
@@ -252,6 +269,7 @@ private:
     ShotController::Source m_shotSource = ShotController::Source::Manual;
     qint64  m_impactUs    = -1;
     int     m_sessionType = -1;
+    bool    m_sessionFolderReady = false;
     QString m_timestampLabel;   // wallclock "hh:mm:ss" at trigger
     QTimer  m_postRollTimer;    // single-shot post-trigger capture continuation
 

@@ -225,7 +225,14 @@ signals:
     // A device's Shot that this host declined to record, and why in one line
     // fit for a person: the golfer hit a ball and nothing came of it, so
     // something has to say so.  `reason` is already translated.
-    void shotRefused(const QString &reason);
+    //
+    // ⚠ `id` IS NOT DECORATION.  These are two different faults — nothing
+    // corroborated the phone's shot, versus the pipeline was still busy with the
+    // last one — and they used to arrive as one signal carrying two different
+    // strings, so the screen could only ever show whichever landed last.  A
+    // stable id is what lets the notification model count them separately; on
+    // 1 September 2026 that was four of the first and two of the second.
+    void shotRefused(const QString &reason, const QString &id);
 
 private:
     // The single commit path — writes the marker and emits shotDetected.

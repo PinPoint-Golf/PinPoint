@@ -70,6 +70,10 @@ public:
     Q_INVOKABLE void reset();   // back to 00:00:00, stopped
 
 signals:
+    // A session began, of this type.  Emitted after the clock starts and after
+    // ShotProcessor::beginSessionFolder() has run, so a listener sees the real
+    // outcome of the folder allocation rather than a guess at it.
+    void sessionStarted(int sessionType);
     void runningChanged();
     void elapsedLabelChanged();
     void activeSessionTypeChanged();
