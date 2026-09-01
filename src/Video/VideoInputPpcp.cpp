@@ -764,6 +764,32 @@ void VideoInputPpcp::closeStream(const QString &streamId, const char *reason)
     (void)ppcp_peer_stream_close(m_peer, streamId.toUtf8().constData(), &closedAt, reason);
 }
 
+// ⚠ **A DIAGNOSTIC INSTRUMENT, NOT A SETTING.**  `PINPOINT_PPCP_MAX_PREVIEWS`
+// caps how many camera Sources this host opens a preview for.  It exists because
+// a phone declares every physical lens it has and there is no way to ask it for
+// fewer, so isolating "does preview traffic kill the cabled link" needed a way
+// to halve the traffic without changing what either peer declares.
+//
+// Unset means no cap, which is the shipping behaviour and the only behaviour a
+// user ever sees.  Do not grow this into a preference: the real control is the
+// camera-enablement gate, which currently does NOT suppress preview (a camera
+// reading "disabled — won't connect" still has a live preview consumer pulling
+// frames), and that is a bug to fix rather than an environment variable to keep.
+static int previewCap()
+{
+    static const int cap = [] {
+        const QByteArray v = qgetenv("PINPOINT_PPCP_MAX_PREVIEWS");
+        if (v.isEmpty()) return -1;
+        bool ok = false;
+        const int n = v.toInt(&ok);
+        if (!ok || n < 0) return -1;
+        ppWarn() << "[ppcp] ⚠ PINPOINT_PPCP_MAX_PREVIEWS =" << n
+                 << "— preview Sources are being capped for diagnosis";
+        return n;
+    }();
+    return cap;
+}
+
 int VideoInputPpcp::startPreviewConsumers(QObject *parent, ppcp_peer *peer,
                                           const QString &peerId,
                                           const QString &sessionId,
@@ -771,8 +797,10 @@ int VideoInputPpcp::startPreviewConsumers(QObject *parent, ppcp_peer *peer,
                                           std::vector<VideoInputPpcp *> *out)
 {
     if (!peer || !desc || !out || peerId.isEmpty() || sessionId.isEmpty()) return 0;
+    const int cap = previewCap();
     int live = 0;
     for (std::size_t i = 0; i < desc->source_count; ++i) {
+        if (cap >= 0 && live >= cap) break;
         if (!ppcp_source_kind_is_camera(&desc->sources[i])) continue;
         const QString sourceId = idStr(desc->sources[i].id);
         auto *v = new VideoInputPpcp(parent);
@@ -1131,8 +1159,10 @@ int VideoInputPpcp::openPreviewStreams(ppcp_peer *peer, const QString &peerId,
                                        const ppcp_peer_desc *desc)
 {
     if (!peer || !desc || sessionId.isEmpty()) return 0;
+    const int cap = previewCap();
     int asked = 0;
     for (std::size_t i = 0; i < desc->source_count; ++i) {
+        if (cap >= 0 && asked >= cap) break;
         const ppcp_source &src = desc->sources[i];
         if (!ppcp_source_kind_is_camera(&src)) continue;
 

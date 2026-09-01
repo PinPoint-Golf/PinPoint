@@ -18,6 +18,8 @@
 
 #include "ppcp_host_peer.h"
 
+#include "../Core/pp_debug.h"   // ppWarn — preview-channel degradation is worth saying
+
 #include <cstring>
 
 #include <ppcp/frame.h>
@@ -235,16 +237,44 @@ bool PpcpHostPeer::tick(std::int64_t nowNs)
     return alive;
 }
 
+// Records why a channel ended, once — the FIRST cause is the interesting one,
+// because tearing one channel down routinely trips the others and the later
+// verdicts are consequences of this one.
+void PpcpHostPeer::noteCloseCause(Channel ch, TransportChannel *tc, IoStatus st)
+{
+    if (!m_stats.closeCause.empty()) return;
+    const char *chName = (ch == Channel::Control) ? "control"
+                       : (ch == Channel::Bulk)    ? "bulk"
+                       : (ch == Channel::Preview) ? "preview" : "?";
+    std::string why = tc ? tc->lastCloseCause() : std::string();
+    if (why.empty())
+        why = (st == IoStatus::Closed) ? "orderly shutdown, no detail"
+                                       : "channel error, no detail";
+    m_stats.closeCause = std::string(chName) + " channel: " + why;
+}
+
 bool PpcpHostPeer::pump()
 {
     if (!m_link || !m_engine) return false;
 
-    bool alive = false;
+    // ⛔ **AN OPTIONAL CHANNEL DYING IS NOT THE LINK DYING.**  `alive` used to be
+    // set true per open channel and false when that channel died, so whichever
+    // channel came LAST decided the link's fate — and a dead `preview` channel
+    // therefore dropped the peer, the session and arbitration with it.
+    // `CORE` §3 requires control and bulk; `ENC` 2.1d makes the third OPTIONAL,
+    // and 5.11i/5.11j say preview degrades first and is discarded rather than
+    // preserved.  Losing it means "no picture", not "session over".
+    //
+    // Measured 1 Sep 2026 on a cabled iPhone: one preview blip every 30-100 s
+    // tore the whole link down, at both ends, all morning.
+    bool sawMandatory  = false;   // control or bulk was open this pass
+    bool lostMandatory = false;   // ...and one of them died
 
     for (Channel ch : m_link->channels()) {
         TransportChannel *tc = m_link->channel(ch);
         if (!tc || !tc->isOpen()) continue;
-        alive = true;
+        const bool optional = (ch == Channel::Preview);
+        if (!optional) sawMandatory = true;
         const std::uint8_t chNo = static_cast<std::uint8_t>(ch);
 
         // ── Socket to engine ───────────────────────────────────────────────
@@ -277,6 +307,7 @@ bool PpcpHostPeer::pump()
             const IoStatus st = tc->read(m_scratch.data() + keep, m_scratch.size() - keep, got);
             if (st == IoStatus::Ok && got > 0) {
                 m_stats.bytesIn += got;
+                if (chNo < 3) m_stats.bytesInCh[chNo] += got;
                 const std::size_t have = keep + got;
 
                 // ⚠ ONE FRAME PER FEED, AND DRAIN BETWEEN THEM.  F-L13-1:
@@ -345,7 +376,9 @@ bool PpcpHostPeer::pump()
                 tail.assign(m_scratch.begin() + static_cast<std::ptrdiff_t>(off),
                             m_scratch.begin() + static_cast<std::ptrdiff_t>(have));
                 if (fatal) {
+                    noteCloseCause(ch, tc, IoStatus::Error);
                     tc->close();
+                    if (optional) break;          // degrade, as above
                     m_stats.closed = true;
                     return false;
                 }
@@ -354,9 +387,17 @@ bool PpcpHostPeer::pump()
             }
             if (st == IoStatus::WouldBlock) break;
             if (st == IoStatus::Closed || st == IoStatus::Error) {
+                noteCloseCause(ch, tc, st);
+                const std::string why = tc->lastCloseCause();
                 tc->close();
-                m_stats.closed = true;
-                alive = false;
+                if (optional) {
+                    ppWarn() << "[ppcp] preview channel lost —"
+                             << QString::fromStdString(why)
+                             << "— the session continues without it";
+                } else {
+                    m_stats.closed = true;
+                    lostMandatory  = true;
+                }
                 break;
             }
             break;
@@ -395,19 +436,30 @@ bool PpcpHostPeer::pump()
             const IoStatus st = tc->write(bytes, len, written);
             if (written > 0) {
                 m_stats.bytesOut += written;
+                if (chNo < 3) m_stats.bytesOutCh[chNo] += written;
                 const ppcp_result cr = m_engine->drainCommit(chNo, written);
                 if (cr != PPCP_OK) {
                     // The engine and this pump now disagree about what left, and
                     // there is no honest way to resynchronise a byte stream.
+                    noteCloseCause(ch, tc, IoStatus::Error);
                     tc->close();
+                    if (optional) break;          // degrade, as above
                     m_stats.closed = true;
                     return false;
                 }
             }
             if (st == IoStatus::Closed || st == IoStatus::Error) {
+                noteCloseCause(ch, tc, st);
+                const std::string why = tc->lastCloseCause();
                 tc->close();
-                m_stats.closed = true;
-                alive = false;
+                if (optional) {
+                    ppWarn() << "[ppcp] preview channel lost —"
+                             << QString::fromStdString(why)
+                             << "— the session continues without it";
+                } else {
+                    m_stats.closed = true;
+                    lostMandatory  = true;
+                }
                 break;
             }
             if (st == IoStatus::WouldBlock || written < len) {
@@ -430,7 +482,9 @@ bool PpcpHostPeer::pump()
     // by now their bytes are gone.
     drainEvents();
 
-    return alive;
+    // Alive while a mandatory channel is still open.  `sawMandatory` guards the
+    // degenerate case: a link with only a preview channel left is not a link.
+    return sawMandatory && !lostMandatory;
 }
 
 // ── The binding to libppcp's engine (L6) ────────────────────────────────────

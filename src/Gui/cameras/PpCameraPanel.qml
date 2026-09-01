@@ -252,6 +252,7 @@ Item {
                 camName: modelData.alias && modelData.alias !== "" ? modelData.alias
                                                                    : modelData.description
                 serial: modelData.serialNumber
+                isPpcp: modelData.isPpcp === true
                 perspective: modelData.perspective    // CameraInstance.Perspective value
                 iface:  modelData.interface
                 selected: modelData.selected
@@ -344,6 +345,9 @@ Item {
         property string camName:  ""
         property int    perspective: 0
         property string serial: ""; property string iface: ""; property bool selected: false
+        // A PPCP camera's `serial` is its owning peer's id, not a serial —
+        // long, shared between that phone's cameras, and elided differently.
+        property bool   isPpcp: false
         property bool   deviceEnabled: true   // session enablement, from cameraList
 
         // ⭐ CR-02 — the phone's torch, or null.  See root.torchFor().
@@ -410,20 +414,36 @@ Item {
                 color: connected ? Theme.colorGood : Theme.colorText3
             }
 
-            Column {
-                Layout.fillWidth: true; spacing: Theme.sp(2)
+            // ⛔ A `ColumnLayout`, NOT a `Column`.  A plain `Column` gives its
+            // children no width, so `elide` never fires and each Text grows to
+            // its full implicit width — a whole peer id for a PPCP camera.  That
+            // inflated this item's implicit width past the space available, and
+            // a RowLayout cannot shrink a child below its implicit width, so the
+            // row overflowed and the toggles were painted over the text.
+            // `Layout.minimumWidth: 0` is what actually lets it give way.
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: Theme.sp(2)
                 opacity: deviceEnabled ? 1.0 : 0.45
                 Text {
+                    Layout.fillWidth: true
                     text: perspLabel + " · " + camName
                     font.family: Theme.fontBody; font.pixelSize: Theme.fontSzBody2
                     color: Theme.colorText; elide: Text.ElideRight
                 }
                 Text {
+                    Layout.fillWidth: true
+                    // A PPCP camera's "serial" is its owning peer's id, which is
+                    // far too long to read and is shown for identification only —
+                    // so it elides from the LEFT, keeping the distinctive tail
+                    // rather than the shared `peer:` prefix.
                     text: !deviceEnabled ? qsTr("disabled — won't connect")
                         : [serial !== "" ? "SN " + serial : "", iface]
                               .filter(function(s){ return s !== "" }).join(" · ")
                     font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                     font.letterSpacing: Theme.trackingData; color: Theme.colorText3
+                    elide: camRow.isPpcp ? Text.ElideMiddle : Text.ElideRight
                 }
             }
 
@@ -474,9 +494,32 @@ Item {
                 }
             }
 
+            // A gap the eye can read, so the torch and the enable toggle are not
+            // one undifferentiated cluster of two identical pills.
+            Item {
+                visible: camRow.hasTorch
+                Layout.preferredWidth: Theme.sp(10)
+                Layout.preferredHeight: 1
+            }
+
             // Enable toggle — session-local; disabling also disconnects.
+            // Labelled only where a torch sits beside it: with two pills on one
+            // row an unlabelled pair is a guess, and this is the one that drops
+            // the camera from the session.
+            Text {
+                visible: camRow.hasTorch
+                Layout.alignment: Qt.AlignVCenter
+                text: qsTr("Enable")
+                font.family: Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
+                font.letterSpacing: Theme.trackingData
+                color: Theme.colorText2
+                opacity: camRow.deviceEnabled ? 1.0 : 0.45
+            }
+
             TogglePill {
                 Layout.alignment: Qt.AlignVCenter
+                Layout.leftMargin: camRow.hasTorch ? 0 : Theme.sp(6)
                 checked: camRow.deviceEnabled
                 onToggled: (v) => cameraManager.setSessionCameraEnabled(camRow.camKey, v)
             }

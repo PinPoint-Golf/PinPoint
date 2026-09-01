@@ -140,6 +140,17 @@ public:
         std::size_t bytesOut = 0;
         std::size_t wouldBlockOnWrite = 0;   // CORE T2 backpressure, observed
         bool        closed = false;
+        // ⭐ Why the link ended, from the channel that ended it — the direction,
+        // the channel, and the OpenSSL/`errno` verdict.  Empty while it is alive.
+        // Without this a dead link is reported as "link closed" whether the peer
+        // left politely or the transport was reset underneath it.
+        std::string closeCause;
+        // ⭐ PER CHANNEL, because the aggregate cannot answer the question that
+        // matters: was the channel that died actually CARRYING anything?  A
+        // preview channel that has moved zero bytes in a minute is an idle
+        // multiplexed tunnel, and an idle tunnel is exactly what a mux reaps.
+        std::size_t bytesInCh[3]  = {0, 0, 0};
+        std::size_t bytesOutCh[3] = {0, 0, 0};
     };
 
     // Moves whatever is ready in both directions on every bound channel, and
@@ -148,6 +159,10 @@ public:
     // thread (ground rule 7 again, applied to ourselves so H8's headless
     // harness can drive it).
     bool pump();
+
+private:
+    void noteCloseCause(Ppcp::Channel ch, Ppcp::TransportChannel *tc, Ppcp::IoStatus st);
+public:
 
     // pump(), then the two schedules that need a clock: §6.3's sync cadence and
     // §7.4's heartbeat cadence, and then 8.2h's issue hold.  `nowNs` is a

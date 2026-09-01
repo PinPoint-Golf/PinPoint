@@ -794,6 +794,9 @@ TlsOutcome plaintextOutcome()
 
 struct TransportChannel::Impl {
     pp_socket_t sock = PP_INVALID_SOCKET;
+    // See TransportChannel::lastCloseCause().  Written only on the paths
+    // that end a channel, so an empty string means nothing has gone wrong.
+    std::string closeCause;
     SSL *ssl = nullptr;
     SSL_CTX *ctx = nullptr;   // owned only by the connector's per-channel context
     bool ownsCtx = false;
@@ -897,6 +900,43 @@ void TransportChannel::close()
     if (m_impl) m_impl->shut();
 }
 
+// Names an SSL failure in the terms an operator and a maintainer both need:
+// which OpenSSL verdict, and — where the verdict is `SSL_ERROR_SYSCALL`, which
+// is the one that hides everything — the `errno` behind it.  `errno` is read by
+// the caller IMMEDIATELY after the SSL call and passed in, because anything at
+// all between the two can overwrite it.
+static std::string sslFailureCause(int sslErr, int err, const char *op)
+{
+    std::string what;
+    switch (sslErr) {
+    case SSL_ERROR_ZERO_RETURN:
+        return std::string(op) + ": TLS close_notify — the peer shut down cleanly";
+    case SSL_ERROR_SYSCALL:
+        if (err == 0)
+            return std::string(op) + ": EOF without close_notify — the peer or the "
+                                     "transport beneath it went away mid-stream";
+        what = std::string(op) + ": socket error " + std::to_string(err) + " ("
+             + std::strerror(err) + ")";
+        return what;
+    case SSL_ERROR_SSL: {
+        // ⭐ WHICH protocol error — this is the whole diagnosis.  "bad record
+        // mac" or "decryption failed" means the record stream was CORRUPTED;
+        // "wrong version number" or "packet length too long" means it lost
+        // FRAMING, i.e. a writer desynchronised it.  Those have entirely
+        // different causes and "TLS protocol error" alone separates neither.
+        const unsigned long q = ERR_peek_last_error();
+        char buf[256] = {0};
+        if (q != 0) ERR_error_string_n(q, buf, sizeof(buf));
+        what = std::string(op) + ": TLS protocol error";
+        if (buf[0] != '\0') what += std::string(" — ") + buf;
+        return what;
+    }
+    default:
+        break;
+    }
+    return std::string(op) + ": SSL_get_error " + std::to_string(sslErr);
+}
+
 IoStatus TransportChannel::read(void *buf, std::size_t len, std::size_t &got)
 {
     got = 0;
@@ -931,11 +971,22 @@ IoStatus TransportChannel::read(void *buf, std::size_t len, std::size_t &got)
         got = n;
         return IoStatus::Ok;
     }
+    // ⚠ `errno` FIRST, before SSL_get_error or anything else can tread on it.
+    const int sysErr = errno;
     const int e = SSL_get_error(m_impl->ssl, r);
     if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) return IoStatus::WouldBlock;
+    m_impl->closeCause = sslFailureCause(e, sysErr, "read");
     if (e == SSL_ERROR_ZERO_RETURN) return IoStatus::Closed;
+    // ⚠ An unclean EOF and a reset BOTH arrive here.  Both still end the channel,
+    // so the returned status is unchanged and no behaviour moves — but they are
+    // no longer indistinguishable, because `closeCause` now separates them.
     if (e == SSL_ERROR_SYSCALL && ERR_peek_error() == 0) return IoStatus::Closed;
     return IoStatus::Error;
+}
+
+std::string TransportChannel::lastCloseCause() const
+{
+    return m_impl ? m_impl->closeCause : std::string();
 }
 
 IoStatus TransportChannel::write(const void *buf, std::size_t len, std::size_t &put)
@@ -958,8 +1009,11 @@ IoStatus TransportChannel::write(const void *buf, std::size_t len, std::size_t &
         put = n;
         return IoStatus::Ok;
     }
+    // ⚠ `errno` FIRST — see read().
+    const int sysErr = errno;
     const int e = SSL_get_error(m_impl->ssl, r);
     if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) return IoStatus::WouldBlock;
+    m_impl->closeCause = sslFailureCause(e, sysErr, "write");
     if (e == SSL_ERROR_ZERO_RETURN) return IoStatus::Closed;
     return IoStatus::Error;
 }

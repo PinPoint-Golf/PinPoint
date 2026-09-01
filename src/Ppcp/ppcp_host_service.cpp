@@ -1034,6 +1034,25 @@ bool PpcpHostService::declareForTest(std::size_t index, const QString &counterpa
 void PpcpHostService::dropPhone(Phone *ph, const char *why)
 {
     if (!ph) return;
+    // ⭐ SAY WHY, not just that.  `why` is this call site's word for it and is
+    // the same string whether the peer left politely or the cable was pulled;
+    // the transport's own verdict is the half that actually diagnoses anything,
+    // so it is read here while the peer still exists to be asked.
+    if (ph->peer) {
+        const std::string cause = ph->peer->stats().closeCause;
+        if (!cause.empty()) {
+            const auto &st = ph->peer->stats();
+            // ⭐ The per-channel traffic beside the cause.  A channel that died
+            // having moved nothing is a very different fault from one that died
+            // mid-transfer, and "link closed" said neither.
+            ppWarn() << "[ppcp] link ended for" << ph->name << "—"
+                     << QString::fromStdString(cause)
+                     << QStringLiteral("| bytes in/out — control %1/%2  bulk %3/%4  preview %5/%6")
+                            .arg(st.bytesInCh[0]).arg(st.bytesOutCh[0])
+                            .arg(st.bytesInCh[1]).arg(st.bytesOutCh[1])
+                            .arg(st.bytesInCh[2]).arg(st.bytesOutCh[2]);
+        }
+    }
     // Find it before anything is torn down, so the erase below cannot be
     // reading a half-destroyed entry.
     auto it = std::find_if(m_phones.begin(), m_phones.end(),

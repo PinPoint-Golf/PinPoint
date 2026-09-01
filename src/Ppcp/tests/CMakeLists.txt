@@ -392,6 +392,13 @@ endif()
 pp_add_test(ppcp_host_peer_test
     SOURCES ppcp_host_peer_test.cpp
             ${PPCP}/ppcp_host_peer.cpp
+            # ⚠ THE REAL LOG, on the same terms as ppcp_video_input_test above.
+            # `pump()` now says through ppWarn() when it degrades rather than
+            # drops — losing the optional preview channel — and a suite that
+            # stubbed that out would link, run, and quietly discard the one line
+            # that says the link survived.
+            ${PP_SRC}/Core/pp_log_stream.cpp
+            ${PP_SRC}/Core/PpMessageLog.cpp
             ${PPCP}/ppcp_live_session.cpp
             ${PPCP}/ppcp_shot_bridge.cpp
             ${PPCP}/ppcp_annotation_store.cpp
@@ -728,6 +735,12 @@ if(PP_PPCP_PLAINTEXT_HARNESS)
         ${PPCP}/ppcp_bundle_transport.cpp
         ${PPCP}/ppcp_import_sink.cpp
         ${PPCP}/ppcp_host_peer.cpp
+        # ⚠ THE REAL LOG — `pump()` reports preview-channel degradation through
+        # ppWarn(), so every target compiling ppcp_host_peer.cpp needs the
+        # primitive.  It stands alone now (pp_log_stream.cpp) and no longer drags
+        # whisper and ggml in behind it.
+        ${PP_SRC}/Core/pp_log_stream.cpp
+        ${PP_SRC}/Core/PpMessageLog.cpp
         ${PPCP}/ppcp_live_session.cpp
         ${PPCP}/ppcp_shot_bridge.cpp
         ${PPCP}/ppcp_annotation_store.cpp

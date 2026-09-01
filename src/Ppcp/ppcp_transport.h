@@ -245,6 +245,16 @@ public:
     const TlsOutcome &tls() const { return m_tls; }
     int fd() const;
     bool isOpen() const;
+
+    // ⭐ WHY THIS CHANNEL DIED, captured where it is known and nowhere else.
+    // `IoStatus` collapses an orderly TLS `close_notify` and a socket-level
+    // reset into `Closed`, because `SSL_ERROR_SYSCALL` with an empty error
+    // queue is BOTH an unclean EOF and every `errno` failure.  A host that
+    // logs only "link closed" therefore cannot tell a peer that left from a
+    // transport that broke — which cost a whole diagnostic session on 1 Sep
+    // 2026, when the phone reported `ECONNRESET` and Studio reported an
+    // orderly shutdown for the same event.  Empty until something goes wrong.
+    std::string lastCloseCause() const;
     void close();
 
     // RV 7.5d: a peer MUST NOT accept application data on an early-data path,
