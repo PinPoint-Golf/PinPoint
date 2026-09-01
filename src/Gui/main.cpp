@@ -933,6 +933,24 @@ int main(int argc, char *argv[])
                      &ppcpClipFiler, bindClipConsumers);
     bindClipConsumers();
 
+    // ⭐ Publish the clip chain so ppcpStats() — and therefore an automated
+    // probe — can read the whole leg from one object. Cheap, on the same 20 ms
+    // tick that already drives the service.
+    QObject::connect(&ppcpHost, &PpcpHostService::phonesChanged, &ppcpClipFiler, [] {
+        const PpcpClipFiler::Stats &f = ppcpClipFiler.stats();
+        QVariantMap m;
+        m[QStringLiteral("captureRequests")] = int(f.asked);
+        m[QStringLiteral("clipsAnnounced")]  = int(f.arrived);
+        m[QStringLiteral("clipsConverted")]  = int(f.arrived);
+        m[QStringLiteral("clipsFiled")]      = int(f.filed);
+        m[QStringLiteral("clipsAbsent")]     = int(f.absent);
+        m[QStringLiteral("clipsParked")]     = int(f.parked);
+        m[QStringLiteral("clipsOrphaned")]   = int(f.orphaned);
+        m[QStringLiteral("clipsDuplicate")]  = int(f.duplicate);
+        m[QStringLiteral("clipsFailed")]     = int(f.failed);
+        ppcpHost.setClipChainStats(m);
+    });
+
     // A landed clip changes the swing on disk. Re-analysis is the existing
     // "this swing changed, analyse it again" path; the row updates in place and
     // the stage is never stolen from a golfer still hitting.

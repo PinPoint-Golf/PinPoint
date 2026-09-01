@@ -2057,6 +2057,17 @@ QVariantMap PpcpHostService::ppcpStats() const
     m[QStringLiteral("phones")]     = static_cast<int>(m_phones.size());
     m[QStringLiteral("armState")]   = armState();
 
+    // The clip chain, as main.cpp last pushed it. Zeroes where nothing has run
+    // yet, which is a reading and not an absence.
+    for (auto it = m_clipChain.cbegin(); it != m_clipChain.cend(); ++it)
+        m[it.key()] = it.value();
+    if (!m.contains(QStringLiteral("clipsFiled"))) {
+        m[QStringLiteral("captureRequests")] = 0;
+        m[QStringLiteral("clipsAnnounced")]  = 0;
+        m[QStringLiteral("clipsConverted")]  = 0;
+        m[QStringLiteral("clipsFiled")]      = 0;
+    }
+
     // Summed across phones: a test asserting "the shot crossed" does not care
     // which link carried it, and with one phone the sum IS that phone's.
     int nominated = 0, observed = 0, issued = 0, adopted = 0, excluded = 0;
@@ -2086,6 +2097,14 @@ QVariantMap PpcpHostService::ppcpStats() const
         one[QStringLiteral("channels")]    =
             p->link ? static_cast<int>(p->link->channels().size()) : 0;
         one[QStringLiteral("sessionOpen")] = p->peer->liveSession().isOpen();
+        // ⭐ 6.1f's clock agreement, and an automated run CANNOT PROCEED WITHOUT
+        // IT.  A session started before the relation converges arbitrates on a
+        // sigma wider than the 5 ms gate, so shots are excluded and the run
+        // measures the warm-up rather than the product.  A person waits for the
+        // number on screen to settle; a rig has to be able to read it.
+        // -1 while nothing has a relation yet — the same sentinel the phones
+        // list uses, and not to be confused with zero.
+        one[QStringLiteral("syncSigmaMs")] = worstSyncSigmaMsFor(p->peer->liveSession());
 
         // ── CR-02 §5.10h — how long this Session has been open ─────────────
         //

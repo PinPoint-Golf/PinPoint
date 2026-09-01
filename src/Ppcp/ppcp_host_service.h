@@ -449,6 +449,19 @@ public:
     // secret and no payload — the same discipline `diagnosticExport()` follows.
     Q_INVOKABLE QVariantMap ppcpStats() const;
 
+    // ⭐ THE CLIP CHAIN, PUBLISHED FROM WHERE IT IS COUNTED.
+    //
+    // `PpcpClipFiler` lives in src/Gui and this class must not reach into it —
+    // so main.cpp, which owns both, pushes the numbers here for ppcpStats() to
+    // report.  A rig then reads ONE object for the whole leg: asked, announced,
+    // converted, filed.
+    //
+    // ⚠ Deliberately a push and not a pull: a Qt signal or a direct call would
+    // put a src/Gui symbol into this translation unit, and ppcp_host_service_test
+    // stubs the src/Video symbols precisely so a suite about the pairing clock
+    // does not drag Aravis, Spinnaker and Bluetooth in behind it.
+    void setClipChainStats(const QVariantMap &m) { m_clipChain = m; }
+
     // What this build's service discovery is, in the words RvBrowser::describe()
     // uses, or why there is none.  Part of the diagnostic export because 3.6a
     // gives discovery no error channel at all: when a remembered phone does not
@@ -901,6 +914,7 @@ private:
     // ever reach `confirmed` and the phone could never evict anything it had
     // sent us.  `have_digests` was likewise always empty, so it re-sent bytes
     // we already had.  The whole machinery existed and had no caller.
+    QVariantMap                            m_clipChain;
     Ppcp::PpcpImportLedger                 m_importLedger;
     // Last aggregate arm state seen by the tick, so a change driven by TIME —
     // the stall deadline — is noticed as well as one driven by a message.

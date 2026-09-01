@@ -1437,7 +1437,8 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
     // record of what WAS announced there was no way to tell whether the
     // announces never came, were refused above, or named something else.
     if (!preview)
-        ppInfo() << "[ppcp] capture announced" << capId << "on stream" << streamId
+        ppInfo() << "[ppcp] capture announced" << capId << "[inst" << m_sourceId << "]"
+                 << "on stream" << streamId
                  << "anchor" << (c.anchor.kind == PPCP_ANCHOR_SHOT     ? "shot"
                                : c.anchor.kind == PPCP_ANCHOR_CANDIDATE ? "candidate"
                                                                         : "stream")
@@ -1519,8 +1520,10 @@ void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
         // No profile, no `timing`, no conversion.  Recorded, never guessed: a
         // fallback convention here would be the hardcoding I19 exists to stop.
         ++m_counters.unconvertible;
-        ppWarn() << "[ppcp] clip" << capId << "DROPPED — no CaptureProfile resolves"
-                 << "for stream" << m_open.clip.streamId
+        ppWarn() << "[ppcp] clip" << capId << "[inst" << m_sourceId << "]"
+                 << "DROPPED — no CaptureProfile resolves for stream"
+                 << (m_open.clip.streamId.isEmpty() ? QStringLiteral("<unknown: this instance saw no announce for it>")
+                                                    : m_open.clip.streamId)
                  << "so there is no `timing` to convert its instants with";
         return;
     }

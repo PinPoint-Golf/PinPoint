@@ -86,6 +86,7 @@ void PpcpClipFiler::onCaptureAsked(const QString &shotId, const QString &peerId,
     }
     if (!s) return;
     s->asked.push_back(Asked{ peerId, sourceId, streamId, alias });
+    ++m_stats.asked;
 }
 
 void PpcpClipFiler::onSwingReady(const QString &swingDir)
@@ -150,6 +151,7 @@ QString PpcpClipFiler::aliasFor(const Shot &s, const PpcpClip &clip) const
 void PpcpClipFiler::onClipReady(const PpcpClip &clip)
 {
     if (clip.preview) return;              // never, ever the ring or the library
+    ++m_stats.arrived;
 
     // I27 — the Capture's own anchor says which Shot this answers.  Without one
     // there is no swing it can belong to, and guessing from arrival order is
@@ -166,6 +168,7 @@ void PpcpClipFiler::onClipReady(const PpcpClip &clip)
         // "frames that claim to be capture and are not" §5.6 is about.  Nothing
         // is filed either way, because a clip with no Shot has no swing; the
         // stream id is logged so the misclassification can be traced.
+        ++m_stats.orphaned;
         ppDebug() << "[ppcp] clip" << clip.captureId << "on stream" << clip.streamId
                   << "source" << clip.sourceId
                   << "is anchored to no Shot — not filed against any swing";
@@ -173,6 +176,7 @@ void PpcpClipFiler::onClipReady(const PpcpClip &clip)
     }
     Shot *s = find(clip.shotId);
     if (!s) {
+        ++m_stats.orphaned;
         ppWarn() << "[ppcp] clip" << clip.captureId << "for unknown shot" << clip.shotId
                  << "— nothing here asked for it";
         return;
@@ -186,6 +190,7 @@ void PpcpClipFiler::onClipReady(const PpcpClip &clip)
         // The folder is still 4-11 s away. PARKED, not dropped: dropping here
         // is the whole defect this work exists to remove.
         s->parked.push_back(clip);
+        ++m_stats.parked;
         return;
     }
     file(*s, clip);
@@ -223,6 +228,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
 {
     const QString alias = aliasFor(s, clip);
     if (alias.isEmpty()) {
+        ++m_stats.orphaned;
         ppWarn() << "[ppcp] clip" << clip.captureId << "matches no Stream asked for on shot"
                  << s.shotId;
         return false;
@@ -248,6 +254,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
         QString err;
         if (!SwingDocWriter::updateStreamOrigin(s.swingDir, alias, o, &err))
             ppWarn() << "[ppcp] could not record an absent clip —" << err;
+        ++m_stats.absent;
         ppInfo() << "[ppcp] no phone video for shot" << s.shotId << "—" << o.absentReason;
         return true;
     }
@@ -266,6 +273,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
 
     const auto admission = m_ledger->admit(rec);
     if (admission == Ppcp::PpcpImportLedger::Admission::AlreadyHeld) {
+        ++m_stats.duplicate;
         ppDebug() << "[ppcp] clip" << clip.captureId << "already held — nothing written";
         return true;
     }
@@ -289,6 +297,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
     // names and the replay cannot open.
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly)) {
+        ++m_stats.failed;
         ppWarn() << "[ppcp] cannot write clip to" << path << "—" << f.errorString();
         o.transfer = QStringLiteral("failed");
         QString err;
@@ -355,6 +364,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
 
     ppInfo() << "[ppcp] phone video landed:" << path << clip.payload.size() << "bytes, shot"
              << s.shotId;
+    ++m_stats.filed;
     emit clipFiled(s.swingDir, alias);
     return true;
 }

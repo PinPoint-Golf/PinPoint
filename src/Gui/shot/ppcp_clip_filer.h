@@ -76,6 +76,22 @@ public:
     using CommitFn = std::function<void()>;
     void setCommitPump(CommitFn f) { m_pumpCommits = std::move(f); }
 
+    // ⭐ THE CHAIN, COUNTED, so a rig can assert on it instead of grepping four
+    // logs.  Every one of these had to be reconstructed by hand from log lines
+    // on 1 September, and two of them (`asked`, `filed`) were the difference
+    // between "the leg works" and "no frame has ever landed".
+    struct Stats {
+        std::size_t asked     = 0;   // Streams a capture_request named
+        std::size_t arrived   = 0;   // clipReady reached this class
+        std::size_t parked    = 0;   // arrived before the swing folder existed
+        std::size_t filed     = 0;   // bytes written into a swing, ledger updated
+        std::size_t absent    = 0;   // the owner answered `absent` (I10 — an ANSWER)
+        std::size_t duplicate = 0;   // I34 — AlreadyHeld, correctly written once
+        std::size_t orphaned  = 0;   // anchored to no Shot, or to one we never asked about
+        std::size_t failed    = 0;   // could not be written
+    };
+    const Stats &stats() const { return m_stats; }
+
 public slots:
     // One Stream was asked for a clip around `shotId`.
     void onCaptureAsked(const QString &shotId, const QString &peerId,
@@ -114,6 +130,7 @@ private:
     QString aliasFor(const Shot &s, const PpcpClip &clip) const;
     bool file(Shot &s, const PpcpClip &clip);
 
+    Stats                   m_stats;
     Ppcp::PpcpImportLedger *m_ledger = nullptr;
     CommitFn                m_pumpCommits;
     // Bounded: a clip that turns up long after its shot has scrolled off is a
