@@ -1,8 +1,12 @@
 # Live capture collection — the missing swing-video leg
 
-**Status**: design, approved for implementation. Nothing here is built.
+**Status**: design, approved for implementation. **Phase 0 (H-g, H-h) is built and committed
+(`f595eb9`).** Phases 1–3 are not started.
 **Written**: 1 September 2026, from the manual PPS + PPC wrist session of that afternoon.
-**Touches**: PinPointStudio (nearly all of it), PinPointCapture (verification only), libppcp (one check).
+**Amended**: 1 September 2026 — see §0.5. Seven statements below were wrong or have been overtaken;
+they are corrected in place and listed there.
+**Touches**: PinPointStudio. **Not** PinPointCapture and **not** libppcp: both are complete for
+the core loop (§3), and the two items once listed against them are hardware verification, not code.
 
 > **This document is self-contained.** It is written to be picked up by a session with no prior
 > context: §0 orients, §1–§4 establish the problem and the evidence, §5–§7 are the design, §8
@@ -71,6 +75,49 @@ In this order. They carry the reasoning that makes the rest of this document sho
 6. `src/Gui/shot/shot_controller.cpp:470-510` — the arbitrated-shot path, where the ask belongs.
 7. `src/Gui/cameras/camera_instance.cpp:738-758` — why a preview frame must never reach the ring.
 8. `src/Export/swing_paths.h` — the derived identity, the other half of the clash.
+
+### 0.5 What changed since this was written
+
+Verified against the tree on 1 September 2026, after §0.4's reading and a pass over all three
+repos. Each is corrected in place below; they are collected here because a session picking this
+up cold would otherwise trip on them in order.
+
+1. **The swing directory does not exist at commit time.** §5.3's sequence showed `commitShot`
+   allocating it. It is allocated in `buildSwingExportJob()` (`shot_processor.cpp:1668`), called
+   from `startSwingSave()` at `finishGatherAndLaunch` — **4–11 s after the shot**, behind the
+   post-roll and a 7 s deferred-history gather. Waiting for it before asking the phone would burn
+   that much of a finite ring for nothing. **Ask at `shotDetected`; file when the directory
+   lands.**
+2. **A correlation key is needed and does not exist.** `shotDetected(source, impactUs,
+   sessionType)` carries no PPCP shot id, and `shotProcessed(int shotId, QString swingDir)` uses
+   an `int` ordinal, so PPCP-shot-id → swingDir is not currently expressible. A single-slot
+   correlation is sound and provable: `armed()` includes `!m_processorBusy`
+   (`shot_controller.cpp:120`), so exactly one shot is ever in flight.
+3. **`PpcpClip` has no container field.** `onPayloadBegin()` never reads
+   `payload_begin.container`, so H-d's "extension from `payload_begin.container`" needs the field
+   added to `PpcpClip` first. ⚠ The comment at `VideoInputPpcp.cpp:1553` claiming ENC §6 declares
+   no container is **stale** — ENC 6g / erratum E7 carries one and `ppcp_import_sink.cpp:228`
+   already reads it.
+4. **Stream ids are hashed.** The real shape is `st:<16 hex of SHA1(peerId|sourceId)>:<video|
+   preview>`, from `VideoInputPpcp::streamIdFor()`. ⚠ The comment at `VideoInputPpcp.cpp:886` and
+   the literal in `ppcp_arbitration_test.cpp:428` both show the pre-hash `st:<peer>:<src>:video`
+   and would mislead anyone building an id by hand. **Use the helper.**
+5. **Open question §9.4 is answered — CR-02 landed after this was written.**
+   `PPCP_EVENT_BUFFER_STATUS` (MSG 5.6) carries a per-stream `retained_from` and retention
+   target, already decoded into `BufferMargin` at `ppcp_live_session.cpp:406`. The host can clamp
+   `pre`/`post` to what the phone actually retains instead of taking `outside_buffer` for the
+   whole clip.
+6. **L-b is answered; libppcp needs no change.** `PPCP_EVENT_SESSION_RESUME` delivers
+   `ev.msg->body.session_resume.pending[]` to a host like any other event. L-b is a
+   documentation and verification item, not an API finding.
+7. **PPC mints a fresh `captureId` per request** (`RecordingSession.swift:704`), so a re-request
+   after a timeout yields a *different* opaque id and ledger dedupe on `captureId` alone will not
+   catch it — dedupe must also hold at the swing level (shot id + alias). It also **ignores the
+   requested `streamIds`** and serves its single `videoStream`.
+
+And one structural finding that shapes H-c: **`activeShotBridge()` returns the FIRST phone's
+bridge** (`ppcp_host_service.cpp:788`, a limitation its own header documents), so a request
+issued through `ShotController`'s single pointer can never name a second phone's Streams.
 
 ---
 
@@ -144,6 +191,11 @@ suggests.
 **So this is not a protocol gap and not a phone gap.** libppcp needs nothing new for the core
 loop. PinPointCapture needs nothing new for the core loop. Two joins inside PinPointStudio are
 missing, and one design question sits behind them.
+
+⚠ **Re-confirmed on 1 September against all three repos at `bc9391b` (libppcp) and `c382888`
+(PPC), both clean.** The one thing the table above overstates is the receiving end: `PpcpClip`
+arrives *without* the payload's container, so H-d needs that field added before it can honour
+ENC 6g (§0.5 #3).
 
 **Proof that the phone half is real**, `AppModel.swift:1802` → `RecordingSession.swift:700`:
 `serveCaptureRequest` converts `t0` into `PpcpTimebases.captureId`, calls
@@ -299,12 +351,24 @@ lands.
  shot arbitrated  (ShotController::onArbitratedShot, shot_controller.cpp:503)
    │
    ├─► commitShot(Source::Ppcp, tUs)          ← unchanged, still synchronous
-   │     └─ ShotProcessor allocates the swing dir and writes swing.json
-   │        with the local streams; the phone stream is recorded
-   │        "origin.transfer": "requested"
+   │     └─ writes a ShotMarker, emits shotDetected. ⚠ NO SWING DIR YET:
+   │        allocation is 4-11 s away, in buildSwingExportJob() behind the
+   │        post-roll and the 7 s history gather (§0.5 #1).
    │
-   ├─► bridge->requestCapture(shotId, t0 in tb:host, streamIds, preNs, postNs, &err)
+   ├─► requestCapture(shotId, t0 in tb:host, streamIds, preNs, postNs, &err)
+   │        ⭐ ISSUED HERE, AT shotDetected — NOT after the swing dir exists.
+   │        The phone's ring is finite and every second of waiting spends it.
+   │        ⚠ Fan out across PpcpHostService::m_phones, not through
+   │        ShotController's single bridge pointer (§0.5, last para).
+   │        ⚠ streamIds from VideoInputPpcp::streamIdFor(), never hand-built.
+   │        ⚠ Clamp pre/post to the phone's declared BufferMargin (§0.5 #5).
    │                                                        ← THE MISSING CALL (H-c)
+   │
+   ├─► (seconds later) ShotProcessor allocates the swing dir and writes
+   │     swing.json with the local streams; the phone stream is recorded
+   │     "origin.transfer": "requested". The pending request is bound to the
+   │     dir here, via the single-slot correlation of §0.5 #2. A clip that
+   │     arrives BEFORE this point is parked, not dropped.
    │
    │        ┌── phone: convert t0 into its own capture timebase
    │        ├── phone: cut the clip from the ring
@@ -317,6 +381,8 @@ lands.
    │     │     ⚠ extension from payload_begin.container (an IANA media type, ENC 6g /
    │     │       erratum E7). 6h FORBIDS inferring it from format.codec, from Stream.kind,
    │     │       or by sniffing.
+   │     │     ⛔ PpcpClip DOES NOT CARRY IT YET — onPayloadBegin() ignores
+   │     │       b.container. Add the field first; see §0.5 #3.
    │     ├─ rewrite that streams[] element: frames.t_us from clip.canonicalNs, rebased to t0
    │     ├─ ledger.setLocalPath(key, path, digest) + swingRef; ledger.save()
    │     ├─ peer capture_committed(captureId, digest)   ← only once DURABLY written (§5.5)
@@ -540,14 +606,26 @@ most of 1 September, and it is independent of all the PPCP work.
 
 | # | Item | Done when |
 |---|---|---|
-| **H-g** | Notification model per §7.4–7.5: one sink, stable ids, coalescing, cause-suppression, condition latching. Migrate the four `Main.qml` toasts onto it | A unit test drives 10 identical posts and observes ONE live notification with count 10; a consequence posted while its cause is live is recorded and not shown; the same consequence with no live cause IS shown |
-| **H-h** | Session-start preflight per §7.7 | With the library root unwritable, starting a session raises one condition **before** any shot, and no shot-time toast fires at all |
+| **H-g** | ✅ **DONE** (`f595eb9`). `NotificationCenter` + `PpNotificationHost`; the four `Main.qml` toasts migrated; `shotRefused` split by id, `swingSaveBlocked` split from `swingSaveFailed`, R4's `shotOutcome` added | Met. `notification_center_test` in the headless `gui-tests` target covers all three cases, plus condition-latching and a **transitive** cause chain (see note below) |
+| **H-h** | ✅ **DONE** (`f595eb9`). Hung off a new `SessionController::sessionStarted` — both start paths already funnel through it, so **no QML change** and nothing near the wizard. `beginSessionFolder` now keeps the `beginSession` return it discarded | Met, verified against the real app offscreen: an unwritable library raises one latched condition before any shot, ten failing shots add nothing to the screen, a writable one raises nothing |
+
+> **Two things Phase 0 learned that this document did not say.**
+>
+> **Suppression must follow the CHAIN.** The cascade is three deep — an unwritable root suppresses
+> "no swing folder", which is in turn the cause the shot-level failures name. With one-hop
+> suppression the outer links surfaced the moment the middle went quiet, which is the defect R2
+> exists to remove. `causeIsLive()` now recurses, bounded.
+>
+> **`phone.no-link` from §7.7 was deliberately NOT built.** Camera config persists per phone, but
+> a real settings file holds *six* historical peer uuids, so the naive check raises a condition
+> for every phone ever paired — the exact noise this work removes. It needs a notion of "cameras
+> this session expects", which does not exist. Left open on purpose.
 
 ### Phase 1 — identity groundwork, no behaviour change
 
 | # | Item | Done when |
 |---|---|---|
-| **H-a** | `SwingRef` on `CaptureRecord`; ledger root moves to `<library>/ppcp-ledger.json`; migrate the old file | `ppcp_bundle_import_test` still passes unchanged; a new case round-trips a record carrying a `swingRef` through save/load; an old `ppcp-import.json` is folded in and its records keep their identity |
+| **H-a** | `SwingRef` on `CaptureRecord`; ledger root moves to `<library>/ppcp-ledger.json`; migrate the old file. **Also fix the dual-writer hazard**: `PpcpHostService::m_importLedger` and a function-local ledger in `PpcpImportController::importBundle()` (`ppcp_import_controller.cpp:65-76`) write the same file through independent copies, last writer wins, nothing reloads | `ppcp_bundle_import_test` still passes unchanged; a new case round-trips a record carrying a `swingRef` through save/load; an old `ppcp-import.json` is folded in and its records keep their identity |
 | **H-b** | `origin` block written and read in `swing.json`; `SwingDocWriter` support | `swing.json` round-trip test (Analysis suite) covers a stream with `origin`; a reader that does not know `origin` still loads the swing |
 
 ### Phase 2 — the loop. ⛔ Land H-c and H-d together
@@ -557,8 +635,8 @@ most of 1 September, and it is independent of all the PPCP work.
 
 | # | Item | Done when |
 |---|---|---|
-| **H-c** | Call `requestCapture()` from the arbitrated-shot path once the swing dir exists | With a phone attached, one shot produces one `capture_request` naming the open capture Stream and the window; `bulk` byte counts become non-zero |
-| **H-d** | Connect `clipReady()` → `admit` → write payload → rewrite the stream element → `capture_committed` | A clip lands in the swing folder with the container from `payload_begin`; the ledger holds the key with a `swingRef`; a **replayed** identical Capture is `AlreadyHeld` and writes nothing; PPC's row reaches `inStudio` |
+| **H-c** | Call `requestCapture()` from the arbitrated-shot path **at `shotDetected`, NOT once the swing dir exists** (§0.5 #1). Fan out across `PpcpHostService::m_phones`, not `activeShotBridge()`. Stream ids from `streamIdFor()`. Clamp the window to the declared `BufferMargin` | With a phone attached, one shot produces one `capture_request` naming the open capture Stream and the window; `bulk` byte counts become non-zero. With TWO phones, both are asked |
+| **H-d** | Add the container field to `PpcpClip` (§0.5 #3), then connect `clipReady()` → `admit` → write payload → rewrite the stream element → `capture_committed`. A clip arriving before the swing dir exists is parked, not dropped | A clip lands in the swing folder with the container from `payload_begin`; the ledger holds the key with a `swingRef`; a **replayed** identical Capture is `AlreadyHeld` and writes nothing; PPC's row reaches `inStudio` |
 | **L-a** | Assert 5.11h — preview payload on a bulk channel distinct from shot payload, using `ppcp_event.channel` (conformance finding 14 says this belongs with this join) | New case in `ppcp_video_input_test` |
 
 ### Phase 3 — the finish
@@ -569,7 +647,7 @@ most of 1 September, and it is independent of all the PPCP work.
 | **H-f** | `requested` / `arriving` / `absent` / `timeout` states on the row and in `swing.json` | Each state is reachable in a test; `absent` is presented as information, never as an error (§6) |
 | **C-a** | *(PPC)* Verify `outside_buffer` on hardware — written but, per `RingBufferRecorder`'s own comment, never exercised on a device | A request whose `t0` predates the ring is answered `absent`, not with silence or a truncated clip |
 | **C-b** | *(PPC)* Confirm the transfer table drives the per-shot sync UI once commits arrive | A shot visibly transitions `sending` → `delivered` → `inStudio` on the phone |
-| **L-b** | *(libppcp)* Confirm `session_resume`'s pending-Capture list is reachable by a **host** through the public API, not only by a device | Either a named accessor exists, or this is raised as an API finding — §5.4 depends on it |
+| **L-b** | ✅ **ANSWERED, no libppcp change** (§0.5 #6). `PPCP_EVENT_SESSION_RESUME` delivers `ev.msg->body.session_resume.pending[]` to a host like any other event | Met by inspection. What remains is using it in §5.4, which is PPS work |
 
 ### Reproducing the manual test
 
@@ -603,21 +681,31 @@ still not working.
 
 1. **Reconnect semantics.** After a link drop, who re-drives an outstanding request — the host
    re-requesting, or the phone re-offering through `session_resume`'s pending Captures? The
-   phone's list is authoritative about what it still holds. Depends on **L-b**.
-2. **Two phones, one shot.** Arbitration already spans peers, and `requestCapture` is CORE §8.4's
-   *orphan* request precisely so a host can ask a device that never nominated the shot. Does the
-   swing then carry two `origin` blocks — two `streams[]` elements — and does analysis treat them
-   as two cameras? Probably yes to both, but unproven; no two-phone capture has ever been run.
+   phone's list is authoritative about what it still holds. ~~Depends on **L-b**.~~ **L-b is
+   answered (§0.5 #6): the list is readable.** The question is now purely a policy one — and
+   §0.5 #7 sharpens it, because a host re-request produces a *new* `captureId` and so cannot be
+   deduplicated against the outstanding one by identity alone.
+2. **Two phones, one shot.** ⭐ **DECIDED: fan out.** The request is issued per-phone across
+   `PpcpHostService::m_phones` and the swing carries one `streams[]` element per phone, because
+   `activeShotBridge()` returns only the FIRST phone's bridge and a design that asks one phone
+   would need rewriting the moment a second is used. Arbitration already spans peers, and
+   `requestCapture` is CORE §8.4's *orphan* request precisely so a host can ask a device that
+   never nominated the shot. **Still unproven:** whether analysis should treat two phone cameras
+   as two cameras, and no two-phone capture has ever been run.
 3. **Preview-to-ring is enforced by accident.** §5.6 — the gate tests instance mode, not frame
    provenance. It should test provenance. Small, and it protects the swing library from exactly
    the class of fault this document is about.
-4. **Where the request's `pre`/`post` window comes from.** The host's own window is
-   `m_windowStartUs .. m_windowEndUs`; the phone's ring depth is finite and declared nowhere the
-   host reads. Asking for more than the phone retains gets `outside_buffer` for the *whole* clip
-   rather than a partial. A declared ring depth may be needed.
+4. ~~**Where the request's `pre`/`post` window comes from.**~~ ✅ **ANSWERED by CR-02, which
+   landed after this was written (§0.5 #5).** The ring depth *is* declared now:
+   `PPCP_EVENT_BUFFER_STATUS` (MSG 5.6) carries a per-stream `retained_from` and retention
+   target, and PPS already decodes it into `BufferMargin` at `ppcp_live_session.cpp:406`. The
+   host clamps `pre`/`post` to what the phone says it still holds, rather than asking blind and
+   taking `outside_buffer` for the whole clip. What remains is only choosing the host-side window
+   (`m_windowStartUs .. m_windowEndUs`) and intersecting the two.
 5. **Ledger growth.** One record per capture per session, for ever, in one JSON file. Fine for a
    season, unproven for years. A compaction rule will be needed eventually — but I34 means
-   records cannot simply be dropped.
+   records cannot simply be dropped. ⚠ Related and now decided: the **dual-writer** hazard is
+   fixed as part of H-a, not left as a finding.
 6. **Does a landed clip re-open the swing for the user mid-session?** Re-analysis takes 15–40 s
    and the golfer is probably hitting again. Proposal: update the row silently, never steal the
    stage. Unresolved.
