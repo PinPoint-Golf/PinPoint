@@ -682,8 +682,21 @@ SwingSummary summaryFromRoot(const QJsonObject &root, const QString &swingDir)
     s.timestampLabel = dt.isValid() ? dt.toLocalTime().toString(QStringLiteral("hh:mm:ss")) : wc;
     s.wallclockMs    = dt.isValid() ? dt.toMSecsSinceEpoch() : 0;
 
-    for (const QJsonValue &v : root[QStringLiteral("streams")].toArray())
-        if (v.toObject()[QStringLiteral("kind")].toString() == QLatin1String("video")) { s.hasVideo = true; break; }
+    // ⚠ A VIDEO STREAM WITH NO `file` IS NOT VIDEO.  A phone clip that has been
+    // asked for and has not arrived is recorded as a `kind: video` element
+    // carrying only its `origin` (see updateStreamOrigin), precisely so the swing
+    // remembers a clip is owed — and answering `hasVideo` for it would have the
+    // carousel offer a replay of bytes that are not there.  Every element the
+    // exporter writes for a real encode carries `file`, so this narrows nothing
+    // that exists today.  DiskReplaySource and SwingDiskLoader already skip an
+    // element whose file is missing; this makes the summary agree with them.
+    for (const QJsonValue &v : root[QStringLiteral("streams")].toArray()) {
+        const QJsonObject el = v.toObject();
+        if (el[QStringLiteral("kind")].toString() != QLatin1String("video")) continue;
+        if (el[QStringLiteral("file")].toString().isEmpty()) continue;
+        s.hasVideo = true;
+        break;
+    }
 
     const QJsonObject thumb = root[QStringLiteral("thumbnail")].toObject();
     if (!thumb.isEmpty())
@@ -859,6 +872,128 @@ bool SwingDocWriter::writeSwingJson(const QString &swingDir, const QJsonObject &
     // so the guard records the committed file's final size and mtime.
     writeSummaryFile(summaryFromRoot(root, swingDir), nullptr);
     return true;
+}
+
+namespace {
+
+// The `origin` block, as JSON.  Optional keys are omitted rather than written
+// empty: a stream that has not been committed has no `committedAt`, and saying
+// so with an absent key is honest where an empty string is noise.
+QJsonObject originToJson(const SwingDocWriter::StreamOrigin &o)
+{
+    QJsonObject j;
+    j[QStringLiteral("transport")]    = o.transport;
+    j[QStringLiteral("peerId")]       = o.peerId;
+    j[QStringLiteral("sessionId")]    = o.sessionId;
+    j[QStringLiteral("captureId")]    = o.captureId;
+    if (!o.streamId.isEmpty())     j[QStringLiteral("streamId")]     = o.streamId;
+    j[QStringLiteral("transfer")]     = o.transfer;
+    if (!o.completeness.isEmpty()) j[QStringLiteral("completeness")] = o.completeness;
+    // 7.3b — a reason belongs to an absent Capture and to nothing else.
+    if (!o.absentReason.isEmpty()) j[QStringLiteral("reason")]       = o.absentReason;
+    if (!o.committedAt.isEmpty())  j[QStringLiteral("committedAt")]  = o.committedAt;
+    return j;
+}
+
+SwingDocWriter::StreamOrigin originFromJson(const QJsonObject &j)
+{
+    SwingDocWriter::StreamOrigin o;
+    o.transport    = j.value(QStringLiteral("transport")).toString();
+    o.peerId       = j.value(QStringLiteral("peerId")).toString();
+    o.sessionId    = j.value(QStringLiteral("sessionId")).toString();
+    o.captureId    = j.value(QStringLiteral("captureId")).toString();
+    o.streamId     = j.value(QStringLiteral("streamId")).toString();
+    o.transfer     = j.value(QStringLiteral("transfer")).toString();
+    o.completeness = j.value(QStringLiteral("completeness")).toString();
+    o.absentReason = j.value(QStringLiteral("reason")).toString();
+    o.committedAt  = j.value(QStringLiteral("committedAt")).toString();
+    return o;
+}
+
+}  // namespace
+
+bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &alias,
+                                        const StreamOrigin &origin, QString *error)
+{
+    if (alias.isEmpty()) {
+        if (error) *error = QStringLiteral("updateStreamOrigin needs a stream alias");
+        return false;
+    }
+
+    const QString path = swingDir + QStringLiteral("/swing.json");
+    QFile in(path);
+    if (!in.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("cannot read %1: %2").arg(path, in.errorString());
+        return false;
+    }
+    QJsonParseError pe{};
+    QJsonObject root = QJsonDocument::fromJson(in.readAll(), &pe).object();
+    in.close();
+    if (pe.error != QJsonParseError::NoError || root.isEmpty()) {
+        if (error) *error = QStringLiteral("cannot parse %1: %2").arg(path, pe.errorString());
+        return false;
+    }
+
+    QJsonArray streams = root.value(QStringLiteral("streams")).toArray();
+
+    // Idempotent: REPLACE the block on the matching element rather than append a
+    // second one.  A transfer moves through several states -- requested, arriving,
+    // then complete or absent -- and each is an update to one statement, not a new
+    // statement beside the last.
+    bool found = false;
+    for (int i = 0; i < streams.size(); ++i) {
+        QJsonObject el = streams.at(i).toObject();
+        if (el.value(QStringLiteral("alias")).toString() != alias) continue;
+        el[QStringLiteral("origin")] = originToJson(origin);
+        streams.replace(i, el);
+        found = true;
+        break;
+    }
+
+    if (!found) {
+        // A clip that has been ASKED for but has not arrived still deserves a row:
+        // the swing knows a phone was expected to contribute one.
+        //
+        // ⚠ NO `file` KEY, deliberately.  DiskReplaySource and SwingDiskLoader both
+        // skip a video element whose file is missing, so a pending element is inert
+        // to every existing consumer until the bytes actually land.
+        QJsonObject el;
+        el[QStringLiteral("kind")]   = QStringLiteral("video");
+        el[QStringLiteral("alias")]  = alias;
+        el[QStringLiteral("origin")] = originToJson(origin);
+        streams.append(el);
+    }
+    root[QStringLiteral("streams")] = streams;
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error) *error = QStringLiteral("cannot write %1: %2").arg(path, file.errorString());
+        return false;
+    }
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!file.commit()) {
+        if (error) *error = QStringLiteral("failed to commit %1: %2").arg(path, file.errorString());
+        return false;
+    }
+
+    // Must follow commit(): the guard records the committed file's size and mtime.
+    writeSummaryFile(summaryFromRoot(root, swingDir), nullptr);
+    return true;
+}
+
+SwingDocWriter::StreamOrigin SwingDocReader::streamOrigin(const QString &swingDir,
+                                                          const QString &alias)
+{
+    QFile in(swingDir + QStringLiteral("/swing.json"));
+    if (!in.open(QIODevice::ReadOnly)) return {};
+    const QJsonObject root = QJsonDocument::fromJson(in.readAll()).object();
+    for (const QJsonValue &v : root.value(QStringLiteral("streams")).toArray()) {
+        const QJsonObject el = v.toObject();
+        if (el.value(QStringLiteral("alias")).toString() != alias) continue;
+        if (!el.contains(QStringLiteral("origin"))) return {};
+        return originFromJson(el.value(QStringLiteral("origin")).toObject());
+    }
+    return {};
 }
 
 bool SwingDocWriter::updateReview(const QString &swingDir, int rating, const QString &note,

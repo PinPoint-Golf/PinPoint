@@ -371,11 +371,15 @@ pp_add_test(session_summary_test SOURCES session_summary_test.cpp)   # session_s
 pp_add_test(arbiter_test         SOURCES arbiter_test.cpp)           # shot_arbiter.h
 
 # --- Unified swing.json writer/reader round-trip (Export subsystem) ----------
+# PP_SRC_DIR lets the suite read the tree: `origin` is provenance and the test
+# asserts that nothing in src/Analysis keys on it, the same shape of rule as
+# CT-I37 and for the same reason.
 pp_add_test(swing_doc_test
     SOURCES ${SRC}/Export/tests/swing_doc_test.cpp ${SRC}/Export/swing_doc.cpp
             ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
             ${SRC}/LaunchMonitor/gcquad_csv_parser.cpp
-    INCLUDE ${SRC}/LaunchMonitor)
+    INCLUDE ${SRC}/LaunchMonitor
+    DEFINES PP_SRC_DIR="${SRC}")
 
 # --- Orientation filters (Phase 0.4): Madgwick (header-only) + ESKF (Eigen) ---
 # The ESKF .cpp pulls the vendored imu_ekf headers through the Arduino-style

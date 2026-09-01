@@ -13,6 +13,7 @@
 QString pinpoint::SwingPaths::sanitise(const QString &raw) { return raw; }
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -51,6 +52,11 @@ int main()
     manifest[QStringLiteral("streams")] = QJsonArray{
         QJsonObject{ {QStringLiteral("kind"), QStringLiteral("video")},
                      {QStringLiteral("alias"), QStringLiteral("face-on")},
+                     // ⚠ `file` is not decoration in this fixture. SwingExporter writes it
+                     // for every video element unconditionally, and hasVideo now requires it
+                     // — a video stream with no file is not playable video, which is what a
+                     // clip that has been asked for and not yet arrived looks like.
+                     {QStringLiteral("file"), QStringLiteral("face-on.mp4")},
                      {QStringLiteral("setup"), QJsonObject{ {QStringLiteral("perspective"), 2},
                                                             {QStringLiteral("perspectiveName"), QStringLiteral("FaceOn")},
                                                             {QStringLiteral("mirrored"), false},
@@ -1075,6 +1081,161 @@ int main()
         check(!m6.contains(QStringLiteral("imuIntegrity")), "removal on an absent key is a no-op");
 
         QDir(d6).removeRecursively();
+    }
+
+    // ── H-b: the `origin` block on a streams[] element ────────────────────
+    //
+    // The swing.json half of the link the PPCP ledger holds. The ledger keys on
+    // the opaque PPCP identity and remembers which swing it landed in; this
+    // remembers the opaque identity beside the stream it became. Either can be
+    // rebuilt from the other, which is why they are LINKED and not merged.
+    {
+        std::printf("\n-- H-b: stream origin, written, read and forward-compatible --\n");
+        const QString dO = QStringLiteral("/tmp/swingdoc_test_origin");
+        QDir(dO).removeRecursively();
+        QDir().mkpath(dO);
+
+        SwingAnalysis aO;
+        QString eO;
+        QJsonObject mO = manifest;
+        check(SwingDocWriter::writeSwingJson(dO, mO, &aO, &eO), "a document to attach origin to");
+
+        // A clip has been ASKED for and has not arrived. There is no file yet, so
+        // the element must not claim one.
+        SwingDocWriter::StreamOrigin req;
+        req.transport = QStringLiteral("ppcp");
+        req.peerId    = QStringLiteral("peer:1f2e4491-b207-4265-af87-74287160f0b4");
+        req.sessionId = QStringLiteral("ses:live-1");
+        req.captureId = QStringLiteral("cap:abc");
+        req.streamId  = QStringLiteral("st:0123456789abcdef:video");
+        req.transfer  = QStringLiteral("requested");
+        check(SwingDocWriter::updateStreamOrigin(dO, QStringLiteral("phoneWide"), req, &eO),
+              "a pending clip gets a streams[] element");
+
+        SwingDocWriter::StreamOrigin back =
+            SwingDocReader::streamOrigin(dO, QStringLiteral("phoneWide"));
+        check(back.transport == QStringLiteral("ppcp"),        "transport round-trips");
+        check(back.peerId    == req.peerId,                    "the MINTING peer round-trips");
+        check(back.captureId == QStringLiteral("cap:abc"),     "the opaque capture id round-trips");
+        check(back.streamId  == req.streamId,                  "the hashed stream id round-trips");
+        check(back.transfer  == QStringLiteral("requested"),   "our view of the exchange");
+        check(back.completeness.isEmpty(),
+              "and NO completeness yet — that is the owner's word, never inferred (I10)");
+
+        {
+            const QJsonObject root = readManifest(dO);
+            const QJsonArray streams = root.value(QStringLiteral("streams")).toArray();
+            bool pendingHasNoFile = false;
+            for (const QJsonValue &v : streams) {
+                const QJsonObject el = v.toObject();
+                if (el.value(QStringLiteral("alias")).toString() != QStringLiteral("phoneWide"))
+                    continue;
+                pendingHasNoFile = !el.contains(QStringLiteral("file"));
+            }
+            check(pendingHasNoFile, "a pending element carries no `file` — readers skip it");
+        }
+
+        // The clip lands. Same element, replaced in place, not a second one.
+        SwingDocWriter::StreamOrigin done = req;
+        done.transfer     = QStringLiteral("complete");
+        done.completeness = QStringLiteral("complete");
+        done.committedAt  = QStringLiteral("2026-09-01T13:46:55.221Z");
+        check(SwingDocWriter::updateStreamOrigin(dO, QStringLiteral("phoneWide"), done, &eO),
+              "the landed clip updates the same element");
+        {
+            const QJsonArray streams = readManifest(dO).value(QStringLiteral("streams")).toArray();
+            int phoneElements = 0;
+            for (const QJsonValue &v : streams)
+                if (v.toObject().value(QStringLiteral("alias")).toString()
+                    == QStringLiteral("phoneWide")) ++phoneElements;
+            check(phoneElements == 1, "idempotent — one element, not one per state change");
+        }
+        back = SwingDocReader::streamOrigin(dO, QStringLiteral("phoneWide"));
+        check(back.transfer == QStringLiteral("complete"),   "transfer advanced");
+        check(back.completeness == QStringLiteral("complete"), "the owner's assertion is carried");
+        check(!back.committedAt.isEmpty(),                   "committedAt recorded");
+
+        // `absent` is an ANSWER, not a failure (I10, 7.3b). It carries a reason.
+        SwingDocWriter::StreamOrigin gone = req;
+        gone.transfer     = QStringLiteral("absent");
+        gone.completeness = QStringLiteral("absent");
+        gone.absentReason = QStringLiteral("outside_buffer");
+        check(SwingDocWriter::updateStreamOrigin(dO, QStringLiteral("phoneDtl"), gone, &eO),
+              "a second phone answers absent");
+        back = SwingDocReader::streamOrigin(dO, QStringLiteral("phoneDtl"));
+        check(back.absentReason == QStringLiteral("outside_buffer"), "the reason round-trips");
+        check(SwingDocReader::streamOrigin(dO, QStringLiteral("face-on")).isEmpty(),
+              "a directly attached camera has no origin, and that is correct");
+        check(SwingDocReader::streamOrigin(dO, QStringLiteral("nope")).isEmpty(),
+              "an unknown alias answers empty rather than inventing one");
+
+        // ⚠ A pending clip must not make a videoless swing claim video: the
+        // carousel would offer a replay of bytes that are not there.
+        {
+            const QString dP = QStringLiteral("/tmp/swingdoc_test_origin_novideo");
+            QDir(dP).removeRecursively();
+            QDir().mkpath(dP);
+            QJsonObject noVid = manifest;
+            noVid[QStringLiteral("streams")] = QJsonArray{};   // a device-only shot
+            SwingAnalysis aP;
+            QString eP;
+            check(SwingDocWriter::writeSwingJson(dP, noVid, &aP, &eP), "a swing with no streams");
+            check(!SwingDocReader::readSwingJson(dP).hasVideo, "…has no video, before");
+            check(SwingDocWriter::updateStreamOrigin(dP, QStringLiteral("phoneWide"), req, &eP),
+                  "…a clip is asked for");
+            check(!SwingDocReader::readSwingJson(dP).hasVideo,
+                  "…and it STILL has no video: a pending element carries no file");
+            check(!SwingDocReader::streamOrigin(dP, QStringLiteral("phoneWide")).isEmpty(),
+                  "…though the swing does remember a clip is owed");
+            QDir(dP).removeRecursively();
+        }
+
+        // ⭐ THE ACCEPTANCE CRITERION: a reader that knows nothing of `origin`
+        // still loads the swing. Every existing consumer selects by `kind` and
+        // reads named keys, so an added key is invisible to it.
+        const PersistedShot shot = SwingDocReader::readSwingJson(dO);
+        check(!shot.swingDir.isEmpty(), "a document carrying origin still loads");
+        check(shot.hasVideo, "…and its ordinary video stream is still found");
+
+        QDir(dO).removeRecursively();
+    }
+
+    // ── The sibling of CT-I37: origin is RECORDED, never INTERPRETED ──────
+    //
+    // Where a stream's bytes came from is not a property of the swing. A measure
+    // that varied by transport would be measuring the network, and the same rule
+    // already governs the `capture.host` block beside it. So no analysis code may
+    // key on it.
+    //
+    // ⚠ THE CHECK IS ON THE JSON KEY, NOT THE ENGLISH WORD. `src/Analysis` is full
+    // of legitimate "origin" — a coordinate origin, an "original" channel — so a
+    // bare grep would be a false-positive machine and would be deleted by whoever
+    // it first annoyed. The quoted literal is what a reader would have to write.
+    {
+        std::printf("\n-- origin is provenance: nothing in src/Analysis reads it --\n");
+        const QString analysisDir = QStringLiteral(PP_SRC_DIR) + QStringLiteral("/Analysis");
+        QStringList offenders;
+        QDirIterator it(analysisDir, QStringList{ QStringLiteral("*.cpp"), QStringLiteral("*.h") },
+                        QDir::Files, QDirIterator::Subdirectories);
+        int scanned = 0;
+        while (it.hasNext()) {
+            const QString f = it.next();
+            QFile in(f);
+            if (!in.open(QIODevice::ReadOnly)) continue;
+            ++scanned;
+            int lineNo = 0;
+            while (!in.atEnd()) {
+                const QString line = QString::fromUtf8(in.readLine());
+                ++lineNo;
+                if (line.contains(QStringLiteral("\"origin\"")))
+                    offenders << (f + QStringLiteral(":%1").arg(lineNo));
+            }
+        }
+        check(scanned > 0, "the analysis tree was actually scanned");
+        if (!offenders.isEmpty())
+            std::printf("      offenders:\n        %s\n",
+                        qPrintable(offenders.join(QStringLiteral("\n        "))));
+        check(offenders.isEmpty(), "src/Analysis never reads the `origin` key");
     }
 
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);

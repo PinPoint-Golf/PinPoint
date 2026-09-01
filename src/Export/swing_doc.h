@@ -117,6 +117,64 @@ public:
                                     const lm::LaunchMonitorReading &reading,
                                     QString *error = nullptr);
 
+    // ── CORE §8.5 — where a stream's bytes came from, when they came off a wire ──
+    //
+    // ⭐ PROVENANCE, AND ONLY PROVENANCE.  This is the swing.json half of the link
+    // the PPCP ledger holds: the ledger keys on the opaque identity and remembers
+    // which swing it landed in, and this remembers the opaque identity beside the
+    // stream it became.  Either can be rebuilt from the other, which is the point
+    // of linking the two identity schemes rather than merging them (CORE 8.5a/8.5b,
+    // "no entity is rewritten or merged").
+    //
+    // ⛔ NOTHING IN src/Analysis MAY KEY ON THIS.  It is recorded, never
+    // interpreted — the same rule, and for the same reason, as the existing
+    // `capture.host` block: where a frame arrived from is not a property of the
+    // swing, and a measure that varied by transport would be measuring the network.
+    // Asserted by CT-I37's sibling in swing_doc_test.
+    //
+    // Additive on a `streams[]` element, so every existing reader ignores it —
+    // they select by `kind` and read named keys (swing_export_developer_guide §6).
+    struct StreamOrigin {
+        // ⚠ THE TWO WORDS THAT ARE NOT THE SAME WORD.
+        //   `transfer`     — THIS HOST's view of the exchange. Ours to assert.
+        //   `completeness` — the OWNER's assertion about the Capture (CORE 5.14,
+        //                    I10), carried verbatim and NEVER inferred from how
+        //                    many bytes turned up.
+        // Conflating them would let a receiver decide a device's data was
+        // complete, which is exactly what I10 forbids.
+        QString transport;      // "ppcp"
+        QString peerId;         // the MINTING peer — I34's first part
+        QString sessionId;
+        QString captureId;
+        QString streamId;
+        QString transfer;       // requested|arriving|complete|absent|timeout|failed
+        QString completeness;   // complete|partial|absent — the owner's word
+        QString absentReason;   // 7.3b, e.g. "outside_buffer"; only when absent
+        QString committedAt;    // ISO-8601 UTC; empty until capture_committed went
+
+        bool isEmpty() const { return transport.isEmpty() && captureId.isEmpty(); }
+    };
+
+    // Attach or refresh the `origin` of ONE `streams[]` element, by alias.
+    //
+    // LATE BY DESIGN, exactly as updateLaunchMonitor() is: a clip is asked for at
+    // the shot and arrives seconds later, long after swing.json was written, and
+    // the answer may be "I no longer have it".  So this is the same
+    // read-modify-atomic-rewrite, and it is idempotent — re-applying replaces the
+    // block rather than appending beside it.
+    //
+    // Creates the `streams[]` element when no element carries `alias`, so the
+    // pending state of a clip that has not landed can be recorded before there is
+    // any file to point at.  ⚠ Such an element deliberately has NO `file` key
+    // until the bytes are on disk: the replay source and the disk loader both skip
+    // an element with no readable file, which is the behaviour we want while a
+    // transfer is in flight.
+    //
+    // Refreshes the summary sidecar for the same reason updateReview does — this
+    // rewrite moves swing.json's size and mtime, invalidating both sidecar guards.
+    static bool updateStreamOrigin(const QString &swingDir, const QString &alias,
+                                   const StreamOrigin &origin, QString *error = nullptr);
+
     // Who the shot belongs to and where it sits — everything a device-only document
     // needs that the reading itself cannot supply.
     struct DeviceOnlyMeta {
@@ -214,6 +272,13 @@ struct SwingSummary {
 class SwingDocReader {
 public:
     static PersistedShot readSwingJson(const QString &swingDir);
+
+    // The `origin` of one `streams[]` element, by alias. Empty when the swing has
+    // no such stream, or when that stream carries no origin — which is every
+    // stream from a directly attached camera, and correctly so: a USB camera's
+    // frames did not come off a wire and have no opaque identity to record.
+    static SwingDocWriter::StreamOrigin streamOrigin(const QString &swingDir,
+                                                     const QString &alias);
 
     // Cheap per-swing summary for the session picker. Prefers <swingDir>/swing_summary.json
     // (a few hundred bytes), validating its source{size,mtime_ms} against the real
