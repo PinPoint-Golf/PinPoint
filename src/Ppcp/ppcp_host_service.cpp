@@ -845,8 +845,24 @@ int PpcpHostService::requestCaptureForShot(const QString &shotId, qint64 t0HostN
     // The interval asked for around `t0`.  A golf swing needs the backswing, so
     // the pre-roll is the long side; the host's own window is 4 s wide
     // (kWindowDuration) and this sits comfortably inside it.
-    constexpr qint64 kPreNs  = 2000LL * 1000 * 1000;   // 2.0 s before t0
-    constexpr qint64 kPostNs = 1000LL * 1000 * 1000;   // 1.0 s after t0
+    // ⚠ OVERRIDABLE, BECAUSE THE RIGHT WINDOW IS AN OPEN QUESTION AND WE ARE
+    // MEASURING IT.  Design §9.4: asking for more than the device retains is
+    // answered `outside_buffer` for the WHOLE clip, not a partial — so a window
+    // chosen blind can look exactly like a device with no footage.
+    //
+    // Observed 1 Sept: pre 2000 ms was refused `outside_buffer`, and 491 ms
+    // later the same ring produced a 12.3 MB clip for the phone's own shot. The
+    // footage was there; the interval we named was not.
+    //
+    // ⛔ And the clamp below cannot help yet: this phone sends NO `buffer_status`
+    // at all (zero in a full run), so there is no declared retention target to
+    // clamp against and nothing tells us the ring's depth.
+    static const qint64 kPreNs = qEnvironmentVariableIntValue("PINPOINT_PPCP_PRE_MS") > 0
+        ? qint64(qEnvironmentVariableIntValue("PINPOINT_PPCP_PRE_MS")) * 1000 * 1000
+        : 2000LL * 1000 * 1000;                        // 2.0 s before t0
+    static const qint64 kPostNs = qEnvironmentVariableIntValue("PINPOINT_PPCP_POST_MS") > 0
+        ? qint64(qEnvironmentVariableIntValue("PINPOINT_PPCP_POST_MS")) * 1000 * 1000
+        : 1000LL * 1000 * 1000;                        // 1.0 s after t0
 
     int asked = 0;
     for (const std::unique_ptr<Phone> &ph : m_phones) {
