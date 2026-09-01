@@ -129,6 +129,19 @@ public:
     // reconnection finish it.
     void finishLive();
 
+    // ── ENC 6g / 6h — the file extension for a payload ────────────────────
+    //
+    // From the CONTAINER (an IANA media type) and from nothing else where one
+    // was given: 6h FORBIDS inferring an extension from `format.codec`, from
+    // `Stream.kind`, or by sniffing the bytes.  `streamKind` is the fallback for
+    // the raw-samples case ENC 6g allows to carry no container at all.
+    //
+    // Public because the LIVE path writes clips too, and two hand-rolled copies
+    // of this table in one subsystem is one too many -- the same argument
+    // `digestFromHex()` is exposed on for.
+    static std::string extensionForPayload(const std::string &container,
+                                           const std::string &streamKind);
+
     const Stats &stats() const { return m_stats; }
 
 private:

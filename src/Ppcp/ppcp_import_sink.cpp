@@ -109,7 +109,10 @@ const char *extensionForStreamKind(const std::string &streamKind)
     return ".bin";
 }
 
-std::string extensionFrom(const std::string &container, const std::string &streamKind)
+}  // namespace
+
+std::string PpcpImportSink::extensionForPayload(const std::string &container,
+                                                const std::string &streamKind)
 {
     if (container.empty()) return extensionForStreamKind(streamKind);
     if (const char *known = extensionForContainer(container)) return known;
@@ -119,6 +122,12 @@ std::string extensionFrom(const std::string &container, const std::string &strea
     return sub.empty() ? std::string(".bin") : "." + sanitise(sub);
 }
 
+namespace {
+// One name for the same thing, so the call sites below read unchanged.
+std::string extensionFrom(const std::string &container, const std::string &streamKind)
+{
+    return PpcpImportSink::extensionForPayload(container, streamKind);
+}
 }  // namespace
 
 PpcpImportSink::PpcpImportSink(PpcpImportLedger &ledger, ppcp_peer *peer, Config cfg)

@@ -487,6 +487,68 @@ public:
     // papered over, because the failure is otherwise silent.
     Ppcp::PpcpShotBridge *activeShotBridge();
 
+    // ── CORE §8.4 — ask every connected phone for the clip around a shot ───
+    //
+    // ⭐ THE CALL THAT WAS NEVER MADE.  `PpcpShotBridge::requestCapture()` has
+    // existed, correct and tested, with no caller anywhere in the tree — so a
+    // phone holding the footage in its ring was never once asked for it, and
+    // `bulk 0/0` on every link teardown was the whole finding.
+    //
+    // ⚠ FANNED OUT, NOT SENT THROUGH `activeShotBridge()`.  That answers the
+    // FIRST phone's bridge, so a request issued through it could never name a
+    // second phone's Streams.  8.4's request is the ORPHAN form precisely so a
+    // host may ask a device that never nominated the shot; every connected
+    // phone is asked, and each answers for itself.
+    //
+    // ⚠ ISSUED AT THE SHOT, NOT WHEN THE SWING FOLDER EXISTS.  Allocation is
+    // 4-11 s later (post-roll plus the history gather), and every second of
+    // waiting spends a ring that is finite.  The answer is filed against the
+    // swing when the folder arrives; see PpcpClipFiler.
+    //
+    // `t0HostNs` is a reading of `Session.timebase_ref` — for this host, of the
+    // same steady_clock `EventBuffer::nowMicros()` reads, times 1000.  The owner
+    // inverts §6.1 into its own convention at its end; this host must not do it
+    // for them (5.13c).
+    //
+    // Returns how many Streams were asked for, across all phones.
+    int requestCaptureForShot(const QString &shotId, qint64 t0HostNs);
+
+    // A stable, filesystem-safe alias for one phone camera, used as the
+    // `streams[]` alias in swing.json and as the clip's filename stem.  The
+    // declared label where there is one, plus a short digest of peer+source so
+    // that two phones offering "iPhone 16 - Wide" stay distinguishable.
+    static QString streamAliasFor(const QString &peerId, const QString &sourceId,
+                                  const QString &label);
+
+    // ── Where a clip actually surfaces ─────────────────────────────────────
+    //
+    // Every VideoInputPpcp this service owns, across every connected phone.
+    //
+    // ⚠ THE CONNECTION IS MADE OUTSIDE THIS CLASS, ON PURPOSE.  Binding
+    // `clipReady` here would put `&VideoInputPpcp::clipReady` -- a moc-generated
+    // symbol -- into this translation unit, and `ppcp_host_service_test` STUBS
+    // the src/Video symbols rather than linking the real ones, precisely so a
+    // suite about the pairing clock does not drag in Aravis, Spinnaker and
+    // Bluetooth.  So this hands out the instances and the join is made where
+    // the real class is already linked.
+    //
+    // ⚠ These are preview-ONLY in what they OPEN, and that does not make them
+    // preview-only in what they SEE: dispatchEvent() hands every event for a
+    // peer to every live instance bound to it, and ownership is resolved by
+    // Source -- so a shot Capture for a camera they cover is assembled here and
+    // emitted with preview=false.  When the phone is ALSO in use as a session
+    // camera, that instance assembles the same clip too; the ledger's admit()
+    // answers AlreadyHeld for the second and nothing is written twice, which is
+    // what I34 is for.
+    std::vector<VideoInputPpcp *> previewConsumers() const;
+
+    // MSG 8.4a — flush what is owed to every connected owner, now.  The tick
+    // does this anyway; this exists so a clip that has just been flushed to disk
+    // is acknowledged immediately rather than up to a tick later, because
+    // `capture_committed` is what lets the device evict under I38 and a phone
+    // used all season depends on it.
+    void flushOwedCommitsNow();
+
     // ── The one ledger, borrowed rather than copied ────────────────────────
     //
     // ⛔ THERE MUST BE EXACTLY ONE IN-MEMORY LEDGER OVER THE FILE.  This class
@@ -557,6 +619,17 @@ public:
     QString hostMicrophoneSourceId() const;
 
 signals:
+    // The set of preview consumers changed -- a phone connected, reconnected or
+    // went away.  Whoever listens for clips must (re)connect to them; see
+    // previewConsumers().
+    void previewConsumersChanged();
+
+    // One Stream was asked for a clip around `shotId`.  Emitted per Stream, so a
+    // consumer can record what is owed before any of it arrives.
+    void captureAsked(const QString &shotId, const QString &peerId,
+                      const QString &sourceId, const QString &streamId,
+                      const QString &alias);
+
     void stateChanged();
     void studioNameChanged();
     void statusChanged();

@@ -59,6 +59,9 @@ constexpr const char *kDevPeer   = "dev-1";
 constexpr const char *kSourceId  = "src-1";
 constexpr const char *kSessionId = "sess-1";
 constexpr const char *kDevTb     = "tb:dev";
+// ENC 6g — an IANA media type, which is the ONLY legitimate source of a file
+// extension for these bytes (6h).
+constexpr const char *kContainer = "video/quicktime";
 
 // Computed, not hand-picked: VideoInputPpcp::start() names its Streams via
 // streamIdFor() (a hash of peerId+sourceId, CORE 5.1's 64-byte PPCP_ID_MAX),
@@ -287,8 +290,12 @@ struct Link {
         ASSERT_EQ(ppcp_achieved_frames_set_exposure(&af, &e,
                       scalar ? PPCP_EXP_LOCKED_CONSTANT : PPCP_EXP_PER_FRAME), PPCP_OK);
 
-        ASSERT_EQ(ppcp_peer_payload_begin(dev.p, PPCP_CHANNEL_BULK, captureId, bytes.size(),
-                                          &d, 1024, &af), PPCP_OK);
+        // ENC 6g / E7 — `_as`, naming the CONTAINER, because a clip is
+        // container-framed bytes and 6h forbids the receiver inferring one from
+        // `format.codec`, from `Stream.kind` or by sniffing.  A device sending a
+        // clip is required to call this form; the plain one is for raw samples.
+        ASSERT_EQ(ppcp_peer_payload_begin_as(dev.p, PPCP_CHANNEL_BULK, captureId, bytes.size(),
+                                             &d, 1024, kContainer, &af), PPCP_OK);
         toHost(PPCP_CHANNEL_BULK);
         ASSERT_EQ(ppcp_peer_payload_chunk(dev.p, PPCP_CHANNEL_BULK, captureId, 0, 1024,
                                           bytes.data(), bytes.size()), PPCP_OK);
@@ -382,6 +389,14 @@ TEST(VideoInputPpcpCanonicalInstant, TheConversionIsAppliedWithTheProfilesOwnTim
     EXPECT_EQ(c.exposureNs[1], 8000);
     EXPECT_EQ(L.in.counters().unconvertible, 0u);
     EXPECT_EQ(L.frames, 0);   // a clip is NOT a live frame
+
+    // ⭐ ENC 6g / E7 — THE CONTAINER REACHES THE CONSUMER.  6h forbids inferring
+    // a file extension from `format.codec`, from `Stream.kind` or by sniffing,
+    // so a consumer that writes this clip to disk has this or has no legitimate
+    // name for the file.  It was decoded and dropped on the floor until Sept
+    // 2026, while a comment in this file's own deliver() claimed ENC §6 declared
+    // no container at all.
+    EXPECT_EQ(c.container, QStringLiteral("video/quicktime"));
 }
 
 // CT-S1 assertion 2, and the plan calls it "the whole test": an implementation

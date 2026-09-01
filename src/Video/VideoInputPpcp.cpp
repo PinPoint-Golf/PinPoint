@@ -1426,6 +1426,10 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
     }
 
     m_captureStream.emplace_back(capId, streamId);
+    // I27 — exactly one anchor.  Recorded only when it is a Shot; a Capture
+    // anchored to a Candidate or to its own Stream belongs to no swing.
+    if (c.anchor.kind == PPCP_ANCHOR_SHOT)
+        m_captureShot.emplace_back(capId, idStr(c.anchor.id));
 }
 
 void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
@@ -1439,10 +1443,20 @@ void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
     m_open.clip.captureId = capId;
     m_open.clip.peerId = m_peerId;
     m_open.clip.sourceId = m_sourceId;
+    m_open.clip.sessionId = m_sessionId;
+    // Carried through from the announce: which Shot this Capture answers.
+    for (const auto &e : m_captureShot)
+        if (e.first == capId) { m_open.clip.shotId = e.second; break; }
     for (const auto &e : m_captureStream)
         if (e.first == capId) { m_open.clip.streamId = e.second; break; }
     m_open.clip.preview = !m_open.clip.streamId.isEmpty()
                           && m_open.clip.streamId == m_previewStreamId;
+
+    // ENC 6g / E7 — the container, carried here and nowhere else.  6h forbids
+    // inferring one from `format.codec`, from `Stream.kind` or by sniffing, so
+    // a consumer that writes these bytes to a file has this or has no name for
+    // it.  Absent for raw samples the profile describes in full.
+    m_open.clip.container = b.has_container ? idStr(b.container) : QString();
 
     // ── CORE §6.1, and the whole reason this work package exists ───────────
     //
@@ -1550,9 +1564,16 @@ void VideoInputPpcp::deliver()
 
 void VideoInputPpcp::emitPreviewFrame(const PpcpClip &clip)
 {
-    // ENC §6 declares no container for a payload (finding 3 in this repository's
-    // conformance claim), so a consumer must decide what the bytes are from the
-    // profile's `format`.  Two cases are handled and a third is refused rather
+    // ⚠ STALE UNTIL SEPT 2026, AND CORRECTED HERE.  This read "ENC §6 declares
+    // no container for a payload" — true of the original text and false since
+    // ENC 6g / erratum E7, which carries one on `payload_begin` and makes it
+    // REQUIRED for container-framed bytes.  `PpcpClip::container` now holds it.
+    //
+    // A PREVIEW payload is the case that genuinely has none: it is raw samples
+    // or an encoded still the profile's `format` describes in full, which is
+    // exactly the "pass NULL" case ENC 6g allows.  So this function still
+    // decides from the profile — correctly, and now for a stated reason rather
+    // than because the container was being dropped on the floor.  Two cases are handled and a third is refused rather
     // than guessed: raw at exactly the declared size, an encoded still QImage
     // can read, and anything else.
     const int w = m_frameWidth, h = m_frameHeight;

@@ -216,6 +216,42 @@ pp_add_test(ppcp_video_input_test
     AUTOMOC
     GTEST)
 
+# PpcpClipFiler — where a phone's clip becomes part of a swing (H-d).
+#
+# The subject is the ORDERING. The capture request goes out at the shot; the
+# swing folder is allocated 4-11 s later, behind the post-roll and the history
+# gather; and the clip may arrive on either side of that, or never. A clip that
+# beats the folder must be PARKED, because dropping it is the exact defect this
+# work exists to remove.
+#
+# ⚠ Lives here rather than in gui-tests because that suite is standalone and has
+# no `ppcp` target. It takes the REAL swing_doc and the REAL ledger, since the
+# whole subject is the join between an opaque PPCP identity and a derived swing
+# one — but not VideoInputPpcp_inventory.cpp, which reaches Bluetooth through
+# device_enumerator -> imu_base, the same TU the row above refuses.
+pp_add_test(ppcp_clip_filer_test
+    SOURCES ppcp_clip_filer_test.cpp
+            ${PP_SRC}/Gui/shot/ppcp_clip_filer.cpp
+            ${PP_SRC}/Video/VideoInputPpcp.cpp
+            ${PP_SRC}/Video/video_input_base.cpp
+            ${PP_SRC}/Video/raw_video_frame.cpp
+            ${PP_SRC}/Core/pp_log_stream.cpp
+            ${PP_SRC}/Core/PpMessageLog.cpp
+            ${PP_SRC}/Export/swing_doc.cpp
+            ${PP_SRC}/Export/swing_paths.cpp    # swing_doc reaches SwingPaths::sanitise
+            ${PP_SRC}/LaunchMonitor/launch_monitor_reading.cpp
+            ${PP_SRC}/LaunchMonitor/gcquad_csv_parser.cpp
+            ${PPCP}/ppcp_import_ledger.cpp
+            ${PPCP}/ppcp_import_sink.cpp
+            ${PPCP}/ppcp_bundle_transport.cpp
+            ${PPCP}/ppcp_host_engine.cpp
+            ${PPCP}/ppcp_ingest_policy.cpp
+            ${PPCP}/ppcp_source_declaration.cpp
+    INCLUDE ${PPCP} ${PP_SRC} ${PP_SRC}/Video ${PP_SRC}/Core ${PP_SRC}/LaunchMonitor
+    LINK    ppcp Qt6::Multimedia Qt6::Qml
+    STD 20
+    AUTOMOC)
+
 # ── H5 — the live Session: sync, heartbeat, arm ─────────────────────────────
 # CT-I21 (one probe sequence per LOCAL timebase), CT-I18's negative half (a
 # conversion with no direct relation is REFUSED, never assumed zero), 7.4c's

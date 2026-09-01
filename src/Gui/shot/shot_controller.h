@@ -234,10 +234,25 @@ signals:
     // 1 September 2026 that was four of the first and two of the second.
     void shotRefused(const QString &reason, const QString &id);
 
+    // ⭐ CORE §8.4 — a committed shot for which a phone should be asked for its
+    // footage.  `t0HostNs` is a reading of `Session.timebase_ref`: the SAME
+    // steady_clock the event buffer reads, times 1000, which is asserted by a
+    // test in the shot bridge rather than left as a comment.
+    //
+    // ⚠ EMITTED AT THE SHOT, not when the swing folder exists.  The folder is
+    // allocated 4-11 s later, behind the post-roll and the history gather, and
+    // every second of waiting spends a phone ring that is finite.  What the
+    // clip is eventually filed against is settled later, by correlation.
+    void captureRequested(const QString &shotId, qint64 t0HostNs);
+
 private:
     // The single commit path — writes the marker and emits shotDetected.
     // Re-checks armed() (the processor may have gone busy mid-hold).
-    void commitShot(Source source, qint64 timestampUs);
+    //
+    // Answers whether the shot was actually committed.  A dropped shot has no
+    // swing to file anything against, so the capture request must not go out
+    // for one — and the old `void` gave the caller no way to tell.
+    bool commitShot(Source source, qint64 timestampUs);
     void onArbHoldExpired();
     void writeShotMarker(Source source, int64_t impactUs, int sessionType);
 

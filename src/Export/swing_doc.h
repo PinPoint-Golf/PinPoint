@@ -172,8 +172,15 @@ public:
     //
     // Refreshes the summary sidecar for the same reason updateReview does — this
     // rewrite moves swing.json's size and mtime, invalidating both sidecar guards.
+    // `fileName` names the file the bytes became, relative to the swing folder.
+    // Written only when non-empty, because the two facts arrive together and for
+    // the same reason: an element that says `complete` while naming no file is a
+    // stream no reader can open, which is worse than one that says it is still
+    // arriving.  Left alone on a pending or absent update, so a later state
+    // change never erases a file that has already landed.
     static bool updateStreamOrigin(const QString &swingDir, const QString &alias,
-                                   const StreamOrigin &origin, QString *error = nullptr);
+                                   const StreamOrigin &origin, QString *error = nullptr,
+                                   const QString &fileName = QString());
 
     // Who the shot belongs to and where it sits — everything a device-only document
     // needs that the reading itself cannot supply.

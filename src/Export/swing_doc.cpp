@@ -913,7 +913,8 @@ SwingDocWriter::StreamOrigin originFromJson(const QJsonObject &j)
 }  // namespace
 
 bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &alias,
-                                        const StreamOrigin &origin, QString *error)
+                                        const StreamOrigin &origin, QString *error,
+                                        const QString &fileName)
 {
     if (alias.isEmpty()) {
         if (error) *error = QStringLiteral("updateStreamOrigin needs a stream alias");
@@ -945,6 +946,7 @@ bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &
         QJsonObject el = streams.at(i).toObject();
         if (el.value(QStringLiteral("alias")).toString() != alias) continue;
         el[QStringLiteral("origin")] = originToJson(origin);
+        if (!fileName.isEmpty()) el[QStringLiteral("file")] = fileName;
         streams.replace(i, el);
         found = true;
         break;
@@ -961,6 +963,7 @@ bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &
         el[QStringLiteral("kind")]   = QStringLiteral("video");
         el[QStringLiteral("alias")]  = alias;
         el[QStringLiteral("origin")] = originToJson(origin);
+        if (!fileName.isEmpty()) el[QStringLiteral("file")] = fileName;
         streams.append(el);
     }
     root[QStringLiteral("streams")] = streams;

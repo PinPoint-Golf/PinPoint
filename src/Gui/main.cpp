@@ -39,6 +39,9 @@
 #include "pp_colorspace_pin.h"
 #include "app_settings.h"
 #include "notification_center.h"
+#ifdef HAVE_PPCP_TRANSPORT
+#include "shot/ppcp_clip_filer.h"
+#endif
 #include "app_info.h"
 #ifdef HAVE_OPENCV
 #  include <opencv2/core.hpp>
@@ -872,6 +875,72 @@ int main(int argc, char *argv[])
     // its records overwritten by the next flush from here, and the same bundle
     // then re-imported as if it were new.  It borrows this one now.
     ppcpImportController.setSharedLedger(&ppcpHost.ledger());
+
+    // ── CORE §8.4 / §8.5 — the swing-video leg ────────────────────────────
+    //
+    // ⭐ THE TWO JOINS THAT WERE MISSING, AND THEY LAND TOGETHER ON PURPOSE.
+    // H-c asks the phone for the clip; H-d files the answer.  H-c without H-d
+    // pulls video across the link and drops it on the floor, which is worse
+    // than not asking — so if one of these connections is ever removed, remove
+    // both.
+    static PpcpClipFiler ppcpClipFiler;
+    ppcpClipFiler.setLedger(&ppcpHost.ledger());
+    // MSG 8.4a — the owed `capture_committed` goes out on the next tick, but a
+    // clip that has just been flushed to disk should not wait 20 ms to be
+    // acknowledged when the link is right here.
+    ppcpClipFiler.setCommitPump([] { ppcpHost.flushOwedCommitsNow(); });
+
+    // A shot was committed → ask every connected phone for its footage.
+    // (`ppcpHost` and `ppcpClipFiler` are statics, so they are named directly
+    // rather than captured — the same reason the aboutToQuit handler does.)
+    QObject::connect(&shotController, &ShotController::captureRequested,
+                     &ppcpHost, [](const QString &shotId, qint64 t0HostNs) {
+        ppcpHost.requestCaptureForShot(shotId, t0HostNs);
+    });
+    QObject::connect(&ppcpHost, &PpcpHostService::captureAsked,
+                     &ppcpClipFiler, &PpcpClipFiler::onCaptureAsked);
+
+    // The swing folder exists (or never will) → file, or discard, what is owed.
+    QObject::connect(&shotProcessor, &ShotProcessor::shotProcessed,
+                     &ppcpClipFiler, [](int, const QString &swingDir) {
+        ppcpClipFiler.onSwingReady(swingDir);
+    });
+    QObject::connect(&shotProcessor, &ShotProcessor::shotFailed,
+                     &ppcpClipFiler, [&shotProcessor](const QString &) {
+        // A shot can fail analysis and still have a folder — the clip belongs in
+        // it either way.  Only a shot with NO folder has nowhere to put one.
+        const QString dir = shotProcessor.lastSwingDir();
+        if (dir.isEmpty()) ppcpClipFiler.onSwingFailed();
+        else               ppcpClipFiler.onSwingReady(dir);
+    });
+
+    // ⚠ AND THE CLIPS THEMSELVES, CONNECTED HERE AND NOT INSIDE PpcpHostService.
+    // Binding `&VideoInputPpcp::clipReady` puts a moc-generated symbol into
+    // whatever translation unit does it, and ppcp_host_service_test STUBS the
+    // src/Video symbols so a suite about the pairing clock does not drag in
+    // Aravis, Spinnaker and Bluetooth.  main.cpp links the real class already.
+    //
+    // Re-run whenever the consumer set changes: a phone connecting, or
+    // reconnecting, builds new instances, and UniqueConnection makes re-running
+    // over the survivors free.
+    const auto bindClipConsumers = [] {
+        for (VideoInputPpcp *v : ppcpHost.previewConsumers())
+            QObject::connect(v, &VideoInputPpcp::clipReady,
+                             &ppcpClipFiler, &PpcpClipFiler::onClipReady,
+                             Qt::UniqueConnection);
+    };
+    QObject::connect(&ppcpHost, &PpcpHostService::previewConsumersChanged,
+                     &ppcpClipFiler, bindClipConsumers);
+    bindClipConsumers();
+
+    // A landed clip changes the swing on disk. Re-analysis is the existing
+    // "this swing changed, analyse it again" path; the row updates in place and
+    // the stage is never stolen from a golfer still hitting.
+    QObject::connect(&ppcpClipFiler, &PpcpClipFiler::clipFiled,
+                     &reanalysisController, [&reanalysisController](const QString &swingDir,
+                                                                    const QString &) {
+        reanalysisController.reanalyse(QVariantList{ swingDir });
+    });
     // MSG 3.3 — a peer's cameras exist the moment it declares.  The registry
     // has already been told by then; CameraManager snapshots at construction
     // and merges only on enumerate(), so it is the one that has to be asked.

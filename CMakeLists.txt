@@ -525,6 +525,7 @@ qt_add_executable(PinPointStudio
     $<$<BOOL:${WIN32}>:${CMAKE_CURRENT_SOURCE_DIR}/PinPointStudio.rc>
     src/Gui/app/app_settings.h               src/Gui/app/app_settings.cpp
     src/Gui/app/notification_center.h        src/Gui/app/notification_center.cpp
+    src/Gui/shot/ppcp_clip_filer.h           src/Gui/shot/ppcp_clip_filer.cpp
     src/Gui/imu/imu_manager.h                src/Gui/imu/imu_manager.cpp
     src/Gui/imu/imu_instance.h               src/Gui/imu/imu_instance.cpp
     # imu_device.h carries Q_OBJECT and has no .cpp of its own, so AUTOMOC only

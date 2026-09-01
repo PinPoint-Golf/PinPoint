@@ -18,6 +18,7 @@
 
 #include "ppcp_host_service.h"
 
+#include <QCryptographicHash>
 #include <algorithm>
 
 #include <QDateTime>
@@ -806,6 +807,139 @@ QString PpcpHostService::armState() const
     return QStringLiteral("armed");
 }
 
+namespace {
+// This file spells ppcp_id out inline everywhere else; one helper for the block
+// below, which reaches for four of them.
+QString qid(const ppcp_id &id) { return QString::fromUtf8(id.v, static_cast<int>(id.len)); }
+}  // namespace
+
+QString PpcpHostService::streamAliasFor(const QString &peerId, const QString &sourceId,
+                                       const QString &label)
+{
+    // The alias becomes a `streams[]` key AND a filename stem, so it has to be
+    // filesystem-safe, stable for the life of the pairing, and unique within one
+    // swing -- two phones may both declare "iPhone 16 - Wide".
+    QString stem = label.trimmed();
+    if (stem.isEmpty()) stem = sourceId;
+    QString safe;
+    safe.reserve(stem.size());
+    for (const QChar c : stem) {
+        if (c.isLetterOrNumber())      safe.append(c.toLower());
+        else if (!safe.endsWith(QLatin1Char('-'))) safe.append(QLatin1Char('-'));
+    }
+    while (safe.endsWith(QLatin1Char('-'))) safe.chop(1);
+    while (safe.startsWith(QLatin1Char('-'))) safe.remove(0, 1);
+    if (safe.isEmpty()) safe = QStringLiteral("phone");
+
+    // Short digest of the identity, not of the label: two lenses on one phone
+    // differ by Source, and two phones differ by Peer.
+    const QByteArray h = QCryptographicHash::hash(
+        (peerId + QLatin1Char('\x1f') + sourceId).toUtf8(), QCryptographicHash::Sha1);
+    return safe + QLatin1Char('-') + QString::fromLatin1(h.toHex().left(8));
+}
+
+int PpcpHostService::requestCaptureForShot(const QString &shotId, qint64 t0HostNs)
+{
+    if (shotId.isEmpty()) return 0;
+
+    // The interval asked for around `t0`.  A golf swing needs the backswing, so
+    // the pre-roll is the long side; the host's own window is 4 s wide
+    // (kWindowDuration) and this sits comfortably inside it.
+    constexpr qint64 kPreNs  = 2000LL * 1000 * 1000;   // 2.0 s before t0
+    constexpr qint64 kPostNs = 1000LL * 1000 * 1000;   // 1.0 s after t0
+
+    int asked = 0;
+    for (const std::unique_ptr<Phone> &ph : m_phones) {
+        if (!ph || !ph->peer || !ph->engine) continue;
+        ppcp_peer *peer = ph->engine->peer();
+        if (!peer) continue;
+
+        // ⚠ ONLY STREAMS THAT ARE ACTUALLY OPEN, AND ASKED OF THE LIBRARY RATHER
+        // THAN RECONSTRUCTED.  A hand-built id would have to reproduce
+        // `VideoInputPpcp::streamIdFor()`'s hash, and a stale comment two files
+        // away still shows the pre-hash form -- so this reads the peer's own
+        // Stream table instead.  5.21c confines a ring buffer, and therefore a
+        // clip, to a `shot_windowed` Stream; a preview Stream retains nothing.
+        std::vector<std::string> ids;
+        std::vector<QString>     sourceIds;
+        const std::size_t n = ppcp_peer_stream_count(peer);
+        for (std::size_t i = 0; i < n; ++i) {
+            const ppcp_stream *st = ppcp_peer_stream_at(peer, i);
+            if (!st) continue;
+            if (st->continuity != PPCP_SHOT_WINDOWED) continue;
+            if (st->has_closed_at) continue;
+            ids.push_back(qid(st->id).toStdString());
+            sourceIds.push_back(qid(st->source_id));
+        }
+        if (ids.empty()) {
+            // Not a fault: the phone is connected and previewing, but no capture
+            // Stream is open, so there is nothing retaining an interval to ask
+            // for.  Said once per shot, because silence here reads as success.
+            ppWarn() << "[ppcp] no shot_windowed Stream open on" << ph->name
+                     << "— no clip asked for shot" << shotId;
+            continue;
+        }
+
+        // 5.21 / E60 — clamp the pre-roll to what the device says it AIMS to
+        // keep, where it has said.  `retention_target_ns` is a DURATION, so this
+        // needs no timebase conversion and cannot get a sign wrong.
+        // ⚠ `retained_from` is an Instant in the DEVICE's timebase and is
+        // deliberately NOT used here: converting it means evaluating a relation,
+        // and a relation evaluated outside its own domain fabricated a ~460 ms
+        // sigma against a real phone in August.  Asking for slightly too much is
+        // answered by `absent`, which is a first-class answer (I10); asking for
+        // the wrong interval is not.
+        qint64 preNs = kPreNs;
+        for (const Ppcp::PpcpLiveSession::BufferMargin &b : ph->peer->liveSession().bufferMargins()) {
+            if (!b.hasRetentionTarget || b.retentionTargetNs <= 0) continue;
+            if (std::find(ids.begin(), ids.end(), b.streamId) == ids.end()) continue;
+            preNs = std::min(preNs, b.retentionTargetNs);
+        }
+
+        std::string err;
+        if (!ph->peer->shotBridge().requestCapture(shotId.toStdString(), t0HostNs,
+                                                   ids, preNs, kPostNs, &err)) {
+            ppWarn() << "[ppcp] capture_request FAILED for" << ph->name
+                     << "shot" << shotId << "—" << QString::fromStdString(err);
+            continue;
+        }
+
+        const ppcp_peer_desc *desc = ppcp_peer_counterpart(peer);
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            QString label;
+            if (desc) {
+                for (std::size_t j = 0; j < desc->source_count; ++j) {
+                    if (qid(desc->sources[j].id) != sourceIds[i]) continue;
+                    if (desc->sources[j].has_label) label = qid(desc->sources[j].label);
+                    break;
+                }
+            }
+            emit captureAsked(shotId, ph->counterpartId, sourceIds[i],
+                              QString::fromStdString(ids[i]),
+                              streamAliasFor(ph->counterpartId, sourceIds[i], label));
+            ++asked;
+        }
+        ppInfo() << "[ppcp] capture_request →" << ph->name << "for" << ids.size()
+                 << "Stream(s), shot" << shotId << "pre_ms" << (preNs / 1000000)
+                 << "post_ms" << (kPostNs / 1000000);
+    }
+    return asked;
+}
+
+void PpcpHostService::flushOwedCommitsNow()
+{
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (p && p->engine && p->peer) flushOwedCommits(p.get());
+}
+
+std::vector<VideoInputPpcp *> PpcpHostService::previewConsumers() const
+{
+    std::vector<VideoInputPpcp *> all;
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (p) all.insert(all.end(), p->previews.begin(), p->previews.end());
+    return all;
+}
+
 Ppcp::PpcpShotBridge *PpcpHostService::activeShotBridge()
 {
     // First one with a running arbiter — see the header for why "first" and not
@@ -1485,6 +1619,11 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
         if (ph->previews.empty()) {
             const int live = VideoInputPpcp::startPreviewConsumers(
                 this, peer, ph->counterpartId, sessionId, desc, &ph->previews);
+            // ⭐ AND SOMETHING HAS TO BE LISTENING WHEN THE CLIP ARRIVES --
+            // the same lesson as the preview consumers themselves, learned
+            // twice.  The join is made outside this class (see
+            // previewConsumers()); this only says the set has changed.
+            if (live > 0) emit previewConsumersChanged();
             if (live > 0)
                 ppWarn() << "[ppcp] preview consumer live for" << live
                          << "camera Source(s) on" << ph->name;

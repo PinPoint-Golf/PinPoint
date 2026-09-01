@@ -94,6 +94,20 @@ struct PpcpClip {
     QString peerId;
     QString sourceId;
 
+    // I34 — a Capture's identity is `Capture.id` SCOPED BY `Session.id` and the
+    // minting `Peer.id`, and all three are needed to key it.  Without this a
+    // consumer would have to invent a scope, and two Sessions from one phone
+    // could collide on a capture id the device was entitled to reuse.
+    QString sessionId;
+
+    // I27 / ENC 4.1d — a Capture is anchored to EXACTLY ONE key, and where that
+    // key is a Shot this is its id.  It is the only honest way to say which shot
+    // a clip belongs to: the alternative is matching on arrival order or on
+    // (peer, source), and both are guesses that a second phone or a re-request
+    // breaks.  Empty when the Capture is anchored to a Candidate or to its own
+    // Stream rather than to a Shot.
+    QString shotId;
+
     // CORE 5.14 — `complete`, `partial` or `absent`.  `absent` carries a reason
     // and NO payload, and is a first-class answer (I10), never an error.
     ppcp_completeness completeness = PPCP_COMPLETE;
@@ -112,6 +126,21 @@ struct PpcpClip {
     // The payload as it arrived.  Empty for `absent`, and empty for a Capture
     // whose transfer failed or was refused.
     QByteArray payload;
+
+    // ⛔ ENC 6g / erratum E7 — THE PAYLOAD'S CONTAINER, AND THE ONLY LEGITIMATE
+    // SOURCE OF A FILE EXTENSION.  An IANA media type ("video/quicktime"),
+    // carried on `payload_begin` and REQUIRED whenever the bytes are a
+    // container-framed file.  ENC 6h forbids a receiver inferring one from
+    // `format.codec`, from `Stream.kind`, or by sniffing the bytes -- so a
+    // consumer that writes this clip to disk MUST name the file from here or
+    // not name it at all.
+    //
+    // Empty for raw samples the Stream's profile describes in full, and empty
+    // for `absent`.  ⚠ The import path has read this since E7
+    // (ppcp_import_sink.cpp); the live path dropped it on the floor until now,
+    // and a stale comment in this file's deliver() claimed ENC §6 declared no
+    // container at all.
+    QString container;
 
     bool preview = false;
 };
@@ -492,6 +521,11 @@ private:
     // through it the profile, and through that the `timing` — is only reachable
     // through what the announce said.
     std::vector<std::pair<QString, QString>> m_captureStream;
+    // capture id -> the SHOT it is anchored to (I27), from the same announce.
+    // `payload_begin` carries neither, so both are only reachable through what
+    // the announce said, and a consumer needs the shot to know which swing the
+    // bytes belong to.
+    std::vector<std::pair<QString, QString>> m_captureShot;
     // capture ids on a preview Stream, so 5.11j is checked on the way in.
     std::vector<QString> m_previewCaptures;
 

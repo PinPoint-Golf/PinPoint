@@ -507,11 +507,21 @@ void ShotController::commitArbitratedShot(qint64 t0HostNs, const QString &shotId
     // from another peer entirely, and the ordinal is persisted — see the note on
     // the enum.  It is a display and marker label, not an authority claim; the
     // authority is `Shot.issued_by` and lives on the wire.
-    commitShot(Source::Ppcp, tUs);
+    if (!commitShot(Source::Ppcp, tUs)) return;
+
+    // ⭐ CORE §8.4 — AND NOW ASK FOR THE FOOTAGE.  Until this line the phone was
+    // never asked: `requestCapture()` existed, correct and tested, with no
+    // caller anywhere in the tree, and every link ended `bulk 0/0`.
+    //
+    // ⚠ Back to nanoseconds on `tb:host`, which is exactly what arrived: the
+    // division above is a truncation of PRECISION for the event buffer's
+    // microsecond index, not a change of domain, so this restores units and
+    // nothing else.  The Shot on the wire kept its nanoseconds throughout.
+    emit captureRequested(shotId, tUs * 1000);
 }
 #endif
 
-void ShotController::commitShot(Source source, qint64 timestampUs)
+bool ShotController::commitShot(Source source, qint64 timestampUs)
 {
     if (!armed()) {
 #ifdef HAVE_PPCP
@@ -532,12 +542,12 @@ void ShotController::commitShot(Source source, qint64 timestampUs)
             emit shotRefused(
                 tr("Shot from the phone was missed — still working on the previous one."),
                 QStringLiteral("shot.dropped.busy"));
-            return;
+            return false;
         }
 #endif
         ppDebug() << "[ShotController] commit ignored (not capturing or busy) — source"
                   << sourceName(source);
-        return;
+        return false;
     }
 
     const qint64 impactUs = timestampUs >= 0 ? timestampUs
@@ -554,6 +564,7 @@ void ShotController::commitShot(Source source, qint64 timestampUs)
     ppInfo() << "[ShotController] shot detected — source" << sourceName(source)
              << "impact_ts_us" << impactUs << "sessionType" << sessionType;
     emit shotDetected(source, impactUs, sessionType);
+    return true;
 }
 
 void ShotController::writeShotMarker(Source source, int64_t impactUs, int sessionType)
