@@ -19,6 +19,7 @@
 #include "swing_paths.h"
 
 #include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -238,8 +239,9 @@ void SwingPaths::endSession(bool discardIfNoNewSwings)
         if (now <= m_sessionBaselineSwings) {
             // Recoverable removal (OS trash), not a permanent delete — matches the
             // shot-trash convention, so an accidentally-discarded session survives.
-            if (QFile::moveToTrash(m_cachedSessionDir))
-                ppInfo() << "[SwingExport] discarded session (to trash):" << m_cachedSessionDir;
+            QString where;
+            if (trashPath(m_cachedSessionDir, &where))
+                ppInfo() << "[SwingExport] discarded session (to" << where << "):" << m_cachedSessionDir;
             else
                 ppWarn() << "[SwingExport] could not trash empty session:" << m_cachedSessionDir;
         }
@@ -254,6 +256,47 @@ void SwingPaths::endSession(bool discardIfNoNewSwings)
     m_cachedSessionDir.clear();
     m_cachedSessionId.clear();
     m_sessionBaselineSwings = -1;
+}
+
+bool SwingPaths::trashPath(const QString& path, QString* where)
+{
+    if (path.isEmpty() || !QFileInfo::exists(path))
+        return false;
+    if (QFile::moveToTrash(path)) {
+        if (where) *where = QStringLiteral("the system trash");
+        return true;
+    }
+    // The volume has no trash (a network share).  Same volume, so this is a
+    // rename: `<root>/.pinpoint-trash/<athlete>/<stamp>_[<session>_]<name>`.
+    // A swing folder sits in a session which sits in an athlete folder; a
+    // session sits in an athlete folder.
+    const QFileInfo fi(path);
+    const QString   name    = fi.fileName();
+    const bool      isSwing = name.startsWith(QStringLiteral("swing_"));
+    const QString   parent  = QDir::cleanPath(fi.absolutePath());
+    const QString   athleteDir = isSwing ? QDir::cleanPath(parent + QStringLiteral("/.."))
+                                         : parent;
+    const QString   root       = QDir::cleanPath(athleteDir + QStringLiteral("/.."));
+    const QString   athlete    = QFileInfo(athleteDir).fileName();
+    const QString   trashDir   = root + QStringLiteral("/.pinpoint-trash/") + athlete;
+    if (!QDir().mkpath(trashDir)) {
+        ppWarn() << "[SwingPaths] no trash on this volume and could not create" << trashDir;
+        return false;
+    }
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    const QString tag   = isSwing ? QFileInfo(parent).fileName() + QStringLiteral("_") : QString();
+    QString dest = trashDir + QStringLiteral("/") + stamp + QStringLiteral("_") + tag + name;
+    for (int n = 2; QFileInfo::exists(dest) && n < 100; ++n)
+        dest = trashDir + QStringLiteral("/") + stamp + QStringLiteral("_") + tag + name
+               + QStringLiteral("-") + QString::number(n);
+    if (!QDir().rename(path, dest)) {
+        ppWarn() << "[SwingPaths] no trash on this volume and could not move" << path
+                 << "to" << dest;
+        return false;
+    }
+    ppInfo() << "[SwingPaths] no trash on this volume — moved to" << dest;
+    if (where) *where = dest;
+    return true;
 }
 
 } // namespace pinpoint

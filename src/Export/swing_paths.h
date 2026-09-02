@@ -44,6 +44,19 @@ public:
         int     swingIndex = 0;
     };
 
+    // ⭐ DELETE = TRASH, AND THE VOLUME MAY NOT HAVE ONE (2 Sept 2026).  Every
+    // delete in this application is a move to the OS trash, so it is
+    // recoverable.  A network share has no trash — macOS answers
+    // NSCocoaErrorDomain 3328, "the volume doesn't have one" — and until now
+    // every delete of a session or shot on the SwingData share failed, with a
+    // log line and nothing on screen.  This tries the OS trash and, where the
+    // volume refuses, MOVES the folder into a library-local trash on the same
+    // volume: `<libraryRoot>/.pinpoint-trash/<athlete>/<stamp>_[<session>_]<name>`,
+    // hidden from every listing (dot-prefixed; the enumerators do not pass
+    // QDir::Hidden) and as recoverable as the OS trash would have been.  `where`
+    // names the destination for the log.
+    static bool trashPath(const QString& path, QString* where = nullptr);
+
     // Allocates (and creates) the next swing directory.  libraryRoot may be
     // empty — falls back to <AppDataLocation>/swings with a warning.
     // namingPattern is the AppSettings sessionNamingPattern key

@@ -22,6 +22,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include "../../Export/swing_paths.h"
 #include <QTime>
 #include <QTimer>
 #include <QUrl>
@@ -271,7 +272,10 @@ bool SessionReviewController::trashSession(const QString &sessionId)
         return false;
     // Move the whole session folder to the OS trash (recoverable there). On
     // failure keep everything in place — the files are still on disk.
-    if (!QFile::moveToTrash(sessionId)) {
+    // ⚠ SwingPaths::trashPath, not QFile::moveToTrash — see its note: a
+    // network share has no OS trash, and this is where every session delete
+    // on the SwingData share was failing (2 Sept 2026).
+    if (!pinpoint::SwingPaths::trashPath(sessionId)) {
         ppWarn() << "[SessionReviewController] could not move session to trash:" << sessionId;
         return false;
     }

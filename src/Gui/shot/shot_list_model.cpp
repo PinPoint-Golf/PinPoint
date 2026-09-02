@@ -23,6 +23,7 @@
 #include "../Core/pp_debug.h"
 
 #include <QFile>
+#include "../../Export/swing_paths.h"
 #include <QStringList>
 
 ShotListModel::ShotListModel(QObject *parent)
@@ -317,8 +318,10 @@ bool ShotListModel::moveToTrash(int id)
         return false;
     // Move the on-disk folder to the OS trash (recoverable there). An
     // analysis-only shot has no folder and simply drops from the model.
+    // ⚠ SwingPaths::trashPath, not QFile::moveToTrash: the SwingData share has
+    // no OS trash, and every delete there failed silently until 2 Sept 2026.
     const QString dir = m_shots.at(row).swingDir;
-    if (!dir.isEmpty() && !QFile::moveToTrash(dir)) {
+    if (!dir.isEmpty() && !pinpoint::SwingPaths::trashPath(dir)) {
         ppWarn() << "[ShotListModel] could not move to trash:" << dir;
         return false;                 // keep the row — its files are still here
     }
