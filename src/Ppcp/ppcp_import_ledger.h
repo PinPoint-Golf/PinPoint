@@ -92,6 +92,10 @@ const char *completenessStr(Completeness c);
 // exactly PPCP_SHA256_BYTES*2 hex digits — which includes the legitimate empty
 // case, an owner that had not computed one.
 bool digestFromHex(const std::string &hex, ppcp_digest *out);
+// The other direction, for a digest that arrived in a message and must be kept
+// in the ledger (and sent back in `capture_committed`, 8.4a).  Empty where the
+// digest is not present.
+std::string digestToHex(const ppcp_digest &d);
 
 // ⭐ THE LINK, AND THE WHOLE REASON THIS CLASS EXTENDS TO THE LIVE PATH.
 //

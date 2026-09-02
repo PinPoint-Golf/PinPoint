@@ -270,6 +270,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
     rec.key.sessionId = clip.sessionId.toStdString();
     rec.key.captureId = clip.captureId.toStdString();
     rec.completeness  = ledgerCompleteness(clip.completeness);
+    rec.digestHex     = clip.digestHex.toStdString();
 
     const auto admission = m_ledger->admit(rec);
     if (admission == Ppcp::PpcpImportLedger::Admission::AlreadyHeld) {
@@ -324,7 +325,7 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
         Ppcp::SwingRef{ QFileInfo(s.swingDir).dir().dirName().toStdString(),
                         QFileInfo(s.swingDir).fileName().toStdString(),
                         alias.toStdString() });
-    m_ledger->queueCommitted(rec.key, {});
+    m_ledger->queueCommitted(rec.key, rec.digestHex);
     m_ledger->save();
     if (m_pumpCommits) m_pumpCommits();
 

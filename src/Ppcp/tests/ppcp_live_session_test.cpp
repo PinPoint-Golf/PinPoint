@@ -310,6 +310,25 @@ TEST(PpcpLiveSession, TheProbeExchangeRecoversTheOffsetAndTheSkew)
     // 6.1f — and the relation reaches the wire as a `relation_update`.
     EXPECT_GT(L.live.stats().relationsPublished, 0u);
     EXPECT_GT(L.live.stats().probesQueued, 0u);
+
+    // ⛔ AND KEEPS REACHING IT.  Until 1 Sept 2026 the host published its
+    // estimate ONCE, when the estimator first had a rate, and never again --
+    // so the phone converted every host-issued `t0` through a two-exchange
+    // fit whose slope was noise, extrapolated from an `observed_at` minutes
+    // old, and answered `outside_buffer` for an instant the ring had never
+    // been asked about.  The estimate is filtered (6.3e), so what goes out on
+    // this cadence is the CURRENT fit; a counterpart is entitled to it.
+    // Align on a publish first, so "under the cadence" is measured from one.
+    std::size_t before = L.live.stats().relationsPublished;
+    for (int i = 0; i < 12 && L.live.stats().relationsPublished == before; ++i)
+        L.tick(500 * kMs);
+    before = L.live.stats().relationsPublished;
+    for (int i = 0; i < 4; ++i) L.tick(500 * kMs);   // under the 5 s cadence
+    EXPECT_EQ(L.live.stats().relationsPublished, before)
+        << "republished inside the cadence -- that is a step, not a schedule";
+    for (int i = 0; i < 8; ++i) L.tick(500 * kMs);   // and past it
+    EXPECT_GT(L.live.stats().relationsPublished, before)
+        << "the estimate went out once and never again";
 }
 
 // ── I18 / 5.4c — the conversion applies at most one relation ──────────────

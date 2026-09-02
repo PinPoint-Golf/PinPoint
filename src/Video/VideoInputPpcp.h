@@ -107,6 +107,11 @@ struct PpcpClip {
     // breaks.  Empty when the Capture is anchored to a Candidate or to its own
     // Stream rather than to a Shot.
     QString shotId;
+    // CORE 5.14 `Capture.digest` as the announce carried it, hex; empty where
+    // the owner had not computed one.  8.4a's `capture_committed` sends it
+    // back, and libppcp refuses a commit without it -- so a clip filed without
+    // this stays "owed" for ever.
+    QString digestHex;
 
     // CORE 5.14 — `complete`, `partial` or `absent`.  `absent` carries a reason
     // and NO payload, and is a first-class answer (I10), never an error.
@@ -267,6 +272,14 @@ public:
         std::size_t previewCaptures = 0;
         std::size_t previewFrames   = 0;     // emitted as videoFrameReady
         std::size_t clips           = 0;     // emitted as clipReady
+        // Reassemblies thrown away to make room (see kMaxOpenPayloads).  Three
+        // channels carry at most three at once, so anything here at all says
+        // the table is leaking, and a test can say so.
+        std::size_t payloadsEvicted = 0;
+        // Chunks and ends that matched no open reassembly.  Non-zero means a
+        // payload's begin was never opened here, or was closed early.
+        std::size_t chunksUnmatched = 0;
+        std::size_t endsUnmatched   = 0;
         std::size_t absentSegments  = 0;     // 5.11c3 — the honest account
         // CT-I36a, host as consumer.  5.11j: "a consumer therefore never sees
         // `transfer: pending` on a preview Capture".  Counted rather than
@@ -478,7 +491,7 @@ private:
     void onPayloadChunk(const ppcp_msg *m);
     void onPayloadEnd(const ppcp_msg *m);
     void onPayloadAbort(const ppcp_msg *m);
-    void deliver();
+    void deliver(const QString &captureId);
     void emitPreviewFrame(const PpcpClip &clip);
 
     ppcp_peer *m_peer = nullptr;
@@ -526,6 +539,8 @@ private:
     // the announce said, and a consumer needs the shot to know which swing the
     // bytes belong to.
     std::vector<std::pair<QString, QString>> m_captureShot;
+    // capture id -> the announced digest, hex (see PpcpClip::digestHex).
+    std::vector<std::pair<QString, QString>> m_captureDigest;
     // capture ids on a preview Stream, so 5.11j is checked on the way in.
     std::vector<QString> m_previewCaptures;
 
@@ -533,9 +548,42 @@ private:
         bool            active = false;
         PpcpClip        clip;
         std::uint64_t   declaredBytes = 0;
+        // ⚠ Kept from `payload_begin` and CONVERTED AT `payload_end`, because
+        // the conversion needs the Stream's profile and the Stream is named by
+        // the announce -- which travels on the control connection while the
+        // bytes travel on bulk, and the two are not ordered against each other.
+        // ⛔ DEEP-COPIED.  `ppcp_achieved_frames` holds pointers into the
+        // engine's decode arena, which is reset by the NEXT frame fed; a copy
+        // of the struct is a copy of dangling pointers by the time `payload_end`
+        // arrives.
+        bool                      hasAchievedFrames = false;
+        QString                   framesTb;
         std::vector<std::int64_t> framesNs;
-        std::vector<std::int64_t> exposureNs;
-    } m_open;
+        std::vector<std::int64_t> exposureNs;      // empty = absent
+        std::vector<std::int64_t> isoValues;       // empty = absent
+        std::vector<ppcp_matrix3> intrinsics;      // empty = absent
+        ppcp_exposure_provenance  exposureProvenance = PPCP_EXP_PER_FRAME;
+    };
+    // Fills `streamId`, `shotId` and `preview` from what the announces said, or
+    // leaves them empty where no announce for this Capture has been read yet.
+    void resolveAnnounce(Open &open) const;
+    // ⛔ ONE REASSEMBLY PER CAPTURE, NOT ONE PER INSTANCE.  `CORE` §2's whole
+    // transport argument is that a clip on bulk must not head-of-line block
+    // the preview channel, so their payloads INTERLEAVE on the wire by design.
+    // A single slot here therefore lost every clip: measured 1 Sept 2026, the
+    // swing's `payload_begin` landed on bulk and the next preview segment's
+    // `payload_begin` replaced it "after 0 of 13126842 bytes" -- the 13 MB
+    // then arrived chunk by chunk for a Capture nothing was collecting, and
+    // the filer saw only the preview.  Keyed by capture id because that is
+    // what every chunk and end carry (ENC 6b).
+    std::vector<Open> m_openPayloads;
+    std::int64_t      m_lastTableDumpMs = 0;
+    // Three channels can each carry one payload at a time, so this is
+    // generous; beyond it the oldest PREVIEW reassembly goes first, and a
+    // clip is evicted only with a warning that names it.
+    static constexpr std::size_t kMaxOpenPayloads = 32;
+    Open *openPayload(const QString &captureId);
+    void  closePayload(const QString &captureId);
 
     QVector<qint64> m_lastCanonicalNs;
     QString         m_lastCanonicalTb;

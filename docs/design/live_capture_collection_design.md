@@ -845,6 +845,18 @@ failure.
 - `AppModel.isUnderTest` suppressing the app's auto-search. **Did not fix the duplicate link**;
   keep or discard on the evidence.
 
+### 10.8 Landed — 1 September 2026, 21:42 (added by the unattended session)
+
+`make integration-device … EXPECT_CLIPS=1` → **PROBE RESULT PASS — filed 1 clip(s) into 1
+shot(s)**, on its eighth run of the evening. On disk, checked by hand:
+`2026-09-01_Mark-Liversedge_Wrist_14/swing_0001/wide-cf05c062.mp4` (21,930,314 bytes, 718
+frames, `frames.t_us` 0…2.99 s, `origin.completeness: complete`, ledger capture with a
+`swingRef`). Over WiFi. The whole account — five stacked silent defects across all three
+repos, and what remains (the cable, preview orphan begins, MP4 timestamps not rebased) — is
+`live_capture_handover.md` §0. 10.3 is fixed (`c4019c3`); 10.4's hypothesis was wrong (the
+drain ran; the answers were `absent` for a different reason, and then the bytes were lost on
+the host four different ways); 10.7 #1–#3 are done, #4 still open.
+
 ### 10.7 What to do first
 
 1. **Find who holds the first link** when `make test-device` dials, and stop it. Nothing else can

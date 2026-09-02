@@ -17,10 +17,12 @@
  */
 
 #include "VideoInputPpcp.h"
+#include "ppcp_import_ledger.h"
 
 #include <algorithm>
 #include <cstring>
 #include <mutex>
+#include <QMetaMethod>
 #include <vector>
 
 #include <QCryptographicHash>
@@ -999,7 +1001,7 @@ void VideoInputPpcp::stop()
     m_previewOwned = false;
     m_previewStreamId.clear();
     m_captureStreamId.clear();
-    m_open = Open{};
+    m_openPayloads.clear();
     m_state = State::Stopped;
     emit stateChanged(m_state);
 }
@@ -1426,6 +1428,8 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
     }
 
     m_captureStream.emplace_back(capId, streamId);
+    if (c.digest.present)
+        m_captureDigest.emplace_back(capId, QString::fromStdString(Ppcp::digestToHex(c.digest)));
     // I27 — exactly one anchor.  Recorded only when it is a Shot; a Capture
     // anchored to a Candidate or to its own Stream belongs to no swing.
     if (c.anchor.kind == PPCP_ANCHOR_SHOT)
@@ -1446,163 +1450,303 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
                  << "completeness" << int(c.completeness) << "transfer" << int(c.transfer);
 }
 
+VideoInputPpcp::Open *VideoInputPpcp::openPayload(const QString &captureId)
+{
+    for (Open &o : m_openPayloads)
+        if (o.active && o.clip.captureId == captureId) return &o;
+    return nullptr;
+}
+
+void VideoInputPpcp::closePayload(const QString &captureId)
+{
+    m_openPayloads.erase(std::remove_if(m_openPayloads.begin(), m_openPayloads.end(),
+                                        [&](const Open &o) { return o.clip.captureId == captureId; }),
+                         m_openPayloads.end());
+}
+
+void VideoInputPpcp::resolveAnnounce(Open &open) const
+{
+    const QString &capId = open.clip.captureId;
+    if (open.clip.shotId.isEmpty())
+        for (const auto &e : m_captureShot)
+            if (e.first == capId) { open.clip.shotId = e.second; break; }
+    if (open.clip.streamId.isEmpty())
+        for (const auto &e : m_captureStream)
+            if (e.first == capId) { open.clip.streamId = e.second; break; }
+    if (open.clip.digestHex.isEmpty())
+        for (const auto &e : m_captureDigest)
+            if (e.first == capId) { open.clip.digestHex = e.second; break; }
+    // ⛔ THE ANNOUNCE DECIDED WHAT THIS IS; THE PAYLOAD MUST AGREE.  Only the
+    // instance that OWNS a preview Stream has its id in `m_previewStreamId`,
+    // but every instance bound to the peer sees every payload, and the other
+    // instance for the same Source accepted the same announce as preview
+    // (`m_previewCaptures`) and then classified its bytes as a clip.
+    // Measured 1 Sept 2026: 3301 "clips" reached the filer in one run, every
+    // one a preview segment anchored to no Shot, and the real clip was a
+    // needle in that.
+    open.clip.preview = (!open.clip.streamId.isEmpty()
+                         && open.clip.streamId == m_previewStreamId)
+                        || std::find(m_previewCaptures.begin(), m_previewCaptures.end(),
+                                     capId) != m_previewCaptures.end();
+}
+
 void VideoInputPpcp::onPayloadBegin(const ppcp_msg *m)
 {
     const ppcp_body_payload_begin &b = m->body.payload_begin;
     const QString capId = idStr(b.capture_id);
 
-    m_open = Open{};
-    m_open.active = true;
-    m_open.declaredBytes = b.bytes;
-    m_open.clip.captureId = capId;
-    m_open.clip.peerId = m_peerId;
-    m_open.clip.sourceId = m_sourceId;
-    m_open.clip.sessionId = m_sessionId;
-    // Carried through from the announce: which Shot this Capture answers.
-    for (const auto &e : m_captureShot)
-        if (e.first == capId) { m_open.clip.shotId = e.second; break; }
-    for (const auto &e : m_captureStream)
-        if (e.first == capId) { m_open.clip.streamId = e.second; break; }
-    m_open.clip.preview = !m_open.clip.streamId.isEmpty()
-                          && m_open.clip.streamId == m_previewStreamId;
+    // A second `payload_begin` for the same Capture restarts it (ENC 6e's
+    // resume goes through `payload_resume`, not here), so whatever was
+    // collected is let go.
+    closePayload(capId);
 
-    // ENC 6g / E7 — the container, carried here and nowhere else.  6h forbids
-    // inferring one from `format.codec`, from `Stream.kind` or by sniffing, so
-    // a consumer that writes these bytes to a file has this or has no name for
-    // it.  Absent for raw samples the profile describes in full.
-    m_open.clip.container = b.has_container ? idStr(b.container) : QString();
-
-    // ── CORE §6.1, and the whole reason this work package exists ───────────
-    //
-    // I30: `achieved_frames` rides `payload_begin` and nowhere else.  I17: the
-    // conversion needs the CONVENTION, the PER-FRAME exposure, and — for
-    // `nominal_frame_start` — the offset, and no two of the three are enough.
-    // ppcp_achieved_frames_canonical_at() is L3's one-call form of exactly that
-    // triple, which is why it is called rather than the arithmetic being
-    // written out here: "the ways of getting the conversion wrong all involve
-    // assembling the three inputs by hand".
-    //
-    // The `timing` comes from the CaptureProfile the STREAM named, resolved
-    // through the counterpart's declaration.  Not from a product string, not
-    // from a role, not from a platform (CT-S3 assertion 3), and not from this
-    // host's own cameras' convention (5.6.1).
-    //
-    // ⛔ AND EVERY REFUSAL BELOW IS SAID OUT LOUD.  These three returns used to
-    // move a counter and nothing else, so a Capture could arrive whole -- 243 MB
-    // of it, measured on hardware 1 Sept -- and be dropped on the floor with
-    // NOTHING red anywhere.  That is the same shape of failure as the leg this
-    // work exists to build: bytes crossing the wire and no one saying they went
-    // nowhere.  The clip is still refused rather than guessed at; it is just no
-    // longer refused in silence.
-    // ⚠ AND ONLY FOR A CAPTURE WE WERE TOLD ABOUT.  An empty `streamId` means no
-    // `capture_announce` for this id ever reached us -- a preview Capture
-    // refused under 5.11j, or a payload for something this instance does not
-    // own -- and those arrive at preview rate.  Warning on each produced 9205
-    // lines in one short session, measured, which buries the drops that matter
-    // as thoroughly as saying nothing did.  Counted, said quietly, and left
-    // alone.
-    const bool announced = !m_open.clip.streamId.isEmpty();
-    if (!b.has_achieved_frames) {
-        // 5.8d makes AchievedFrames mandatory on any camera Capture that has
-        // frames; 5.8j exempts a preview Stream from the EXPOSURE requirement,
-        // never from `frames`.  Absent altogether, there is nothing to convert.
-        ++m_counters.unconvertible;
-        if (announced)
-            ppWarn() << "[ppcp] clip" << capId << "on stream" << m_open.clip.streamId
-                     << "DROPPED — no achieved_frames on payload_begin (5.8d), so its"
-                     << "per-frame instants cannot be converted";
-        else
-            ppDebug() << "[ppcp] payload for un-announced capture" << capId << "— ignored";
-        return;
-    }
-    const ppcp_capture_profile *p = profileForStream(m_open.clip.streamId);
-    if (!p) {
-        // No profile, no `timing`, no conversion.  Recorded, never guessed: a
-        // fallback convention here would be the hardcoding I19 exists to stop.
-        ++m_counters.unconvertible;
-        ppWarn() << "[ppcp] clip" << capId << "[inst" << m_sourceId << "]"
-                 << "DROPPED — no CaptureProfile resolves for stream"
-                 << (m_open.clip.streamId.isEmpty() ? QStringLiteral("<unknown: this instance saw no announce for it>")
-                                                    : m_open.clip.streamId)
-                 << "so there is no `timing` to convert its instants with";
-        return;
-    }
-
-    const ppcp_achieved_frames &af = b.achieved_frames;
-    m_open.clip.timebaseId = idStr(af.tb);
-    m_open.clip.canonicalNs.reserve(static_cast<int>(af.frame_count));
-    m_open.clip.exposureNs.reserve(static_cast<int>(af.frame_count));
-    for (std::size_t i = 0; i < af.frame_count; ++i) {
-        ppcp_instant out{};
-        if (ppcp_achieved_frames_canonical_at(&af, &p->timing, i, &out) != PPCP_OK) {
-            ++m_counters.unconvertible;
-            ppWarn() << "[ppcp] clip" << capId << "DROPPED — §6.1 conversion failed at frame"
-                     << int(i) << "of" << int(af.frame_count) << "on stream"
-                     << m_open.clip.streamId;
-            m_open.clip.canonicalNs.clear();
-            break;
+    Open open;
+    open.active = true;
+    open.declaredBytes = b.bytes;
+    open.clip.captureId = capId;
+    open.clip.peerId = m_peerId;
+    open.clip.sourceId = m_sourceId;
+    open.clip.sessionId = m_sessionId;
+    open.clip.container = b.has_container ? idStr(b.container) : QString();
+    open.hasAchievedFrames = b.has_achieved_frames;
+    if (b.has_achieved_frames) {
+        const ppcp_achieved_frames &af = b.achieved_frames;
+        const std::size_t n = af.frame_count;
+        open.framesTb = idStr(af.tb);
+        open.framesNs.assign(af.frames_ns, af.frames_ns + n);
+        open.exposureProvenance = af.has_exposure_provenance ? af.exposure_provenance
+                                                             : PPCP_EXP_PER_FRAME;
+        // Each optional series in full or not at all: a series the sender
+        // gave for some frames only would slide out of step with the times.
+        open.exposureNs.reserve(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            std::int64_t v = 0;
+            if (ppcp_per_frame_i64_at(&af.exposure_ns, n, i, &v) != PPCP_OK) {
+                open.exposureNs.clear();
+                break;
+            }
+            open.exposureNs.push_back(v);
         }
-        m_open.clip.canonicalNs.append(static_cast<qint64>(out.ns));
-        std::int64_t exp = 0;
-        if (ppcp_achieved_frames_exposure_at(&af, i, &exp) == PPCP_OK)
-            m_open.clip.exposureNs.append(static_cast<qint64>(exp));
+        open.isoValues.reserve(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            std::int64_t v = 0;
+            if (ppcp_per_frame_i64_at(&af.iso, n, i, &v) != PPCP_OK) {
+                open.isoValues.clear();
+                break;
+            }
+            open.isoValues.push_back(v);
+        }
+        open.intrinsics.reserve(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            ppcp_matrix3 m3{};
+            if (ppcp_per_frame_m3_at(&af.intrinsics, n, i, &m3) != PPCP_OK) {
+                open.intrinsics.clear();
+                break;
+            }
+            open.intrinsics.push_back(m3);
+        }
     }
-    if (!m_open.clip.canonicalNs.isEmpty()) {
-        m_lastCanonicalNs = m_open.clip.canonicalNs;
-        m_lastCanonicalTb = m_open.clip.timebaseId;
-        m_lastInstantSourceNs = m_open.clip.canonicalNs.first();
-        m_haveLastInstant = true;
-        m_haveLastGeometry = p->has_geometry;
-        if (p->has_geometry) m_lastGeometry = p->geometry;
+    resolveAnnounce(open);
+
+    // ⚠ OPENED WHETHER OR NOT THE ANNOUNCE HAS BEEN READ YET.  Measured 1 Sept
+    // 2026 (run four): the clip's `capture_announce` and its `payload_begin`
+    // left the phone in the same flush, on two different TCP connections, and
+    // the bulk bytes were read first -- so a rule of "no announce, no
+    // reassembly" dropped 17 MB that had arrived whole.  Bytes are collected
+    // on the capture id alone; what they ARE is settled at `payload_end`, by
+    // which time the announce has had every chance to land.
+    //
+    // The one thing settled here is a preview segment this instance does not
+    // own: the same-Source capture instance registered the announce too, and
+    // a preview frame from it would go straight into the analysis buffer.
+    if (open.clip.preview && open.clip.streamId != m_previewStreamId) return;
+
+    open.clip.payload.reserve(static_cast<int>(b.bytes));
+    if (!open.clip.preview && !open.clip.streamId.isEmpty())
+        ppInfo() << "[ppcp] payload begin" << capId << "[inst" << m_sourceId << "]"
+                 << "stream" << open.clip.streamId
+                 << "shot" << (open.clip.shotId.isEmpty() ? QStringLiteral("<none>")
+                                                          : open.clip.shotId)
+                 << "bytes" << b.bytes << "frames" << int(open.framesNs.size());
+
+    // Room, preview first: a stalled preview reassembly is a frame nobody will
+    // miss; a stalled clip is a swing.
+    while (m_openPayloads.size() >= kMaxOpenPayloads) {
+        auto victim = std::find_if(m_openPayloads.begin(), m_openPayloads.end(),
+                                   [](const Open &o) { return o.clip.preview; });
+        ++m_counters.payloadsEvicted;
+        // The table itself, at most once per five seconds per instance: what
+        // is open, how full each is, and how many chunks and ends found no
+        // home -- the three numbers that say whether ends are not arriving,
+        // are arriving for something else, or are arriving and being ignored.
+        const std::int64_t nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (nowMs - m_lastTableDumpMs >= 5000) {
+            m_lastTableDumpMs = nowMs;
+            QString table;
+            for (const Open &o : m_openPayloads)
+                table += QStringLiteral(" %1%2:%3/%4").arg(o.clip.captureId.left(8),
+                                                           o.clip.preview ? QStringLiteral("(p)")
+                                                                          : QString(),
+                                                           QString::number(o.clip.payload.size()),
+                                                           QString::number(o.declaredBytes));
+            ppWarn() << "[ppcp] payload table full [inst" << m_sourceId << "]"
+                     << "chunks unmatched" << m_counters.chunksUnmatched
+                     << "ends unmatched" << m_counters.endsUnmatched << "open:" << table;
+        }
+        if (victim == m_openPayloads.end()) {
+            victim = m_openPayloads.begin();
+            ppWarn() << "[ppcp] clip" << victim->clip.captureId << "[inst" << m_sourceId << "]"
+                     << "EVICTED unfinished after" << victim->clip.payload.size() << "of"
+                     << victim->declaredBytes << "bytes —" << kMaxOpenPayloads
+                     << "payloads already open";
+        }
+        m_openPayloads.erase(victim);
     }
-    m_open.clip.payload.reserve(static_cast<int>(b.bytes));
+    m_openPayloads.push_back(std::move(open));
 }
 
 void VideoInputPpcp::onPayloadChunk(const ppcp_msg *m)
 {
     const ppcp_body_payload_chunk &b = m->body.payload_chunk;
-    if (!m_open.active || idStr(b.capture_id) != m_open.clip.captureId) return;
+    Open *open = openPayload(idStr(b.capture_id));
+    if (!open) { ++m_counters.chunksUnmatched; return; }
     if (!b.data || b.data_len == 0) return;
-    // ENC 6b — `offset` is index x chunk_bytes and travels on every chunk, so a
-    // chunk that arrives out of order is PLACED, not appended.  On one bulk
-    // channel they are ascending (8.3a); placing anyway is what makes the same
-    // code work when they are not.
     const qsizetype need = static_cast<qsizetype>(b.offset) + static_cast<qsizetype>(b.data_len);
-    if (m_open.clip.payload.size() < need) m_open.clip.payload.resize(need);
-    std::memcpy(m_open.clip.payload.data() + b.offset, b.data, b.data_len);
+    if (open->clip.payload.size() < need) open->clip.payload.resize(need);
+    std::memcpy(open->clip.payload.data() + b.offset, b.data, b.data_len);
 }
 
 void VideoInputPpcp::onPayloadEnd(const ppcp_msg *m)
 {
-    if (!m_open.active) return;
-    if (idStr(m->body.payload_end.capture_id) != m_open.clip.captureId) return;
-    deliver();
+    const QString capId = idStr(m->body.payload_end.capture_id);
+    if (!openPayload(capId)) { ++m_counters.endsUnmatched; return; }
+    deliver(capId);
 }
 
 void VideoInputPpcp::onPayloadAbort(const ppcp_msg *m)
 {
-    if (!m_open.active) return;
-    if (idStr(m->body.payload_abort.capture_id) != m_open.clip.captureId) return;
+    const QString capId = idStr(m->body.payload_abort.capture_id);
+    Open *open = openPayload(capId);
+    if (!open) return;
     // 8.3c — `already_present` is not a failure, and neither reaches a frame.
     // The Capture stays announced; what it does NOT do is arrive as data.
-    m_open = Open{};
+    if (!open->clip.preview)
+        ppWarn() << "[ppcp] clip" << capId << "[inst" << m_sourceId << "]"
+                 << "ABORTED by the sender after" << open->clip.payload.size()
+                 << "of" << open->declaredBytes << "bytes";
+    closePayload(capId);
 }
 
-void VideoInputPpcp::deliver()
+void VideoInputPpcp::deliver(const QString &captureId)
 {
-    PpcpClip clip = m_open.clip;
-    m_open = Open{};
+    auto slot = std::find_if(m_openPayloads.begin(), m_openPayloads.end(),
+                             [&](const Open &o) { return o.active && o.clip.captureId == captureId; });
+    if (slot == m_openPayloads.end()) return;
+    // ⚠ Erased BY ITERATOR, not by id after a move: a moved-from QString is
+    // empty, so `closePayload(captureId)` after `std::move(*slot)` matched
+    // nothing and left a zombie behind for every delivery.  Measured 1 Sept
+    // 2026: 3534 evictions in one run, and the swing's 14 MB clip among them.
+    Open open = std::move(*slot);
+    m_openPayloads.erase(slot);
 
+    // Whatever the announce has said by now.  The bytes have all arrived; if
+    // no announce has, this instance has nothing to file them against and the
+    // payload is dropped -- audibly, because 17 MB that crossed a link and
+    // vanished is the kind of silence this file has been paying for.
+    resolveAnnounce(open);
+    PpcpClip &clip = open.clip;
+    if (clip.streamId.isEmpty()) {
+        // ⚠ ppDebug and not ppWarn: every instance bound to the peer sees
+        // every payload, and the preview segments of a Source this instance
+        // does not render arrive here at frame rate.  The instance that DOES
+        // own the Stream says what became of the bytes.
+        ppDebug() << "[ppcp] payload" << captureId << "[inst" << m_sourceId << "]"
+                  << clip.payload.size() << "bytes for a Capture no announce named — dropped";
+        return;
+    }
     if (clip.preview) {
+        if (clip.streamId != m_previewStreamId) return;
         ++m_counters.previewFrames;
         emitPreviewFrame(clip);
         return;
     }
+
+    // A clip.  Its per-frame instants are converted now, with the profile the
+    // announce's Stream names (5.8d, §6.1).
+    if (!open.hasAchievedFrames) {
+        ++m_counters.unconvertible;
+        ppWarn() << "[ppcp] clip" << captureId << "[inst" << m_sourceId << "]" << "on stream"
+                 << clip.streamId << "DROPPED — no achieved_frames on payload_begin (5.8d),"
+                 << "so its per-frame instants cannot be converted";
+        return;
+    }
+    const ppcp_capture_profile *p = profileForStream(clip.streamId);
+    if (!p) {
+        ++m_counters.unconvertible;
+        ppWarn() << "[ppcp] clip" << captureId << "[inst" << m_sourceId << "]"
+                 << "DROPPED — no CaptureProfile resolves for stream" << clip.streamId
+                 << "so there is no `timing` to convert its instants with";
+        return;
+    }
+    // The struct the engine handed over, rebuilt from the copies.
+    const std::size_t n = open.framesNs.size();
+    ppcp_achieved_frames af{};
+    ppcp_per_frame_i64 exposure{}, isoSeries{};
+    ppcp_per_frame_m3 intrinsicsSeries{};
+    const QByteArray tbUtf8 = open.framesTb.toUtf8();
+    if (ppcp_achieved_frames_make(&af, tbUtf8.constData(), open.framesNs.data(), n) != PPCP_OK) {
+        ++m_counters.unconvertible;
+        ppWarn() << "[ppcp] clip" << captureId << "DROPPED — its achieved_frames do not"
+                 << "rebuild (" << int(n) << "frames on" << open.framesTb << ")";
+        return;
+    }
+    if (!open.exposureNs.empty()
+            && ppcp_per_frame_i64_array(&exposure, open.exposureNs.data(), n) == PPCP_OK)
+        (void)ppcp_achieved_frames_set_exposure(&af, &exposure, open.exposureProvenance);
+    if (!open.isoValues.empty()
+            && ppcp_per_frame_i64_array(&isoSeries, open.isoValues.data(), n) == PPCP_OK)
+        (void)ppcp_achieved_frames_set_iso(&af, &isoSeries);
+    if (!open.intrinsics.empty()
+            && ppcp_per_frame_m3_array(&intrinsicsSeries, open.intrinsics.data(), n) == PPCP_OK)
+        (void)ppcp_achieved_frames_set_intrinsics(&af, &intrinsicsSeries);
+    clip.timebaseId = open.framesTb;
+    clip.canonicalNs.reserve(static_cast<int>(af.frame_count));
+    clip.exposureNs.reserve(static_cast<int>(af.frame_count));
+    for (std::size_t i = 0; i < af.frame_count; ++i) {
+        ppcp_instant out{};
+        if (ppcp_achieved_frames_canonical_at(&af, &p->timing, i, &out) != PPCP_OK) {
+            ++m_counters.unconvertible;
+            ppWarn() << "[ppcp] clip" << captureId << "DROPPED — §6.1 conversion failed at frame"
+                     << int(i) << "of" << int(af.frame_count) << "on stream" << clip.streamId;
+            return;
+        }
+        clip.canonicalNs.append(static_cast<qint64>(out.ns));
+        std::int64_t exp = 0;
+        if (ppcp_achieved_frames_exposure_at(&af, i, &exp) == PPCP_OK)
+            clip.exposureNs.append(static_cast<qint64>(exp));
+    }
+    if (!clip.canonicalNs.isEmpty()) {
+        m_lastCanonicalNs = clip.canonicalNs;
+        m_lastCanonicalTb = clip.timebaseId;
+        m_lastInstantSourceNs = clip.canonicalNs.first();
+        m_haveLastInstant = true;
+        m_haveLastGeometry = p->has_geometry;
+        if (p->has_geometry) m_lastGeometry = p->geometry;
+    }
+
     // ⚠ A CLIP IS NOT A LIVE FRAME.  It leaves with its canonical instants
     // attached; pushing it through videoFrameReady() would hand it to a
     // consumer that stamps EventBuffer::nowMicros() on arrival and throw the
     // conversion away.  See the header note and F7.
     ++m_counters.clips;
+    // ⚠ Said here and not only in the filer: `clipReady` is a signal, and a
+    // signal nobody is connected to is the one failure that leaves no line
+    // anywhere else.  `isSignalConnected` is the honest witness for that.
+    ppInfo() << "[ppcp] clip delivered" << clip.captureId << "[inst" << m_sourceId << "]"
+             << "shot" << (clip.shotId.isEmpty() ? QStringLiteral("<none>") : clip.shotId)
+             << clip.payload.size() << "bytes," << clip.canonicalNs.size() << "frames,"
+             << (isSignalConnected(QMetaMethod::fromSignal(&VideoInputPpcp::clipReady))
+                     ? "handed to the filer" : "and NOTHING is connected to clipReady");
     emit clipReady(clip);
 }
 

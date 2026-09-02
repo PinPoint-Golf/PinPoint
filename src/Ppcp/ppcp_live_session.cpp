@@ -267,10 +267,10 @@ void PpcpLiveSession::pump(std::int64_t nowNs)
         if (m_onActuator) m_onActuator(r);
     }
 
-    publishRelations();
+    publishRelations(nowNs);
 }
 
-void PpcpLiveSession::publishRelations()
+void PpcpLiveSession::publishRelations(std::int64_t nowNs)
 {
     // 6.1f — publish the current estimate for every registered timebase that
     // has one, as a single `relation_update`.  6.3a is the gate: an estimator
@@ -285,20 +285,35 @@ void PpcpLiveSession::publishRelations()
     m_stats.syncEstimators = n;
     m_stats.estimatorsWithoutEstimate = n - with;
     if (with == 0) return;
-    if (with == m_publishedWith && m_stats.relationsPublished > 0) {
-        // The same estimators still have estimates.  6.3e makes the published
-        // offset FILTERED rather than stepped, so it moves continuously; the
-        // maintenance cadence of 6.3g republishes it on its own schedule and
-        // nothing is lost by not republishing on every pump.  What must never
-        // be suppressed is a relation that did not exist before, which is why
-        // the comparison is on the count of estimators that HAVE one.
-        return;
-    }
+
+    // ⛔ TWO TRIGGERS, AND THE SECOND WAS MISSING FOR A WEEK.  A relation that
+    // did not exist before goes out at once.  A relation that already went out
+    // goes out AGAIN every kRelationPublishIntervalNs -- the same cadence the
+    // phone's `HostLinkDriver` keeps for its own estimate.
+    //
+    // Until 1 Sept 2026 this returned as soon as the count of estimators with
+    // an estimate stopped changing, on the belief that "the maintenance cadence
+    // of 6.3g republishes it on its own schedule".  Nothing did: this function
+    // IS the only publisher, so the phone held the FIRST fit for the life of
+    // the link -- two exchanges 20 ms apart, whose slope is noise -- and
+    // `ppcp_relation_apply` extrapolated that slope from an `observed_at`
+    // minutes old.  Every `capture_request` the phone served converted `t0`
+    // through it, landed seconds from the footage, and was answered
+    // `outside_buffer` for an instant the ring had never been asked about.
+    // 6.3e makes the published offset FILTERED rather than stepped, so
+    // republishing is continuous by construction; what is never acceptable is
+    // a counterpart converting against an estimate this host has long since
+    // replaced.
+    const bool newEstimator = (with != m_publishedWith) || m_stats.relationsPublished == 0;
+    const bool due = m_lastPublishedAtNs == 0
+                     || nowNs - m_lastPublishedAtNs >= kRelationPublishIntervalNs;
+    if (!newEstimator && !due) return;
 
     std::size_t published = 0;
     if (ppcp_peer_publish_relations(m_peer, &published) == PPCP_OK && published > 0) {
         m_stats.relationsPublished += published;
         m_publishedWith = with;
+        m_lastPublishedAtNs = nowNs;
         if (m_onRelations) m_onRelations();
     }
 }

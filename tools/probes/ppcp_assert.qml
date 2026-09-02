@@ -70,6 +70,31 @@ Item {
                ? parseInt(Qt.application.arguments[i + 1]) : 1
     }
 
+    // ⭐ A SWING FROM THE HOST'S SIDE, FOR A PHONE THAT CANNOT INJECT ONE.  The
+    // automated device suite injects its own synthetic swing; the REAL app,
+    // launched in the foreground for a cable run, has no such hook.  With
+    // this set, the probe triggers one Manual host shot this many ms after the
+    // session starts, so the host asks the phone for the footage its ring
+    // already holds.
+    // 0 = off.
+    readonly property int injectShotAfterMs: {
+        var i = Qt.application.arguments.indexOf("--inject-shot-after-ms")
+        return (i >= 0 && i + 1 < Qt.application.arguments.length)
+               ? parseInt(Qt.application.arguments[i + 1]) : 0
+    }
+    property int  sessionOpenedAt: -1
+    property bool shotInjected:    false
+
+    // ⛔ --linger: on a PASS, say so and KEEP RUNNING.  The rig's device half
+    // dials this host several more times after the clip has landed; a host
+    // that quit on its own green left those tests dialling a dead port and the
+    // rig reporting "the DEVICE half failed" on the first run that ever
+    // passed (1 Sept 2026, run eight).  The rig reads the verdict from the log
+    // and kills this process when the device half is done.
+    readonly property bool linger:
+        Qt.application.arguments.indexOf("--linger") >= 0
+    property bool passed: false
+
     readonly property int timeoutMs: {
         var i = Qt.application.arguments.indexOf("--probe-timeout-ms")
         return (i >= 0 && i + 1 < Qt.application.arguments.length)
@@ -161,12 +186,42 @@ Item {
             sessionController.start(probe.sessionType)
             cameraManager.startCapture()
             probe.sessionOpened = true
+            probe.sessionOpenedAt = probe.elapsed
             console.warn("PROBE DRIVE session started — type " + probe.sessionType
                          + ", dir " + shotProcessor.activeSessionDir)
+            // ⚠ The host-driven swing needs the phone RETAINING, and nothing in
+            // the session start arms a phone: the golfer does, on the phone,
+            // or Settings -> Phones does with this same call.  The automated
+            // device suite arms itself; the real app will not.
+            if (probe.injectShotAfterMs > 0) {
+                var armed = ppcpHost.armAll()
+                console.warn("PROBE DRIVE arm " + (armed ? "sent to every phone" : "REFUSED"))
+            }
+            return
+        }
+
+        if (probe.injectShotAfterMs > 0 && !probe.shotInjected
+                && probe.elapsed - probe.sessionOpenedAt >= probe.injectShotAfterMs) {
+            probe.shotInjected = true
+            // ⚠ triggerShot, NOT injectDetection: the latter is corroboration
+            // EVIDENCE beside a phone's Candidate and commits nothing on its
+            // own (measured 1 Sept: "committed 0 of 1").  A Manual shot is the
+            // host's own button, and it commits, asks every phone, and files.
+            // "Now": the phone's ring holds the last ten seconds, so the full
+            // pre-roll is there to serve.
+            // ⚠ reportCandidate(Acoustic), NOT triggerShot(Manual): a Manual shot
+            // commits locally and asks no phone (captureRequested is emitted
+            // only for an arbitrated PPCP Shot).  This is the host's own
+            // microphone path: the Candidate is nominated on the wire, the
+            // host arbitrates it, and the commit asks every phone.
+            shotController.reportCandidate(4, shotController.nowUs(), 1.0)
+            console.warn("PROBE DRIVE host acoustic candidate reported — " + probe.injectShotAfterMs
+                         + " ms after the session started")
         }
     }
 
     function finish(ok, why) {
+        if (probe.passed) return
         var s = probe.snapshot()
         console.warn("PROBE RESULT " + (ok ? "PASS" : "FAIL") + " — " + why)
         // ⛔ The ladder on every FAILURE, not only on a timeout.  A verdict that
@@ -174,12 +229,18 @@ Item {
         // is the loop this probe exists to break.
         if (!ok) console.warn("PROBE DOCTOR — " + probe.doctor(s))
         console.warn("PROBE STATS " + JSON.stringify(s))
+        if (ok && probe.linger) {
+            probe.passed = true
+            console.warn("PROBE LINGER — staying up for the device half; the rig ends this process")
+            return
+        }
         Qt.exit(ok ? 0 : 1)
     }
 
     Timer {
         interval: 250; running: true; repeat: true
         onTriggered: {
+            if (probe.passed) return
             probe.elapsed += interval
             var s = probe.snapshot()
 
@@ -232,5 +293,6 @@ Item {
                                         + " drive=" + drive
                                         + " sync-gate=" + syncGateMs + "ms"
                                         + " corroborate=" + corroborate
+                                        + " inject-shot-after-ms=" + injectShotAfterMs
                                         + " timeout=" + timeoutMs + "ms")
 }

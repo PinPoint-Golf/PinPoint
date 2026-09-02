@@ -62,6 +62,7 @@
 
 #include <QDateTime>
 #include <QObject>
+#include <functional>
 #include <QHash>
 #include <QSet>
 #include <QString>
@@ -461,6 +462,11 @@ public:
     // stubs the src/Video symbols precisely so a suite about the pairing clock
     // does not drag Aravis, Spinnaker and Bluetooth in behind it.
     void setClipChainStats(const QVariantMap &m) { m_clipChain = m; }
+    // ⛔ READ ON DEMAND, NOT PUSHED.  The push above ran on `phonesChanged`,
+    // so a run whose phone list never changed after the clip landed reported
+    // "filed 0" for ever -- the first cable clip (1 Sept 2026, 22:15) was on
+    // disk four minutes before the probe timed out saying it was not.
+    void setClipChainStatsProvider(std::function<QVariantMap()> f) { m_clipChainProvider = std::move(f); }
 
     // What this build's service discovery is, in the words RvBrowser::describe()
     // uses, or why there is none.  Part of the diagnostic export because 3.6a
@@ -915,6 +921,7 @@ private:
     // sent us.  `have_digests` was likewise always empty, so it re-sent bytes
     // we already had.  The whole machinery existed and had no caller.
     QVariantMap                            m_clipChain;
+    std::function<QVariantMap()>           m_clipChainProvider;
     Ppcp::PpcpImportLedger                 m_importLedger;
     // Last aggregate arm state seen by the tick, so a change driven by TIME —
     // the stall deadline — is noticed as well as one driven by a message.
@@ -1057,6 +1064,10 @@ private:
     // ordinary session and the only way to see a slow convergence in a real one.
     const bool          m_syncTrace = !qEnvironmentVariableIsEmpty("PINPOINT_SYNC_TRACE");
     std::int64_t        m_lastSyncTraceMs = 0;
+    // onTick() punctuality (see the note there).  One heartbeat interval late
+    // is already a third of the way to a phone calling the link lost.
+    static constexpr std::int64_t kTickStallWarnMs = 750;
+    std::int64_t        m_lastTickMs = 0;
     const std::int64_t  m_syncTraceStartMs = QDateTime::currentMSecsSinceEpoch();
     Ppcp::QrCode        m_qr;
     QVariantList        m_qrRows;

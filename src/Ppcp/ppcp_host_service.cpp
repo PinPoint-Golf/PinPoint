@@ -623,8 +623,24 @@ void PpcpHostService::flushOwedCommits(Phone *ph)
     for (const Ppcp::PpcpImportLedger::PendingCommit &pc : owed) {
         ppcp_digest d{};
         const bool haveDigest = Ppcp::digestFromHex(pc.digestHex, &d);
-        if (ppcp_peer_capture_committed(ph->engine->peer(), pc.key.captureId.c_str(),
-                                        haveDigest ? &d : nullptr) != PPCP_OK)
+        const ppcp_result cr = ppcp_peer_capture_committed(ph->engine->peer(),
+                                                           pc.key.captureId.c_str(),
+                                                           haveDigest ? &d : nullptr);
+        if (cr == PPCP_ERR_INVALID) {
+            // ⛔ Not "queue full or link down": 8.4a's commit CARRIES the digest
+            // and libppcp refuses one without it.  A ledger row that reached
+            // here with no digest (the filer did not carry the announce's until
+            // 1 Sept 2026) is a debt that can never be paid; retrying it every
+            // 20 ms for the life of the link was measured that evening as a
+            // log flood and nothing else.  Struck from the ledger, said once.
+            ppWarn() << "[ppcp] capture_committed can never be sent for"
+                     << pc.key.captureId.c_str() << "—" << ppcp_result_str(cr)
+                     << (haveDigest ? "" : "(the ledger holds no digest for it)")
+                     << "— struck from the owed list; the clip on disk is unaffected";
+            m_importLedger.clearCommitted(pc.key);
+            continue;
+        }
+        if (cr != PPCP_OK)
             break;   // queue full or link down — the debt stands, and we retry
         // ⚠ CLEARED ON QUEUE, WHICH IS EARLIER THAN THE LEDGER'S OWN COMMENT
         // ASKS FOR ("once the owner has had it").  There is no acknowledgement
@@ -891,8 +907,23 @@ int PpcpHostService::requestCaptureForShot(const QString &shotId, qint64 t0HostN
             // Not a fault: the phone is connected and previewing, but no capture
             // Stream is open, so there is nothing retaining an interval to ask
             // for.  Said once per shot, because silence here reads as success.
+            // ⚠ WITH THE TABLE, because "none open" has meant "the phone never
+            // opened them" and "they were opened and closed again" on the same
+            // evening (1 Sept, cable run), and only the rows tell those apart.
+            QString table;
+            for (std::size_t i = 0; i < n; ++i) {
+                const ppcp_stream *st = ppcp_peer_stream_at(peer, i);
+                if (!st) continue;
+                table += QStringLiteral(" %1[%2,%3%4]")
+                             .arg(qid(st->id), qid(st->kind),
+                                  st->continuity == PPCP_SHOT_WINDOWED
+                                      ? QStringLiteral("shot_windowed")
+                                      : QStringLiteral("continuous"),
+                                  st->has_closed_at ? QStringLiteral(",closed") : QString());
+            }
             ppWarn() << "[ppcp] no shot_windowed Stream open on" << ph->name
-                     << "— no clip asked for shot" << shotId;
+                     << "— no clip asked for shot" << shotId << "— the peer's" << n
+                     << "Stream(s):" << (table.isEmpty() ? QStringLiteral("(none)") : table);
             continue;
         }
 
@@ -2075,7 +2106,8 @@ QVariantMap PpcpHostService::ppcpStats() const
 
     // The clip chain, as main.cpp last pushed it. Zeroes where nothing has run
     // yet, which is a reading and not an absence.
-    for (auto it = m_clipChain.cbegin(); it != m_clipChain.cend(); ++it)
+    const QVariantMap chain = m_clipChainProvider ? m_clipChainProvider() : m_clipChain;
+    for (auto it = chain.cbegin(); it != chain.cend(); ++it)
         m[it.key()] = it.value();
     if (!m.contains(QStringLiteral("clipsFiled"))) {
         m[QStringLiteral("captureRequests")] = 0;
@@ -2507,6 +2539,24 @@ void PpcpHostService::onTick()
     // 7.3b's periodic half, and 7.2d's: a code nobody used still holds a K_tls
     // until something removes it.
     if (m_rv.reap() > 0) emit codeChanged();
+
+    // ── THE TICK'S OWN PUNCTUALITY ─────────────────────────────────────────
+    // ⚠ Heartbeats are queued from this tick (7.4a) and a phone declares the
+    // link LOST after three missed intervals — 3 s at the default.  A link
+    // that dies with "no error reported" on the phone and "the peer shut down
+    // cleanly" here (1 Sept 2026, 36 s into a hosted run) therefore has two
+    // candidate causes that leave identical logs: the network held the beats
+    // up, or THIS THREAD did.  One line settles which.  Measured against the
+    // wall clock, not the tick count, because a tick that did not fire is
+    // exactly the thing being looked for.
+    {
+        const std::int64_t nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (m_lastTickMs != 0 && nowMs - m_lastTickMs >= kTickStallWarnMs)
+            ppWarn() << "[ppcp] host tick stalled" << (nowMs - m_lastTickMs)
+                     << "ms — no heartbeat left this host meanwhile, and a phone"
+                     << "declares the link lost after 3 missed intervals";
+        m_lastTickMs = nowMs;
+    }
 
     // ── 6.3 convergence trace (PINPOINT_SYNC_TRACE=1) ──────────────────────
     // ⚠ THE TWO TERMS OF THE SIGMA ARE MEASURED APART, because only their

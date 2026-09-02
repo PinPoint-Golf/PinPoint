@@ -177,6 +177,17 @@ void PpcpHostPeer::drainEvents()
     // they see a peer whose protocol state is already settled.
     ppcp_event ev{};
     while (ppcp_peer_next_event(p, &ev) == PPCP_OK) {
+        // ⛔ THE ENGINE'S OWN ERRORS, WHICH NOTHING READ.  An inbound frame the
+        // engine cannot decode is consumed, answered with an `error` on the
+        // wire, and raised here as PPCP_EVENT_ERROR -- and until 1 Sept 2026
+        // no consumer looked, so a clip's `payload_begin` that overflowed the
+        // decode arena vanished with its 22 MB of chunks and left no line.
+        if (ev.kind == PPCP_EVENT_ERROR)
+            ppWarn() << "[ppcp] engine refused an inbound frame on channel" << int(ev.channel)
+                     << "—" << ppcp_result_str(ev.status)
+                     << (ev.msg ? QString::fromUtf8(ev.msg->env.type,
+                                                    int(ev.msg->env.type_len))
+                                : QStringLiteral("(undecodable)"));
         m_live.observe(ev);
         m_shots.observe(ev);
         m_annotations.observeEvent(ev);

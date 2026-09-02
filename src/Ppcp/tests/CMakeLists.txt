@@ -209,6 +209,9 @@ pp_add_test(ppcp_video_input_test
             ${PPCP}/ppcp_host_engine.cpp
             ${PPCP}/ppcp_ingest_policy.cpp
             ${PPCP}/ppcp_source_declaration.cpp
+            # The announced digest travels on PpcpClip as hex (8.4a's commit
+            # sends it back), and the hex helpers live with the ledger.
+            ${PPCP}/ppcp_import_ledger.cpp
     INCLUDE ${PPCP} ${PP_SRC}/Video
     LINK    ppcp Qt6::Multimedia
     DEFINES PP_PPCP_SRC_DIR="${PPCP}"

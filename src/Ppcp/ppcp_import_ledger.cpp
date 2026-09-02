@@ -40,6 +40,19 @@ Completeness completenessFrom(const QString &v)
 
 }  // namespace
 
+std::string digestToHex(const ppcp_digest &d)
+{
+    if (!d.present) return {};
+    static const char *const digits = "0123456789abcdef";
+    std::string hex;
+    hex.reserve(PPCP_SHA256_BYTES * 2);
+    for (std::size_t i = 0; i < PPCP_SHA256_BYTES; ++i) {
+        hex.push_back(digits[d.value[i] >> 4]);
+        hex.push_back(digits[d.value[i] & 0x0f]);
+    }
+    return hex;
+}
+
 bool digestFromHex(const std::string &hex, ppcp_digest *out)
 {
     if (!out || hex.size() != PPCP_SHA256_BYTES * 2) return false;

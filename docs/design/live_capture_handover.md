@@ -1,10 +1,129 @@
 # Handover — the swing-video leg, one question from done
 
 **Written**: 1 September 2026, end of the second hardware session.
-**Status**: **No frame of phone video has ever reached PinPointStudio.** Not once, in any run.
-**Audience**: a session picking this up cold. Read this file, then §10 of
-`live_capture_collection_design.md`. Do not trust the Phase 2 commit message (`48dfc7e`); it
-says the answer "is kept" and nothing has ever been kept.
+**Updated**: 1 September 2026, late evening, unattended session — **see §0 first.**
+**Audience**: a session picking this up cold. Read §0, then this file, then §10 of
+`live_capture_collection_design.md`.
+
+---
+
+## 0. Status, 1 September 2026, 21:43 — A CLIP IS ON DISK
+
+```
+/System/Volumes/Data/mnt/swingdata/Mark-Liversedge/2026-09-01_Mark-Liversedge_Wrist_14/swing_0001/wide-cf05c062.mp4
+21,930,314 bytes, HEVC 1920x1080, 718 frames; swing.json names it with frames.t_us 0…2,993,875;
+ppcp-ledger.json holds cap:98aa0927… with a swingRef.   make integration-device: PROBE RESULT PASS
+```
+
+The rig in §4 went green for the first time on its eighth run of the evening, and the disk
+was checked by hand (§1's rule). Two frames were pulled with ffmpeg and looked at: the phone's
+view of the desk. **Over WiFi.** The cable is not yet proven — see §0.3.
+
+### 0.1 The answer to §2's question
+
+`outside_buffer` was **not** the ring. It was **five stacked defects, each silent**, found one
+per rig run by adding a line and reading the number. In order of discovery:
+
+| # | Where | Defect | Fix |
+|---|---|---|---|
+| 1 | PPS `PpcpLiveSession::publishRelations` | The host published its clock relation **once**, at its first two-exchange fit, and never again (the comment claimed "the maintenance cadence republishes it" — nothing did). The phone converted every host `t0` through a slope that was noise, extrapolated from an `observed_at` minutes old — the "47 s out" the phone's own code remembered. | Republish every 5 s, matching the phone's `HostLinkDriver.publishIntervalNs`. Test added. |
+| 2 | PPC `RecordingSession.serveCaptureRequest` | Extracted **on arrival**, ~300 ms after `t0`, for a window ending 1000 ms after `t0`. The phone's own path is held by 8.2i's mint deadline; a host request had no such wait. | Wait until `t0 + post + one fragment interval + 200 ms` (bounded by the ring's depth) before reading the ring. Logs the conversion, the relation it went through and its age, and on `absent` the requested span beside what the ring held. |
+| 3 | PPS `VideoInputPpcp` | **One payload reassembly slot per instance.** CORE §2 interleaves bulk and preview payloads by design; the next preview segment's `payload_begin` replaced the clip's "after 0 of 13,126,842 bytes". | Reassembly keyed per capture id, bounded, preview evicted first. Test added. |
+| 4 | PPS `VideoInputPpcp` | **Announce/payload ordering race**: two TCP connections, bulk read first; "no announce, no reassembly" dropped 17 MB that had arrived whole. | Bytes are collected on the capture id; what they are is resolved at `payload_end`. `achieved_frames` is deep-copied (it holds pointers into the engine's arena). Tests added. |
+| 5 | libppcp `PPCP_PEER_SCRATCH_ARENA` | The decode arena was **8 KiB**. A 3 s clip's `payload_begin` (720 frames × instant + exposure) was "undecodable"; the engine raised `PPCP_EVENT_ERROR` and **PPS never logged it**; 22 MB of chunks then arrived for a payload nobody had opened. The phone's own 2 s clips (~495 frames) squeezed under, which is why *they* landed and every host-requested clip did not. | 512 KiB, public in `peer.h`, derived from a 10 s ring at 240 fps with every per-frame series. Decode test added. PPS now logs engine error events. |
+
+Also fixed on the way: the phone's own preview segments were being delivered to the filer as
+shot-less "clips" (3301 in one run — §6's "noise" was this); the eviction table's zombie
+entries after a move; the rig's `pull-diags` racing the phone's log; a host tick-stall
+warning (~1.1 s stalls at camera enable are real and now visible).
+
+### 0.2 What the numbers looked like once the lines existed
+
+```
+PHONE  capture_request t0 converted … tb:host 51041918133000 → tb:hosttime 163797621783335, -1410 ms from now;
+       via relation offset 112755686.25 ms skew 6317.27 ppm (σ 1.304 ms / 119.53 ppm) observed 2.1 s before t0
+PHONE  capture_request waiting … +290 ms for the post-roll to reach the ring
+PHONE  capture_request answered … partial [-2000 … +1000] ms from t0, payload queued
+HOST   payload begin "cap:…" [inst "src:camera:wide"] stream "str:video:src:camera:wide" shot "…" bytes 21930314 frames 718
+HOST   clip delivered "cap:…" [inst "src:camera:wide"] shot "…" 21930314 bytes, 718 frames, handed to the filer
+HOST   phone video landed: …/swing_0001/wide-cf05c062.mp4 21930314 bytes
+```
+
+⚠ The host's published skew still reads 6,000–14,000 ppm with σ up to 4,700 ppm after a
+burst: the slope is unconstrained until maintenance exchanges spread the window. It converts
+fine 2 s from `observed_at`; at 7 s it is ±24 ms. See §0.4.
+
+### 0.3 The cable — DONE, 22:25
+
+```
+2026-09-01_Mark-Liversedge_Wrist_19/swing_0001/wide-cf05c062.mp4   21,918,545 bytes, 719 frames
+link up … transport=usb   → capture_request 22:25:06 → phone video landed 22:25:10   PROBE RESULT PASS
+capture_committed x 1 -> "iPhone 16" (0 still owed)
+```
+
+The real app in the foreground (`make deploy`), the host dialling usbmux, the session driven
+by the probe, the shot from the host's own microphone path. Four seconds from ask to disk on
+the cable against ten over WiFi; the clock gate passed in under a second at 0.25 ms. Three
+more defects fell out on the way:
+
+| # | Where | Defect | Fix |
+|---|---|---|---|
+| 6 | PPS `ShotController` | A **Manual shot asks no phone**: `captureRequested` is emitted only for an arbitrated PPCP Shot. | Not changed — it is arguably by design. The probe drives `reportCandidate(Acoustic)` (now `Q_INVOKABLE`, with `nowUs()`), which is the host's real microphone path: nominated, arbitrated, committed, asked. `--inject-shot-after-ms N` also sends `armAll()` at session start. |
+| 7 | PPS filer / `VideoInputPpcp` | **`capture_committed` was never sent**: 8.4a's commit carries the digest, the filer never had it, libppcp refused with `invalid argument`, and the flush `break`-ed silently every 20 ms for ever (`pending_commits: 3`). | The announce's digest rides on `PpcpClip.digestHex` into the ledger row and the commit. A commit the library refuses as invalid is struck once, with a line, instead of retried. `digestToHex` added beside `digestFromHex`. |
+| 8 | Rig | The host **exited on its PASS** while the device suite still had three hosted tests to dial, so the first green run reported "the DEVICE half failed". And the probe's clip counters were pushed on `phonesChanged`, so a run with no phone-list change reported "filed 0" with the clip on disk. | `--linger`: the probe stays up after a PASS and the Makefile reads the verdict from the log and ends the process. Clip-chain stats are read on demand through a provider. |
+
+### 0.3a What is NOT done
+
+1. **Preview `payload_begin`s with no chunk or end** trickle in (a few a minute, 0 of ~38 KB).
+   `PreviewProducer` sends begin, then chunk, then end in one `perform`; when `payloadChunk`
+   throws NOSPACE the begin is already on the wire. Harmless now (bounded table, preview
+   evicted first, "payload table full" line) — but protocol litter, and the phone should not
+   begin what it cannot chunk.
+2. **The landed MP4's container timestamps are the capture clock's** (ffprobe says the file
+   "starts" at 165,375 s). `swing.json`'s `frames.t_us` is rebased to 0 and PPS replays from
+   that, but QuickTime will show a clip that begins 45 hours in. Rebase in the writer or the
+   filer.
+3. **The wired preview channel dies every ~50 s** (`preview channel: read: TLS protocol error
+   — Broken pipe`, phone `posix 54`) and takes the whole link with it. The clip leg survives
+   because it completes in 4 s, but this is the drop `wired-preview-drops-link` believed cured.
+4. Three unattributed WiFi link losses at 36 s (20:19): phone `link lost no error reported`,
+   host `close_notify`, 3 missed 1 s heartbeats. Host tick stalls are now logged; none exceeded
+   1.1 s in the runs that followed.
+5. `commitShot`'s unarmed message (§6.2) still says "still processing the previous shot" for
+   every unarmed state.
+6. The rig's device half still has no test of `serveCaptureRequest` (§10.7 #4 of the design).
+7. ⚠ **Nothing is committed.** All three repos are dirty; Mark commits.
+
+### 0.4 On clock convergence (Mark's secondary ask)
+
+Tonight, over WiFi with min RTT 2.4 ms, the host's 5 ms gate passed **6–11 s** after
+link-up, not 120 s. `PINPOINT_SYNC_TRACE=1` (exported before `make integration-device`)
+shows why the old number was the link and not the estimator: `offset_sigma` sits on
+`sqrt(residual² + (min_rtt/2)²)`, and the residual is what a bad radio inflates. Two things
+worth doing anyway, neither built:
+- The burst's 16 exchanges span 300 ms, so `skew_sigma` is ~49,000 ppm until the first
+  maintenance exchange 5 s later (then 648, 126, 94 ppm). Spreading the same 16 exchanges
+  over 2 s — same traffic — would give a usable slope at once.
+- Both gates (host `worstSyncSigmaMsFor`, phone `offsetSigmaMilliseconds`) evaluate at
+  `observed_at`, i.e. **ignore the skew term**, and can pass 1 s after link-up on a
+  burst-only fit whose `sigma@5s` is 247 ms. They should evaluate the sigma at the horizon a
+  clip will be asked at (a few seconds).
+
+### 0.5 Reproducing the cable run
+
+```sh
+cd ~/Projects/PinPointCapture && make deploy          # installs + foregrounds the real app
+# (or, app already installed:)  xcrun devicectl device process launch --device A39B669F-23F5-5E93-8A68-AC090EF2FADB --terminate-existing org.pinpointstudio.capture
+sleep 6; pkill -f "PinPointStudio.app/Contents/MacOS"
+QT_QPA_PLATFORM=offscreen PINPOINT_LOG_STDERR=1 PINPOINT_PPCP_ACCEPT_ALL=1 PINPOINT_SYNC_TRACE=1 \
+  <PinPointStudio binary> --probe-qml tools/probes/ppcp_assert.qml \
+  --expect-clips 1 --inject-shot-after-ms 20000 --probe-timeout-ms 150000 > pps.log 2>&1
+```
+⛔ The app must be foregrounded BEFORE the host starts, and never relaunched while the host is
+up: a relaunch kills the link the host just dialled and the fresh app is never armed (the
+21:53 attempt). Look for `link up … transport=usb`, `PROBE DRIVE arm sent`, `host acoustic
+candidate reported`, `capture_request →`, `payload begin "cap:`, `phone video landed`,
+`PROBE RESULT PASS`.
 
 ---
 

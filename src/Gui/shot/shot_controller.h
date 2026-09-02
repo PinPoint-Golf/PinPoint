@@ -100,7 +100,10 @@ public:
     // deadline the arbiter fuses candidates and commits at most one shot
     // (>=2 agreeing modalities, or one strong one — see shot_arbiter.h).
     // Inherits the armed() gate; Manual is rerouted to triggerShot().
-    void reportCandidate(Source source, qint64 estImpactUs, float confidence);
+    // Q_INVOKABLE so a probe can be a detector: this is the entry every real
+    // detector uses, and the only host-originated path that nominates a
+    // Candidate on the wire (a Manual shot commits locally and asks no phone).
+    Q_INVOKABLE void reportCandidate(Source source, qint64 estImpactUs, float confidence);
 
 #ifdef HAVE_PPCP
     // ── H5 — PPCP arbitration REPLACES the arbiter above ───────────────────
@@ -194,6 +197,8 @@ public:
     // The corroboration verdict is otherwise a `ppDebug()` line that a release
     // build does not even emit.
     Q_INVOKABLE QVariantMap shotStats() const;
+    // The host clock a detector stamps with, for a probe acting as one.
+    Q_INVOKABLE qint64 nowUs() const;
 
     // 5.10's coincidence window, and deliberately the same number the Session
     // is opened with — one rule stated once.  CORE §5.10's own proposal, not a

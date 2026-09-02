@@ -633,6 +633,229 @@ TEST(VideoInputPpcpPreview, APreviewSegmentReachesTheLiveTileAsAnOrdinaryFrame)
     EXPECT_TRUE(L.clips.empty());   // a preview frame is not a clip
 }
 
+// ── Payloads interleave across channels, and every one of them lands ──────
+//
+// ⛔ MEASURED 1 SEPT 2026, THE LINE THAT HAD LOST EVERY SWING: `clip
+// cap:bf5e00d1 INTERRUPTED by payload 42f995d4 after 0 of 13126842 bytes`.
+// The clip's `payload_begin` arrived on bulk, the next preview segment's
+// `payload_begin` arrived on the preview channel a moment later, and the one
+// reassembly slot the backend kept was handed to the preview.  Thirteen
+// megabytes then arrived for a Capture nothing was collecting.  CORE §2 makes
+// that interleaving the POINT of the multi-channel transport — a clip must
+// never head-of-line block a live frame — so reassembly is per Capture.
+TEST(VideoInputPpcpPreview, AClipOnBulkSurvivesAPreviewSegmentArrivingMidway)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    ASSERT_NO_FATAL_FAILURE(L.openStreams());
+
+    // The clip: announced, and its payload BEGUN on bulk -- nothing more yet.
+    ppcp_capture c{};
+    ASSERT_EQ(ppcp_capture_make_shot(&c, "cap-clip-1", "shot-1", kVideoStream, PPCP_COMPLETE),
+              PPCP_OK);
+    ASSERT_EQ(ppcp_capture_set_transfer(&c, PPCP_TRANSFER_IN_FLIGHT), PPCP_OK);
+    std::vector<std::uint8_t> clipBytes(3000);
+    for (std::size_t i = 0; i < clipBytes.size(); ++i) clipBytes[i] = static_cast<std::uint8_t>(i * 7u + 3u);
+    ppcp_digest cd{};
+    ASSERT_EQ(ppcp_payload_digest(clipBytes.data(), clipBytes.size(), &cd), PPCP_OK);
+    ASSERT_EQ(ppcp_capture_set_digest(&c, &cd, clipBytes.size()), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_capture_announce(L.dev.p, &c, false, nullptr, nullptr, 0), PPCP_OK);
+    L.toHost(0);
+
+    const std::int64_t clipFrames[] = { 1000000, 1004167, 1008333 };
+    ppcp_achieved_frames caf{};
+    ASSERT_EQ(ppcp_achieved_frames_make(&caf, kDevTb, clipFrames, 3), PPCP_OK);
+    ppcp_per_frame_i64 e{};
+    ASSERT_EQ(ppcp_per_frame_i64_scalar(&e, 2000), PPCP_OK);
+    ASSERT_EQ(ppcp_achieved_frames_set_exposure(&caf, &e, PPCP_EXP_LOCKED_CONSTANT), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_payload_begin_as(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-1", clipBytes.size(),
+                                         &cd, 1024, kContainer, &caf), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+    ASSERT_EQ(ppcp_peer_payload_chunk(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-1", 0, 1024,
+                                      clipBytes.data(), 1024), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+
+    // A whole preview segment, begin to end, on its own channel, in the gap.
+    ppcp_interval iv{};
+    ASSERT_EQ(ppcp_interval_make(&iv, kDevTb, std::strlen(kDevTb), 1000000, 1033000), PPCP_OK);
+    ppcp_capture pc{};
+    ASSERT_EQ(ppcp_capture_make_segment(&pc, "cap-preview-1", kPreviewStream,
+                                        PPCP_COMPLETE, &iv), PPCP_OK);
+    ASSERT_EQ(ppcp_capture_set_transfer(&pc, PPCP_TRANSFER_IN_FLIGHT), PPCP_OK);
+    std::vector<std::uint8_t> bgra(8 * 4 * 4, 0x40);
+    ppcp_digest pd{};
+    ASSERT_EQ(ppcp_payload_digest(bgra.data(), bgra.size(), &pd), PPCP_OK);
+    ASSERT_EQ(ppcp_capture_set_digest(&pc, &pd, bgra.size()), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_capture_announce(L.dev.p, &pc, /*is_preview=*/true, nullptr, nullptr, 0),
+              PPCP_OK);
+    L.toHost(0);
+    const std::int64_t pf[] = { 1000000 };
+    ppcp_achieved_frames paf{};
+    ASSERT_EQ(ppcp_achieved_frames_make(&paf, kDevTb, pf, 1), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_payload_begin(L.dev.p, PPCP_CHANNEL_PREVIEW, "cap-preview-1",
+                                      bgra.size(), &pd, 4096, &paf), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_PREVIEW);
+    ASSERT_EQ(ppcp_peer_payload_chunk(L.dev.p, PPCP_CHANNEL_PREVIEW, "cap-preview-1", 0, 4096,
+                                      bgra.data(), bgra.size()), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_PREVIEW);
+    ASSERT_EQ(ppcp_peer_payload_end(L.dev.p, PPCP_CHANNEL_PREVIEW, "cap-preview-1", &pd), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_PREVIEW);
+    EXPECT_EQ(L.frames, 1);
+
+    // The rest of the clip, and its end.
+    ASSERT_EQ(ppcp_peer_payload_chunk(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-1", 1, 1024,
+                                      clipBytes.data() + 1024, 1024), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+    ASSERT_EQ(ppcp_peer_payload_chunk(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-1", 2, 1024,
+                                      clipBytes.data() + 2048, clipBytes.size() - 2048), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+    ASSERT_EQ(ppcp_peer_payload_end(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-1", &cd), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+
+    ASSERT_EQ(L.clips.size(), 1u) << "the clip was lost to the preview segment's payload_begin";
+    EXPECT_EQ(L.clips[0].captureId, QString("cap-clip-1"));
+    EXPECT_EQ(L.clips[0].shotId, QString("shot-1"));
+    EXPECT_FALSE(L.clips[0].preview);
+    ASSERT_EQ(static_cast<std::size_t>(L.clips[0].payload.size()), clipBytes.size());
+    EXPECT_EQ(std::memcmp(L.clips[0].payload.constData(), clipBytes.data(), clipBytes.size()), 0);
+    EXPECT_EQ(L.clips[0].canonicalNs.size(), 3);
+    // And the preview frame was a frame, not a second clip.
+    EXPECT_EQ(L.frames, 1);
+    EXPECT_EQ(L.in.counters().previewFrames, 1u);
+}
+
+// ⛔ MEASURED 1 SEPT 2026, RUN FOUR: the announce and the `payload_begin`
+// left the phone in one flush on two TCP connections, and the host read the
+// bulk connection first.  17 MB arrived whole for a Capture whose announce
+// was read a tick later, and a rule of "no announce, no reassembly" dropped
+// it.  The connections are not ordered against each other by anything, so
+// what a payload IS can only be settled when its last byte is in.
+TEST(VideoInputPpcpPreview, AClipWhosePayloadBeginsBeforeItsAnnounceIsReadStillLands)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    ASSERT_NO_FATAL_FAILURE(L.openStreams());
+
+    std::vector<std::uint8_t> clipBytes(1500);
+    for (std::size_t i = 0; i < clipBytes.size(); ++i) clipBytes[i] = static_cast<std::uint8_t>(i * 5u + 9u);
+    ppcp_digest cd{};
+    ASSERT_EQ(ppcp_payload_digest(clipBytes.data(), clipBytes.size(), &cd), PPCP_OK);
+
+    // The announce is QUEUED on control but not yet piped to the host...
+    ppcp_capture c{};
+    ASSERT_EQ(ppcp_capture_make_shot(&c, "cap-clip-2", "shot-2", kVideoStream, PPCP_COMPLETE),
+              PPCP_OK);
+    ASSERT_EQ(ppcp_capture_set_transfer(&c, PPCP_TRANSFER_IN_FLIGHT), PPCP_OK);
+    ASSERT_EQ(ppcp_capture_set_digest(&c, &cd, clipBytes.size()), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_capture_announce(L.dev.p, &c, false, nullptr, nullptr, 0), PPCP_OK);
+
+    // ...while the bulk connection delivers the begin and the first chunk.
+    const std::int64_t clipFrames[] = { 1000000, 1004167 };
+    ppcp_achieved_frames caf{};
+    ASSERT_EQ(ppcp_achieved_frames_make(&caf, kDevTb, clipFrames, 2), PPCP_OK);
+    ppcp_per_frame_i64 e{};
+    ASSERT_EQ(ppcp_per_frame_i64_scalar(&e, 2000), PPCP_OK);
+    ASSERT_EQ(ppcp_achieved_frames_set_exposure(&caf, &e, PPCP_EXP_LOCKED_CONSTANT), PPCP_OK);
+    ASSERT_EQ(ppcp_peer_payload_begin_as(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-2", clipBytes.size(),
+                                         &cd, 1024, kContainer, &caf), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+    ASSERT_EQ(ppcp_peer_payload_chunk(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-2", 0, 1024,
+                                      clipBytes.data(), 1024), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+
+    // Now the announce lands, then the rest of the bytes.
+    L.toHost(0);
+    ASSERT_EQ(ppcp_peer_payload_chunk(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-2", 1, 1024,
+                                      clipBytes.data() + 1024, clipBytes.size() - 1024), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+    ASSERT_EQ(ppcp_peer_payload_end(L.dev.p, PPCP_CHANNEL_BULK, "cap-clip-2", &cd), PPCP_OK);
+    L.toHost(PPCP_CHANNEL_BULK);
+
+    ASSERT_EQ(L.clips.size(), 1u) << "bytes that arrived before their announce were dropped";
+    EXPECT_EQ(L.clips[0].captureId, QString("cap-clip-2"));
+    EXPECT_EQ(L.clips[0].shotId, QString("shot-2"));
+    EXPECT_EQ(L.clips[0].streamId, QString(kVideoStream));
+    ASSERT_EQ(static_cast<std::size_t>(L.clips[0].payload.size()), clipBytes.size());
+    EXPECT_EQ(std::memcmp(L.clips[0].payload.constData(), clipBytes.data(), clipBytes.size()), 0);
+    EXPECT_EQ(L.clips[0].canonicalNs.size(), 2);
+}
+
+// A run is thousands of preview segments, one after another, each begun and
+// ended.  If any of them leaves its reassembly behind, the table fills and the
+// next clip is what gets thrown out to make room — which is exactly what
+// happened once (3534 evictions in one run, the swing's clip among them).
+TEST(VideoInputPpcpPreview, ThousandsOfFinishedPreviewSegmentsLeaveNothingOpen)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    ASSERT_NO_FATAL_FAILURE(L.openStreams());
+
+    std::vector<std::uint8_t> bgra(8 * 4 * 4, 0x40);
+    ppcp_digest pd{};
+    ASSERT_EQ(ppcp_payload_digest(bgra.data(), bgra.size(), &pd), PPCP_OK);
+    const std::int64_t pf[] = { 1000000 };
+    ppcp_achieved_frames paf{};
+    ASSERT_EQ(ppcp_achieved_frames_make(&paf, kDevTb, pf, 1), PPCP_OK);
+
+    const int n = 40;   // five times the table, so a leak of one per segment shows
+    for (int i = 0; i < n; ++i) {
+        const std::string id = "cap-preview-" + std::to_string(i);
+        ppcp_interval iv{};
+        ASSERT_EQ(ppcp_interval_make(&iv, kDevTb, std::strlen(kDevTb),
+                                     1000000 + i * 33000, 1033000 + i * 33000), PPCP_OK);
+        ppcp_capture pc{};
+        ASSERT_EQ(ppcp_capture_make_segment(&pc, id.c_str(), kPreviewStream, PPCP_COMPLETE, &iv),
+                  PPCP_OK);
+        ASSERT_EQ(ppcp_capture_set_transfer(&pc, PPCP_TRANSFER_IN_FLIGHT), PPCP_OK);
+        ASSERT_EQ(ppcp_capture_set_digest(&pc, &pd, bgra.size()), PPCP_OK);
+        ASSERT_EQ(ppcp_peer_capture_announce(L.dev.p, &pc, true, nullptr, nullptr, 0), PPCP_OK);
+        L.toHost(0);
+        ASSERT_EQ(ppcp_peer_payload_begin(L.dev.p, PPCP_CHANNEL_PREVIEW, id.c_str(),
+                                          bgra.size(), &pd, 4096, &paf), PPCP_OK);
+        L.toHost(PPCP_CHANNEL_PREVIEW);
+        ASSERT_EQ(ppcp_peer_payload_chunk(L.dev.p, PPCP_CHANNEL_PREVIEW, id.c_str(), 0, 4096,
+                                          bgra.data(), bgra.size()), PPCP_OK);
+        L.toHost(PPCP_CHANNEL_PREVIEW);
+        ASSERT_EQ(ppcp_peer_payload_end(L.dev.p, PPCP_CHANNEL_PREVIEW, id.c_str(), &pd), PPCP_OK);
+        L.toHost(PPCP_CHANNEL_PREVIEW);
+    }
+    EXPECT_EQ(L.frames, n);
+    EXPECT_EQ(L.in.counters().previewFrames, static_cast<std::size_t>(n));
+    EXPECT_EQ(L.in.counters().payloadsEvicted, 0u)
+        << "finished segments are still occupying the reassembly table";
+}
+
+// ⛔ MEASURED 1 SEPT 2026, RUNS SIX AND SEVEN: a 720-frame `payload_begin`
+// (2 s pre-roll + 1 s post-roll at 240 fps) overflowed libppcp's 8 KiB decode
+// arena, the engine raised PPCP_EVENT_ERROR that nothing logged, and the 22 MB
+// of chunks behind it arrived for a payload no instance had opened.  The
+// phone's own two-second clips (~495 frames) fitted, which is why THEY landed
+// and every clip the host asked for did not.  Through the real engine pair,
+// with the per-frame exposure 5.8d mandates.
+TEST(VideoInputPpcpPreview, AThreeSecondClipsPayloadBeginIsNotTooBigToDecode)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    ASSERT_NO_FATAL_FAILURE(L.openStreams());
+
+    std::vector<std::int64_t> frames(720), exposures(720);
+    for (int i = 0; i < 720; ++i) { frames[i] = 1000000 + i * 4167; exposures[i] = 2000 + i % 5; }
+    ASSERT_NO_FATAL_FAILURE(L.sendClip("cap-3s", frames, exposures));
+
+    ASSERT_EQ(L.clips.size(), 1u) << "the engine could not decode a three-second clip's begin";
+    EXPECT_EQ(L.clips[0].canonicalNs.size(), 720);
+    // 8.4a — the announce's digest rides with the clip so the filer's
+    // `capture_committed` can carry it; without it libppcp refuses the commit
+    // and the debt was owed for ever (1 Sept 2026, `pending_commits: 3`).
+    EXPECT_EQ(L.clips[0].digestHex.size(), 64);
+    EXPECT_EQ(L.clips[0].exposureNs.size(), 720);
+    EXPECT_EQ(L.in.counters().unconvertible, 0u);
+}
+
 // ── Streams ────────────────────────────────────────────────────────────────
 
 TEST(VideoInputPpcpStreams, StartOpensACaptureStreamAndAPreviewStreamWhereOneIsOffered)

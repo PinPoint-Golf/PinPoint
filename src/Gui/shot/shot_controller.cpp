@@ -378,6 +378,11 @@ void ShotController::injectDetection(Source source, qint64 tUs)
 #endif
 }
 
+qint64 ShotController::nowUs() const
+{
+    return static_cast<qint64>(pinpoint::EventBuffer::nowMicros());
+}
+
 QVariantMap ShotController::shotStats() const
 {
     QVariantMap m;

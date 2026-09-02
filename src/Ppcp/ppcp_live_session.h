@@ -189,6 +189,9 @@ public:
     // "stalled" is a worse lie than a slow spinner.  The device's
     // `estimated_ready_ms`, doubled, wins where it is larger.
     static constexpr std::int64_t kArmStallFloorNs = 20LL * 1000 * 1000 * 1000;
+    // 6.3g's maintenance cadence, and the phone's own `publishIntervalNs`: how
+    // often an estimate that already went out is sent again.
+    static constexpr std::int64_t kRelationPublishIntervalNs = 5LL * 1000 * 1000 * 1000;
     // Why, where the device said.  Empty unless `armState() == Blocked`.
     const std::string &blockedReason() const { return m_readiness.blockedReason; }
     // 5.2a's `estimated_ready_ms`, MANDATORY when not settled.  Zero and
@@ -454,7 +457,9 @@ public:
 
 private:
     bool registerEstimators(std::string *err);
-    void publishRelations();
+    // 6.1f, on a schedule.  `nowNs` is a reading of `tb:host`, used only to
+    // pace the republish; it never enters a measurement.
+    void publishRelations(std::int64_t nowNs);
     // The one place a command is queued, shared by the on/off and the level
     // entry points so the book-keeping either function leaves behind — the
     // pending flag, the stopwatch, the cleared refusal — cannot drift apart.
@@ -508,6 +513,9 @@ private:
     // honest change detector: it never suppresses a NEW relation, and a moving
     // offset is republished on the maintenance cadence anyway.
     std::size_t                  m_publishedWith = 0;
+    // When the estimate last went out, so the phone converts against the
+    // current fit and not the first one (see publishRelations()).
+    std::int64_t                 m_lastPublishedAtNs = 0;
 };
 
 }  // namespace Ppcp
