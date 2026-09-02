@@ -2672,6 +2672,20 @@ void PpcpHostService::onTick()
                     const ppcp_sync_estimator *est = estimatorForSource(live.peer(), tb);
                     const double minRttMs =
                         est ? ppcp_sync_estimator_min_rtt_ns(est) / 1.0e6 : 0.0;
+                    // E67 — `offset_sigma` above is what a conversion RESOLVES to
+                    // (the declared relation or the inverse of ours, whichever is
+                    // tighter).  This is what the phone DECLARED for the same
+                    // direction, so a run can time both estimators.
+                    double declaredMs = -1.0;
+                    if (const ppcp_relation_set *rs = live.relations()) {
+                        ppcp_id from{}, to{};
+                        if (ppcp_id_set(&from, tb.c_str(), tb.size()) == PPCP_OK
+                            && ppcp_id_set(&to, live.config().timebaseRef.c_str(),
+                                           live.config().timebaseRef.size()) == PPCP_OK) {
+                            if (const ppcp_timebase_relation *r = ppcp_relations_find(rs, &from, &to))
+                                declaredMs = r->offset_sigma_ns / 1.0e6;
+                        }
+                    }
                     // ⚠ THE RELATION SET IS NOT NECESSARILY OURS.  Both peers call
                     // ppcp_peer_publish_relations(), and libppcp puts a published
                     // relation into the SAME p->relations that an arriving
@@ -2701,6 +2715,7 @@ void PpcpHostService::onTick()
                         << " (floor=" << minRttMs / 2.0 << "ms)"
                         << " offset_sigma=" << s0 / 1.0e6 << "ms"
                         << " own_sigma=" << ownSigmaMs << "ms"
+                        << " declared_sigma=" << declaredMs << "ms"
                         << " own_dir=" << ownDir.c_str()
                         << " skew_sigma=" << skewPpm << "ppm"
                         << " sigma@5s=" << s5 / 1.0e6 << "ms"
