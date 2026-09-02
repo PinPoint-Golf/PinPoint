@@ -251,14 +251,23 @@ One command, both products, real hardware, nobody in the room. It:
 
 1. starts PinPointStudio offscreen under `tools/probes/ppcp_assert.qml`, which performs the
    procedure a person performs — **enable the phone's camera, wait for clock agreement under
-   5 ms, start the capture session** — then asserts on the clip chain;
-2. runs `DeviceSessionTests` on the phone, which arms itself (`model.arm()`) and injects its own
-   swing (`SyntheticAudio.oneSwing`) — no hands, no noise needed;
+   5 ms, light the phone's torch from the host, start the capture session** — then waits for
+   the phone to report **armed by the host's `arm`**, re-reads the torch 3 s later (it must
+   still be on), and asserts on the clip chain;
+2. runs `DeviceSessionTests` on the phone, which **waits for the host to arm it** (since
+   2 Sept 2026 the session screen's Capture sends `arm` to every phone; the test no longer
+   calls `model.arm()`), checks the torch survived arming, and injects its own swing
+   (`SyntheticAudio.oneSwing`) — no hands, no noise needed;
 3. pulls the phone's own diagnostics off the device;
 4. leaves `~/pinpoint-diags/<stamp>-integration/` with host log, device log, phone log and the
    usbmuxd stream;
 5. **fails if either half fails**, and prints a `PROBE DOCTOR` line naming the first rung of the
    chain that did not happen.
+
+⚠ `make deploy` foregrounds the real app, which would then connect as a second phone and
+take the probe's first rung. Terminate it before the rig (`xcrun devicectl device info
+processes` for the pid, then `device process terminate --pid`). `--no-torch` skips the torch
+rungs on a phone without one; a phone that declares no torch skips them with a line.
 
 ### Reading the phone
 

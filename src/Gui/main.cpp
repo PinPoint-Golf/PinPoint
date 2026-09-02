@@ -869,6 +869,16 @@ int main(int argc, char *argv[])
     static PpcpHostService ppcpHost;
     ppcpHost.setOfferController(&ppcpOfferController);
 
+    // ⭐ THE SESSION SCREEN DRIVES THE PHONES (2 Sept 2026).  Capture/Stop and
+    // the wizard's start set CameraManager's capture intent; every connected
+    // phone is armed or disarmed with it, so nobody taps Capture on a phone —
+    // or on three of them.  A phone that connects mid-capture is armed at
+    // `declare` by the service itself.
+    QObject::connect(&cameraManager, &CameraManager::captureIntentChanged,
+                     &ppcpHost, [&cameraManager] {
+        ppcpHost.setCaptureWanted(cameraManager.captureIntent());
+    });
+
     // ⛔ ONE LEDGER OVER ONE FILE.  The file-import path used to build its own
     // in-memory copy of the ledger the host service already has loaded, and
     // neither reloaded before saving — so an import during a live session had

@@ -671,6 +671,8 @@ bool PpcpHostService::armAll()
         if (!p->peer->liveSession().arm({}, &err)) {
             all = false;
             ppWarn() << "[ppcp] arm refused by" << p->name << "-" << err.c_str();
+        } else {
+            p->hostArmed = true;
         }
     }
     // The device's answer is a `readiness` that has not arrived yet, so the
@@ -691,12 +693,57 @@ bool PpcpHostService::disarmAll()
         if (!p->peer->liveSession().disarm({}, &err)) {
             all = false;
             ppWarn() << "[ppcp] disarm refused by" << p->name << "-" << err.c_str();
+        } else {
+            p->hostArmed = false;
         }
     }
     emit armStateChanged();
     emit phonesChanged();
     setStatus(tr("Disarmed."));
     return all;
+}
+
+// ── The session screen's capture intent, on every phone ────────────────────
+
+void PpcpHostService::setCaptureWanted(bool on)
+{
+    if (m_captureWanted == on) return;
+    m_captureWanted = on;
+    ppWarn() << "[ppcp] capture" << (on ? "started" : "stopped") << "on the host ->"
+             << (on ? "arm" : "disarm") << static_cast<int>(m_phones.size()) << "phone(s)";
+    // ⚠ FORCED, not reconciled: a golfer who ended the session on the phone
+    // itself leaves `hostArmed` true with nothing armed — the phone cannot say
+    // it stopped (no `readiness` fits, see AppModel.disarm) — so the next
+    // Capture must ask again.  The phone's arm is idempotent, so asking an
+    // armed phone costs one message.
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        reconcileArm(p.get(), on ? "capture started" : "capture stopped", /*force=*/true);
+    emit captureWantedChanged();
+    // As armAll(): the answer is a `readiness` that has not arrived, so the
+    // aggregate reads `arming` now and the screen says so.
+    emit armStateChanged();
+    emit phonesChanged();
+}
+
+void PpcpHostService::reconcileArm(Phone *ph, const char *why, bool force)
+{
+    if (!ph || !ph->peer) return;
+    if (!force && ph->hostArmed == m_captureWanted) return;
+    // ⚠ Before `session_open` the library refuses `arm` (it is Live-profile
+    // session control), so a phone still in its hello/declare exchange is left
+    // for onDeclare(), which calls back in here once the Session is open.
+    if (!ph->peer->liveSession().isOpen()) return;
+    std::string err;
+    const bool ok = m_captureWanted ? ph->peer->liveSession().arm({}, &err)
+                                    : ph->peer->liveSession().disarm({}, &err);
+    if (!ok) {
+        ppWarn() << "[ppcp]" << (m_captureWanted ? "arm" : "disarm") << "refused by"
+                 << ph->name << "-" << err.c_str() << "(" << why << ")";
+        return;
+    }
+    ph->hostArmed = m_captureWanted;
+    ppWarn() << "[ppcp]" << (m_captureWanted ? "arm ->" : "disarm ->") << ph->name
+             << "(" << why << ")";
 }
 
 // ── MSG §12 / CR-02 — the torch ─────────────────────────────────────────────
@@ -1707,6 +1754,11 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
     ppWarn() << "[ppcp] peer declared:" << ph->name << "-" << n << "camera Source(s)";
     setStatus(tr("%1 connected — %2 camera(s).").arg(ph->name).arg(n));
 
+    // ⭐ A phone that arrives (or comes back) while the session screen is
+    // already capturing is armed now, on the Session opened above — the golfer
+    // is not going to walk over and tap it.  A no-op while capture is off.
+    reconcileArm(ph, "declared while capture is live");
+
     // CameraManager snapshots the registry at construction and merges only on
     // enumerate(); the home screen's DEVICES list reads the registry directly
     // and picks it up on its own two-second refresh.  So this signal exists for
@@ -2137,6 +2189,23 @@ QVariantMap PpcpHostService::ppcpStats() const
         QVariantMap one;
         one[QStringLiteral("name")]        = p->name;
         one[QStringLiteral("peerId")]      = p->counterpartId;
+        // The handle setPhoneActuator() takes, so a probe can command a torch
+        // on the phone it is reading, and this phone's own arm state — the
+        // aggregate `armState` above is the least-ready of all of them.
+        one[QStringLiteral("pairingId")]   = p->pairingId;
+        one[QStringLiteral("hostArmed")]   = p->hostArmed;
+        {
+            using AS = Ppcp::PpcpLiveSession::ArmState;
+            QString a;
+            switch (p->peer->liveSession().armState()) {
+            case AS::Blocked:  a = QStringLiteral("blocked");  break;
+            case AS::Stalled:  a = QStringLiteral("stalled");  break;
+            case AS::Arming:   a = QStringLiteral("arming");   break;
+            case AS::Disarmed: a = QStringLiteral("disarmed"); break;
+            case AS::Armed:    a = QStringLiteral("armed");    break;
+            }
+            one[QStringLiteral("armState")] = a;
+        }
         one[QStringLiteral("arbiter")]     = p->peer->shotBridge().active();
         one[QStringLiteral("retained")]    =
             static_cast<int>(p->peer->shotBridge().retainedCount());

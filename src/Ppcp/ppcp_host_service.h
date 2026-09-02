@@ -599,6 +599,25 @@ public:
     Q_INVOKABLE bool armAll();
     Q_INVOKABLE bool disarmAll();
 
+    // ⭐ THE SESSION SCREEN'S CAPTURE / STOP, ON EVERY PHONE (2 Sept 2026).
+    //
+    // With one phone a golfer could tap Capture on it; with a DTL and a face-on
+    // phone in the bay nobody is walking to each one, so the host's capture
+    // intent — `CameraManager::captureIntent()`, the toolbar's Capture/Stop and
+    // the wizard's start — is what arms and disarms them.  main.cpp connects
+    // `captureIntentChanged` here.
+    //
+    // ⚠ EVERY connected phone, not only those with a session camera enabled:
+    // `requestCaptureForShot()` already asks every phone, and a phone that is
+    // connected to a bay is there to capture.  A phone that declares while
+    // capture is live is armed at `declare` by the same rule (`reconcileArm`).
+    //
+    // MSG 5.2c — arm and disarm cycle within the one open Session; nothing
+    // here closes or reopens a Session.
+    Q_INVOKABLE void setCaptureWanted(bool on);
+    Q_PROPERTY(bool captureWanted READ captureWanted NOTIFY captureWantedChanged)
+    bool captureWanted() const { return m_captureWanted; }
+
     // ── MSG §12 / CR-02 — the torch, and anything else a phone declares ─────
     //
     // Modelled on armAll() above, and carrying the same discipline for the same
@@ -638,6 +657,8 @@ public:
     QString hostMicrophoneSourceId() const;
 
 signals:
+    // The host's capture intent, as last pushed by setCaptureWanted().
+    void captureWantedChanged();
     // The set of preview consumers changed -- a phone connected, reconnected or
     // went away.  Whoever listens for clips must (re)connect to them; see
     // previewConsumers().
@@ -753,6 +774,13 @@ private:
             QString label;     // informational, may be empty
         };
         QVector<DeclaredActuator> actuators;
+        // ⭐ WHETHER THIS HOST'S CAPTURE INTENT HAS BEEN SENT TO THIS PHONE.
+        // `arm` went out and no `disarm` has followed.  It is what
+        // `reconcileArm()` compares `m_captureWanted` against, so a phone that
+        // declares while the session screen is already capturing is armed on
+        // arrival and one that was armed is not asked twice.  It is NOT the
+        // phone's readiness — that is `liveSession().armState()`.
+        bool hostArmed = false;
         // What it called itself in MSG 3.3.  Display text from an untrusted
         // counterpart (4.4d): it names a row and is never an identifier.
         QString name;
@@ -926,6 +954,13 @@ private:
     // Last aggregate arm state seen by the tick, so a change driven by TIME —
     // the stall deadline — is noticed as well as one driven by a message.
     QString                                m_lastArmState;
+    // The session screen's capture intent, mirrored to every phone as
+    // `arm`/`disarm`.  See setCaptureWanted().
+    bool                                   m_captureWanted = false;
+    // Sends `arm` or `disarm` to ONE phone iff its `hostArmed` disagrees with
+    // `m_captureWanted`.  `why` is for the log line.
+    // `force` sends it even where `hostArmed` already agrees.
+    void reconcileArm(Phone *ph, const char *why, bool force = false);
 
     // 5.14h — every `capture_committed` this host owes, sent to whichever phone
     // is the OWNER, once it is here to receive it.  Called from the tick.

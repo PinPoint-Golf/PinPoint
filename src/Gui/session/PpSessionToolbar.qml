@@ -113,6 +113,13 @@ Item {
     // once under that, not merely "connected".
     readonly property real    phoneSyncSigmaMs: root.havePpcp ? ppcpHost.phoneWorstSyncSigmaMs : -1
     readonly property bool    phoneSyncWarn:    phoneSyncSigmaMs >= 0 && phoneSyncSigmaMs > 5.0
+    // ⭐ Capture/Stop arms the phones (2 Sept 2026), and this is their answer:
+    // the least-ready phone's arm state.  Only meaningful while capture is
+    // live — a disarmed phone with capture stopped is the correct state.
+    readonly property string  phoneArmState:    root.havePpcp ? ppcpHost.armState : ""
+    readonly property bool    phoneArming:      root.captureLive && phoneArmState === "arming"
+    readonly property bool    phoneArmWarn:     root.captureLive
+                                                && (phoneArmState === "blocked" || phoneArmState === "stalled")
 
     // ── Motion pill label ────────────────────────────────────────────────────
     // "Off" wins outright (master switch dominates); otherwise the active
@@ -574,16 +581,20 @@ Item {
             valueText: root.camTotal === 0 ? qsTr("none")
                         : root.phoneBatteryLow ? qsTr("phone battery %1%").arg(root.phoneLowestBattery)
                         : root.phoneThermalWarn ? qsTr("phone %1").arg(root.phoneWorstThermal)
+                        : root.phoneArmWarn ? qsTr("phone %1").arg(root.phoneArmState)
                         : root.phoneSyncWarn ? qsTr("sync ±%1ms").arg(root.phoneSyncSigmaMs.toFixed(1))
+                        : root.phoneArming ? qsTr("phone arming…")
                         : root.camNeedsAttention ? qsTr("calibrate")
                         : qsTr("%1 of %2").arg(root.camConnected).arg(root.camTotal)
             ledColor: root.phoneBatteryLow ? (root.phoneLowestBattery <= 20 ? Theme.colorError : Theme.colorWarn)
                        : root.phoneThermalWarn ? (root.phoneWorstThermal === "critical" ? Theme.colorError : Theme.colorWarn)
+                       : root.phoneArmWarn ? Theme.colorWarn
                        : root.phoneSyncWarn ? Theme.colorWarn
+                       : root.phoneArming ? Theme.colorWarn
                        : root.camNeedsAttention ? Theme.colorAttention
                        : root.camConnected > 0 ? Theme.colorGood : Theme.colorText3
-            attention: root.camNeedsAttention && !root.phoneBatteryLow && !root.phoneThermalWarn && !root.phoneSyncWarn
-            warn: root.phoneBatteryLow || root.phoneThermalWarn || root.phoneSyncWarn
+            attention: root.camNeedsAttention && !root.phoneBatteryLow && !root.phoneThermalWarn && !root.phoneSyncWarn && !root.phoneArmWarn
+            warn: root.phoneBatteryLow || root.phoneThermalWarn || root.phoneSyncWarn || root.phoneArmWarn
             warnColor: root.phoneBatteryLow ? (root.phoneLowestBattery <= 20 ? Theme.colorError : Theme.colorWarn)
                         : root.phoneThermalWarn ? (root.phoneWorstThermal === "critical" ? Theme.colorError : Theme.colorWarn)
                         : Theme.colorWarn

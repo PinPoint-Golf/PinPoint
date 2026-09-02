@@ -85,6 +85,31 @@ Item {
     property int  sessionOpenedAt: -1
     property bool shotInjected:    false
 
+    // ⭐ THE TORCH, AS A RUNG (2 Sept 2026).  Lit from the host before the
+    // session starts, then required to STILL be lit once the phone has armed —
+    // the phone used to rebuild its camera session on every arm, which put the
+    // light out the moment capture started.  Skipped, with a line, on a phone
+    // that declares no torch; --no-torch skips it on any phone.
+    readonly property bool torch:
+        Qt.application.arguments.indexOf("--no-torch") < 0
+    property bool torchAsked:   false
+    property bool torchLit:     false
+    property bool torchSkipped: false
+    property int  torchAskedAt: -1
+    // How long a torch command may go unanswered before the run fails.
+    readonly property int torchWaitMs: 15000
+
+    // ⭐ ARMED BY THE HOST, AS A RUNG.  Starting the session sends `arm` to
+    // every phone (CameraManager::captureIntentChanged -> setCaptureWanted);
+    // the phone's `readiness` answers it.  The run does not proceed to a
+    // swing on the strength of a queued message.
+    property bool phoneArmed:    false
+    property int  phoneArmedAt:  -1
+    readonly property int armWaitMs: 60000
+    // Torch re-read this long after the phone reported armed.
+    readonly property int torchRecheckMs: 3000
+    property bool torchSurvived: false
+
     // ⛔ --linger: on a PASS, say so and KEEP RUNNING.  The rig's device half
     // dials this host several more times after the clip has landed; a host
     // that quit on its own green left those tests dialling a dead port and the
@@ -110,6 +135,22 @@ Item {
     property bool synced:        false
     property bool sessionOpened: false
     property real bestSigmaMs:   -1
+
+    // The first phone's torch row, or null.  perPhone[i].actuators is what
+    // actuator_command_ack / actuator_state write; `state` is "unknown" until
+    // the phone has said something, which is a reading and not "off".
+    function torchRow(s) {
+        if (!s.ppcp.perPhone || !s.ppcp.perPhone.length) return null
+        var ph = s.ppcp.perPhone[0]
+        if (!ph.actuators) return null
+        for (var i = 0; i < ph.actuators.length; i++)
+            if (ph.actuators[i].kind === "torch") return ph.actuators[i]
+        return null
+    }
+    function armStateOf(s) {
+        if (!s.ppcp.perPhone || !s.ppcp.perPhone.length) return ""
+        return s.ppcp.perPhone[0].armState
+    }
 
     function snapshot() {
         return { "ppcp": ppcpHost.ppcpStats(), "shot": shotController.shotStats() }
@@ -137,7 +178,15 @@ Item {
         if (!probe.camEnabled)     return "the phone's camera was never enabled for the session"
         if (!probe.synced)         return "clock agreement never reached " + probe.syncGateMs
                                           + " ms (best " + probe.bestSigmaMs + " ms) — 6.1f"
+        if (probe.torch && !probe.torchLit && !probe.torchSkipped)
+                                   return "the torch never lit from the host (asked=" + probe.torchAsked
+                                          + ", " + JSON.stringify(probe.torchRow(s)) + ")"
         if (!probe.sessionOpened)  return "the capture session never started, so armed() was false"
+        if (!probe.phoneArmed)     return "the phone never reported armed after the host's arm (armState="
+                                          + probe.armStateOf(s) + ")"
+        if (probe.torch && probe.torchLit && !probe.torchSurvived)
+                                   return "the torch went out when capture started ("
+                                          + JSON.stringify(probe.torchRow(s)) + ")"
         if (!s.shot.committed)     return "no Shot was committed (corroboration "
                                           + s.shot.corroboratePass + " pass / "
                                           + s.shot.corroborateFail + " fail: "
@@ -179,6 +228,40 @@ Item {
             return
         }
 
+        // The torch, from the host, BEFORE capture starts — so that arming has
+        // a lit torch to put out.  The phone is warm by now: preview was asked
+        // for at declare and warmed the camera.
+        if (probe.torch && !probe.torchLit && !probe.torchSkipped) {
+            var row = probe.torchRow(s)
+            if (!row) {
+                probe.torchSkipped = true
+                console.warn("PROBE DRIVE torch skipped — the phone declares no torch")
+                return
+            }
+            if (!probe.torchAsked) {
+                var sent = ppcpHost.setPhoneActuator(s.ppcp.perPhone[0].pairingId, row.id, true)
+                probe.torchAsked = true
+                probe.torchAskedAt = probe.elapsed
+                console.warn("PROBE DRIVE torch on " + (sent ? "sent" : "REFUSED by the library")
+                             + " — actuator " + row.id)
+                if (!sent) return probe.finish(false, "torch command refused by the library")
+                return
+            }
+            if (row.state === "on") {
+                probe.torchLit = true
+                console.warn("PROBE DRIVE torch lit — the phone reports on, "
+                             + (probe.elapsed - probe.torchAskedAt) + " ms after asking")
+                return
+            }
+            if (row.refusedReason)
+                return probe.finish(false, "torch refused by the phone: " + row.refusedReason)
+            if (row.stalled || probe.elapsed - probe.torchAskedAt > probe.torchWaitMs)
+                return probe.finish(false, "torch command unanswered after "
+                                    + (probe.elapsed - probe.torchAskedAt) + " ms: "
+                                    + JSON.stringify(row))
+            return
+        }
+
         if (!probe.sessionOpened) {
             // Exactly what Main.qml's session-start handler does, in its order.
             shotProcessor.beginSessionFolder(probe.sessionType, false)
@@ -188,16 +271,51 @@ Item {
             probe.sessionOpened = true
             probe.sessionOpenedAt = probe.elapsed
             console.warn("PROBE DRIVE session started — type " + probe.sessionType
-                         + ", dir " + shotProcessor.activeSessionDir)
-            // ⚠ The host-driven swing needs the phone RETAINING, and nothing in
-            // the session start arms a phone: the golfer does, on the phone,
-            // or Settings -> Phones does with this same call.  The automated
-            // device suite arms itself; the real app will not.
-            if (probe.injectShotAfterMs > 0) {
-                var armed = ppcpHost.armAll()
-                console.warn("PROBE DRIVE arm " + (armed ? "sent to every phone" : "REFUSED"))
-            }
+                         + ", dir " + shotProcessor.activeSessionDir
+                         + "; captureWanted=" + ppcpHost.captureWanted
+                         + " armState=" + ppcpHost.armState)
+            // ⭐ startCapture() is what arms the phones now — the session
+            // screen's Capture drives them (2 Sept 2026).  No armAll() here:
+            // if the join above ever breaks, this run must fail on the rung
+            // below rather than paper over it.
             return
+        }
+
+        // The phone's own answer to the host's `arm`: a `readiness` that says
+        // settled.  A swing before this lands in a ring that is not retaining.
+        if (!probe.phoneArmed) {
+            var st = probe.armStateOf(s)
+            if (st === "armed") {
+                probe.phoneArmed = true
+                probe.phoneArmedAt = probe.elapsed
+                console.warn("PROBE DRIVE phone armed by the host — "
+                             + (probe.elapsed - probe.sessionOpenedAt) + " ms after capture started")
+                return
+            }
+            if (st === "blocked" || st === "stalled")
+                return probe.finish(false, "the host's arm ended " + st + " on the phone")
+            if (probe.elapsed - probe.sessionOpenedAt > probe.armWaitMs)
+                return probe.finish(false, "the phone never reported armed within "
+                                    + probe.armWaitMs + " ms of the host's capture start (armState="
+                                    + st + ", hostArmed=" + s.ppcp.perPhone[0].hostArmed + ")")
+            return
+        }
+
+        // ⭐ The torch, AFTER the phone armed.  Read a few seconds later so a
+        // 12.2a actuator_state from the phone's 1 Hz tick has had time to
+        // arrive: a light that went out on arm is reported on that tick, and a
+        // reading taken before it would pass a run that failed.
+        if (probe.torch && probe.torchLit && !probe.torchSurvived) {
+            if (probe.elapsed - probe.phoneArmedAt < probe.torchRecheckMs) return
+            var trow = probe.torchRow(s)
+            if (trow && trow.state === "on") {
+                probe.torchSurvived = true
+                console.warn("PROBE DRIVE torch survived arming — still on "
+                             + (probe.elapsed - probe.phoneArmedAt) + " ms after the phone armed")
+                return
+            }
+            return probe.finish(false, "the torch went out when capture started: "
+                                + JSON.stringify(trow))
         }
 
         if (probe.injectShotAfterMs > 0 && !probe.shotInjected
@@ -293,6 +411,7 @@ Item {
                                         + " drive=" + drive
                                         + " sync-gate=" + syncGateMs + "ms"
                                         + " corroborate=" + corroborate
+                                        + " torch=" + torch
                                         + " inject-shot-after-ms=" + injectShotAfterMs
                                         + " timeout=" + timeoutMs + "ms")
 }
