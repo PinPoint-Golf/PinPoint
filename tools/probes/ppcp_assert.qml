@@ -85,11 +85,13 @@ Item {
     property int  sessionOpenedAt: -1
     property bool shotInjected:    false
 
-    // ⭐ THE TORCH, AS A RUNG (2 Sept 2026).  Lit from the host before the
-    // session starts, then required to STILL be lit once the phone has armed —
-    // the phone used to rebuild its camera session on every arm, which put the
-    // light out the moment capture started.  Skipped, with a line, on a phone
-    // that declares no torch; --no-torch skips it on any phone.
+    // ⭐ THE TORCH, AS A RUNG (2 Sept 2026).  The torch is a CAPTURE SETTING:
+    // the probe sets "torch during capture" for the phone before the session
+    // starts, and requires the light ON once the phone has armed (Studio lights
+    // it on the phone's readiness) — and STILL on a few seconds later (the
+    // phone used to rebuild its camera on every arm, which put it out).
+    // Skipped, with a line, on a phone that declares no torch; --no-torch
+    // skips it on any phone.
     readonly property bool torch:
         Qt.application.arguments.indexOf("--no-torch") < 0
     property bool torchAsked:   false
@@ -185,7 +187,7 @@ Item {
         if (!probe.phoneArmed)     return "the phone never reported armed after the host's arm (armState="
                                           + probe.armStateOf(s) + ")"
         if (probe.torch && probe.torchLit && !probe.torchSurvived)
-                                   return "the torch went out when capture started ("
+                                   return "the torch was not lit by capture ("
                                           + JSON.stringify(probe.torchRow(s)) + ")"
         if (!s.shot.committed)     return "no Shot was committed (corroboration "
                                           + s.shot.corroboratePass + " pass / "
@@ -238,27 +240,14 @@ Item {
                 console.warn("PROBE DRIVE torch skipped — the phone declares no torch")
                 return
             }
-            if (!probe.torchAsked) {
-                var sent = ppcpHost.setPhoneActuator(s.ppcp.perPhone[0].pairingId, row.id, true)
-                probe.torchAsked = true
-                probe.torchAskedAt = probe.elapsed
-                console.warn("PROBE DRIVE torch on " + (sent ? "sent" : "REFUSED by the library")
-                             + " — actuator " + row.id)
-                if (!sent) return probe.finish(false, "torch command refused by the library")
-                return
-            }
-            if (row.state === "on") {
-                probe.torchLit = true
-                console.warn("PROBE DRIVE torch lit — the phone reports on, "
-                             + (probe.elapsed - probe.torchAskedAt) + " ms after asking")
-                return
-            }
-            if (row.refusedReason)
-                return probe.finish(false, "torch refused by the phone: " + row.refusedReason)
-            if (row.stalled || probe.elapsed - probe.torchAskedAt > probe.torchWaitMs)
-                return probe.finish(false, "torch command unanswered after "
-                                    + (probe.elapsed - probe.torchAskedAt) + " ms: "
-                                    + JSON.stringify(row))
+            // The SETTING, before capture.  Nothing lights yet: the phone is
+            // not armed, and a torch during capture is lit by the capture.
+            ppcpHost.setPhoneTorchDuringCapture(s.ppcp.perPhone[0].pairingId, true)
+            probe.torchAsked = true
+            probe.torchAskedAt = probe.elapsed
+            probe.torchLit = true
+            console.warn("PROBE DRIVE torch during capture set — actuator " + row.id
+                         + " (state now " + row.state + ")")
             return
         }
 
@@ -301,20 +290,23 @@ Item {
             return
         }
 
-        // ⭐ The torch, AFTER the phone armed.  Read a few seconds later so a
-        // 12.2a actuator_state from the phone's 1 Hz tick has had time to
-        // arrive: a light that went out on arm is reported on that tick, and a
-        // reading taken before it would pass a run that failed.
+        // ⭐ The torch, AFTER the phone armed: Studio lights it on the phone's
+        // readiness.  Read a few seconds after armed so the command, its ack,
+        // and any 12.2a actuator_state from the phone's 1 Hz tick have all had
+        // time to arrive — a light that went out on arm is reported on that
+        // tick, and a reading taken before it would pass a run that failed.
         if (probe.torch && probe.torchLit && !probe.torchSurvived) {
             if (probe.elapsed - probe.phoneArmedAt < probe.torchRecheckMs) return
             var trow = probe.torchRow(s)
             if (trow && trow.state === "on") {
                 probe.torchSurvived = true
-                console.warn("PROBE DRIVE torch survived arming — still on "
+                console.warn("PROBE DRIVE torch lit by capture — on "
                              + (probe.elapsed - probe.phoneArmedAt) + " ms after the phone armed")
                 return
             }
-            return probe.finish(false, "the torch went out when capture started: "
+            if (probe.elapsed - probe.phoneArmedAt < probe.torchWaitMs) return
+            return probe.finish(false, "the torch was not lit by capture within "
+                                + probe.torchWaitMs + " ms of the phone arming: "
                                 + JSON.stringify(trow))
         }
 

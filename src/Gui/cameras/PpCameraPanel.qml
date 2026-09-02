@@ -381,6 +381,11 @@ Item {
         // nobody asked look identical without it.
         readonly property string torchRefusal:
             hasTorch && torch.refusedReason ? torch.refusedReason : ""
+        // ⭐ THE SETTING, NOT THE LIGHT (Mark, 2 Sept 2026).  "Torch during
+        // capture" is what the pill binds to: Studio lights the torch when the
+        // phone is armed for a live capture and puts it out when capture stops.
+        // `torchOn` above remains the LIGHT, shown beside the label.
+        readonly property bool torchWanted: hasTorch && torch.duringCapture === true
 
         // Live controller for this camera (reactive on cameraManager.instances).
         readonly property var realInstance: {
@@ -461,8 +466,9 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     // The device's own label where it gave one (informational,
                     // 5.19), otherwise the kind.
-                    text: camRow.hasTorch && camRow.torch.label && camRow.torch.label !== ""
-                          ? camRow.torch.label : qsTr("Torch")
+                    text: (camRow.hasTorch && camRow.torch.label && camRow.torch.label !== ""
+                           ? camRow.torch.label : qsTr("Torch"))
+                          + (camRow.torchOn ? qsTr(" · lit") : "")
                     font.family: Theme.fontData
                     font.pixelSize: Theme.fontSzMicro
                     font.letterSpacing: Theme.trackingData
@@ -474,22 +480,21 @@ Item {
                 TogglePill {
                     id: torchPill
                     anchors.verticalCenter: parent.verticalCenter
-                    // ⛔ BOUND TO THE ACK, NOT TO THE CLICK.  `torchOn` reads
-                    // `torch.state`, which only PpcpLiveSession::observe()
-                    // writes.  Clicking sends a command and moves `pending`;
-                    // the pill does not move until the device answers.
-                    checked: camRow.torchOn
+                    // ⭐ BOUND TO THE CAPTURE SETTING.  This pill used to be a
+                    // light switch bound to the ack (trap 3's lesson: the click
+                    // is not the light).  It is now "torch during capture", a
+                    // per-phone preference Studio persists and acts on when
+                    // capture starts and stops — so it reads back the setting,
+                    // and the LIGHT is shown beside the label (" · lit") from
+                    // `torch.state`, which only the ack and `actuator_state`
+                    // write.
+                    checked: camRow.torchWanted
                     // Half-lit while a command is outstanding, so an operator
                     // can see that we asked without being told it worked.
-                    opacity: camRow.torchPending ? 0.55
-                           : camRow.torchUnknown ? 0.75 : 1.0
+                    opacity: camRow.torchPending ? 0.55 : 1.0
                     onToggled: (v) => {
                         if (!root.havePpcp || !camRow.hasTorch) return
-                        // ⚠ `v` IS WHAT THE OPERATOR ASKED FOR, and it is used
-                        // for exactly one thing: the value sent.  It is never
-                        // written back into `checked`.
-                        ppcpHost.setPhoneActuator(camRow.torch.pairingId,
-                                                  camRow.torch.id, v)
+                        ppcpHost.setPhoneTorchDuringCapture(camRow.torch.pairingId, v)
                     }
                 }
             }

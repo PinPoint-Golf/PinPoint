@@ -633,6 +633,15 @@ public:
     // or the library refused the command (12.1d, I39, 12a).
     Q_INVOKABLE bool setPhoneActuator(const QString &pairingId, const QString &actuatorId,
                                       bool on);
+
+    // ⭐ THE TORCH IS A CAPTURE SETTING, NOT A LIGHT SWITCH (Mark, 2 Sept 2026).
+    // The Cameras pill's torch toggle records, per phone, whether the torch is
+    // wanted DURING CAPTURE.  Studio lights it once the phone reports armed for
+    // a capture that is live, and puts it out when capture stops — the golfer
+    // sets it once and never touches it mid-session.  Persisted per pairing in
+    // the same INI map the alias lives in; read back by `actuators[].duringCapture`.
+    Q_INVOKABLE void setPhoneTorchDuringCapture(const QString &pairingId, bool on);
+    static bool torchDuringCaptureFor(const QString &pairingId);
     // ⚠ TEST SEAM, for the reason declareForTest() above is one: this suite
     // links `ppcp_host_service_stubs.cpp` and never accepts a link, so there is
     // no connected phone to command.  Drives the same per-phone call
@@ -781,6 +790,11 @@ private:
         // arrival and one that was armed is not asked twice.  It is NOT the
         // phone's readiness — that is `liveSession().armState()`.
         bool hostArmed = false;
+        // ⭐ Whether THIS HOST lit the torch for capture: -1 never asked, 1 the
+        // last command we sent was on, 0 off.  reconcileTorch() puts out only
+        // a light it lit — a torch an operator switched on by hand is not
+        // this host's to switch off when capture stops.
+        int torchSentOn = -1;
         // What it called itself in MSG 3.3.  Display text from an untrusted
         // counterpart (4.4d): it names a row and is never an identifier.
         QString name;
@@ -961,6 +975,10 @@ private:
     // `m_captureWanted`.  `why` is for the log line.
     // `force` sends it even where `hostArmed` already agrees.
     void reconcileArm(Phone *ph, const char *why, bool force = false);
+    // Lights or puts out this phone's torch to match "capture live AND wanted
+    // during capture".  On only once the phone reports armed (a cold camera
+    // answers `no_actuator`); off immediately, and only for a light we lit.
+    void reconcileTorch(Phone *ph, const char *why);
 
     // 5.14h — every `capture_committed` this host owes, sent to whichever phone
     // is the OWNER, once it is here to receive it.  Called from the tick.

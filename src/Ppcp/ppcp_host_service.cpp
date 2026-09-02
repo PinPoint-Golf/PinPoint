@@ -486,6 +486,9 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err, bool liste
                          << r.estimatedReadyMs << "ms";
             emit armStateChanged();
             emit phonesChanged();
+            // ⭐ The torch for capture waits for exactly this: armed means the
+            // camera is warm and the light can be commanded.
+            reconcileTorch(ph, "phone armed");
         });
     // 8.2h — a Shot this host issued or adopted.  Handed on as a Qt signal so
     // that the shot pipeline's lifetime is Qt's problem and not ours; see the
@@ -716,8 +719,12 @@ void PpcpHostService::setCaptureWanted(bool on)
     // it stopped (no `readiness` fits, see AppModel.disarm) — so the next
     // Capture must ask again.  The phone's arm is idempotent, so asking an
     // armed phone costs one message.
-    for (const std::unique_ptr<Phone> &p : m_phones)
+    for (const std::unique_ptr<Phone> &p : m_phones) {
         reconcileArm(p.get(), on ? "capture started" : "capture stopped", /*force=*/true);
+        // On the way UP this waits for the phone's readiness (see
+        // reconcileTorch); on the way DOWN the light goes out now.
+        reconcileTorch(p.get(), on ? "capture started" : "capture stopped");
+    }
     emit captureWantedChanged();
     // As armAll(): the answer is a `readiness` that has not arrived, so the
     // aggregate reads `arming` now and the screen says so.
@@ -744,6 +751,64 @@ void PpcpHostService::reconcileArm(Phone *ph, const char *why, bool force)
     ph->hostArmed = m_captureWanted;
     ppWarn() << "[ppcp]" << (m_captureWanted ? "arm ->" : "disarm ->") << ph->name
              << "(" << why << ")";
+}
+
+void PpcpHostService::reconcileTorch(Phone *ph, const char *why)
+{
+    if (!ph || !ph->peer) return;
+    const Phone::DeclaredActuator *torch = nullptr;
+    for (const Phone::DeclaredActuator &a : ph->actuators)
+        if (a.kind == QStringLiteral("torch")) { torch = &a; break; }
+    if (!torch) return;
+
+    const bool desired = m_captureWanted && torchDuringCaptureFor(ph->pairingId);
+    const PpcpLiveSession &ls = ph->peer->liveSession();
+    const PpcpLiveSession::ActuatorReading *r = ls.actuatorReading(torch->id.toStdString());
+    if (desired) {
+        // ⚠ Not before the phone says it is armed: `arm` is what warms its
+        // camera, and a torch commanded on a cold camera answers `no_actuator`.
+        // The readiness callback calls back in here when that changes.
+        if (ls.armState() != PpcpLiveSession::ArmState::Armed) return;
+        if (r && r->commandPending) return;
+        if (r && r->valid && r->hasOn && r->on) { ph->torchSentOn = 1; return; }
+        if (commandActuator(ph, torch->id, true)) {
+            ph->torchSentOn = 1;
+            ppWarn() << "[ppcp] torch on ->" << ph->name << "(" << why << ")";
+        }
+    } else {
+        if (ph->torchSentOn != 1) return;   // not ours: we never lit it
+        if (commandActuator(ph, torch->id, false)) {
+            ph->torchSentOn = 0;
+            ppWarn() << "[ppcp] torch off ->" << ph->name << "(" << why << ")";
+        }
+    }
+}
+
+bool PpcpHostService::torchDuringCaptureFor(const QString &pairingId)
+{
+    return ppSettings().value(QStringLiteral("ppcp/torchDuringCapture")).toMap()
+               .value(pairingId).toBool();
+}
+
+void PpcpHostService::setPhoneTorchDuringCapture(const QString &pairingId, bool on)
+{
+    if (pairingId.isEmpty()) return;
+    QSettings s = ppSettings();
+    QVariantMap prefs = s.value(QStringLiteral("ppcp/torchDuringCapture")).toMap();
+    if (prefs.value(pairingId).toBool() == on && (on || !prefs.contains(pairingId))) {
+        // Unchanged — but a phone that is armed and unlit still gets reconciled
+        // below, so a tap on a pill that already reads "on" retries a refusal.
+    } else if (on) {
+        prefs[pairingId] = true;
+        s.setValue(QStringLiteral("ppcp/torchDuringCapture"), prefs);
+    } else {
+        prefs.remove(pairingId);
+        s.setValue(QStringLiteral("ppcp/torchDuringCapture"), prefs);
+    }
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (p->pairingId == pairingId) reconcileTorch(p.get(), "torch setting changed");
+    emit phonesChanged();
+    emit phoneHealthChanged();
 }
 
 // ── MSG §12 / CR-02 — the torch ─────────────────────────────────────────────
@@ -815,6 +880,9 @@ QVariantList PpcpHostService::actuatorRowsFor(const Phone *ph) const
         m[QStringLiteral("kind")]    = a.kind;
         m[QStringLiteral("control")] = a.control;
         m[QStringLiteral("label")]   = a.label;
+        // The capture setting the pill binds to — a preference, not a reading.
+        m[QStringLiteral("duringCapture")] = (a.kind == QStringLiteral("torch"))
+                                             ? torchDuringCaptureFor(ph->pairingId) : false;
 
         const PpcpLiveSession::ActuatorReading *r =
             ls.actuatorReading(a.id.toStdString());
@@ -1758,6 +1826,7 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
     // already capturing is armed now, on the Session opened above — the golfer
     // is not going to walk over and tap it.  A no-op while capture is off.
     reconcileArm(ph, "declared while capture is live");
+    reconcileTorch(ph, "declared while capture is live");
 
     // CameraManager snapshots the registry at construction and merges only on
     // enumerate(); the home screen's DEVICES list reads the registry directly
