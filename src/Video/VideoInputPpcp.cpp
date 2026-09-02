@@ -1430,6 +1430,7 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
     m_captureStream.emplace_back(capId, streamId);
     if (c.digest.present)
         m_captureDigest.emplace_back(capId, QString::fromStdString(Ppcp::digestToHex(c.digest)));
+    m_captureCompleteness.emplace_back(capId, c.completeness);
     // I27 — exactly one anchor.  Recorded only when it is a Shot; a Capture
     // anchored to a Candidate or to its own Stream belongs to no swing.
     if (c.anchor.kind == PPCP_ANCHOR_SHOT)
@@ -1476,6 +1477,8 @@ void VideoInputPpcp::resolveAnnounce(Open &open) const
     if (open.clip.digestHex.isEmpty())
         for (const auto &e : m_captureDigest)
             if (e.first == capId) { open.clip.digestHex = e.second; break; }
+    for (const auto &e : m_captureCompleteness)
+        if (e.first == capId) { open.clip.completeness = e.second; break; }
     // ⛔ THE ANNOUNCE DECIDED WHAT THIS IS; THE PAYLOAD MUST AGREE.  Only the
     // instance that OWNS a preview Stream has its id in `m_previewStreamId`,
     // but every instance bound to the peer sees every payload, and the other

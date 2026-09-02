@@ -30,6 +30,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QJsonArray>
+#include <cmath>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -227,6 +228,12 @@ int main(int argc, char **argv)
         // Without frames the loader and the replay source both skip the element,
         // so a clip written without them is a file nothing will ever open.
         check(!fr.isEmpty(), "frames present — otherwise replay never shows it");
+        // The file's frame rate, measured from those instants: three frames 4 ms
+        // apart is 250 fps.  Missing, the replay assumed 30 and ran a 240 fps
+        // clip at 8x, over in half a second (2 Sept 2026).
+        const double fps = el.value(QStringLiteral("playback")).toObject()
+                               .value(QStringLiteral("fps")).toDouble(0.0);
+        check(std::abs(fps - 250.0) < 0.5, "playback.fps measured from the frame times");
     }
 
     // ── `absent` is an answer, not a failure ──────────────────────────────

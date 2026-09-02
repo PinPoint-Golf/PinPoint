@@ -72,6 +72,27 @@ more defects fell out on the way:
 | 7 | PPS filer / `VideoInputPpcp` | **`capture_committed` was never sent**: 8.4a's commit carries the digest, the filer never had it, libppcp refused with `invalid argument`, and the flush `break`-ed silently every 20 ms for ever (`pending_commits: 3`). | The announce's digest rides on `PpcpClip.digestHex` into the ledger row and the commit. A commit the library refuses as invalid is struck once, with a line, instead of retried. `digestToHex` added beside `digestFromHex`. |
 | 8 | Rig | The host **exited on its PASS** while the device suite still had three hosted tests to dial, so the first green run reported "the DEVICE half failed". And the probe's clip counters were pushed on `phonesChanged`, so a run with no phone-list change reported "filed 0" with the clip on disk. | `--linger`: the probe stays up after a PASS and the Makefile reads the verdict from the log and ends the process. Clip-chain stats are read on demand through a provider. |
 
+### 0.3b Morning after — the clip did not play (2 September)
+
+Mark: "it seems to only be 0.5 s long". Four more defects, all in what the two sides SAY
+about the bytes rather than in the bytes:
+
+| # | Where | Defect | Fix |
+|---|---|---|---|
+| 9 | PPS filer | No `playback.fps` in the swing document, so the replay assumed 30, decided 719 frames were 24 s of video to fit into a 3 s window, ran the player at 8× and the 3.5 s file was over in 0.44 s. | The filer writes the file's frame rate, **measured** from the frame instants. Test. |
+| 10 | PPC `FragmentRing.extract` | The payload is whole fragments (a fragment decodes whole), but the frame list and the realised interval were clipped to the request: 838 frames in the file, 719 listed, the first 119 unplaced, so a consumer indexing frames by position sat half a second early. | The realised interval is the span of the fragments delivered; every frame in them is listed; `complete` means the request lies inside it. Tests updated. |
+| 11 | PPC `RingBufferRecorder.append` | A frame the encoder refused was dropped from the file but kept its instant in the timeline (observe ran before the readiness guard): 246 listed, 233 in the file. | Observe only once the encoder has taken the frame. |
+| 12 | PPS `VideoInputPpcp` | A partial clip was filed as `complete`: `PpcpClip.completeness` kept its default. | The announce's completeness rides with the clip. Test. |
+
+Last night's three clips (Wrist_14, 18, 19) were **repaired in place**: `frames.t_us` re-derived
+from the container's own timestamps (1/600 s resolution — fine for playback, not for
+analysis) so every frame is placed, and `playback.fps` measured from them; `origin.repaired`
+says so.
+
+Also seen: after the probe's host quits on a PASS, the phone shows "Nothing is being recorded
+— channelClosed(peerClosed)" while the ring is visibly recording at 238 fps. The banner is
+about the hosted session, not the ring, and should say so.
+
 ### 0.3a What is NOT done
 
 1. **Preview `payload_begin`s with no chunk or end** trickle in (a few a minute, 0 of ~38 KB).

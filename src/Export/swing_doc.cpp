@@ -927,7 +927,8 @@ SwingDocWriter::StreamOrigin originFromJson(const QJsonObject &j)
 bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &alias,
                                         const StreamOrigin &origin, QString *error,
                                         const QString &fileName,
-                                        const QVector<qint64> &frameTUs)
+                                        const QVector<qint64> &frameTUs,
+                                        double playbackFps)
 {
     if (alias.isEmpty()) {
         if (error) *error = QStringLiteral("updateStreamOrigin needs a stream alias");
@@ -961,6 +962,8 @@ bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &
         el[QStringLiteral("origin")] = originToJson(origin);
         if (!fileName.isEmpty()) el[QStringLiteral("file")] = fileName;
         if (!frameTUs.isEmpty()) el[QStringLiteral("frames")] = framesToJson(frameTUs);
+        if (playbackFps > 0.0)
+            el[QStringLiteral("playback")] = QJsonObject{{QStringLiteral("fps"), playbackFps}};
         streams.replace(i, el);
         found = true;
         break;
@@ -979,6 +982,8 @@ bool SwingDocWriter::updateStreamOrigin(const QString &swingDir, const QString &
         el[QStringLiteral("origin")] = originToJson(origin);
         if (!fileName.isEmpty()) el[QStringLiteral("file")] = fileName;
         if (!frameTUs.isEmpty()) el[QStringLiteral("frames")] = framesToJson(frameTUs);
+        if (playbackFps > 0.0)
+            el[QStringLiteral("playback")] = QJsonObject{{QStringLiteral("fps"), playbackFps}};
         streams.append(el);
     }
     root[QStringLiteral("streams")] = streams;

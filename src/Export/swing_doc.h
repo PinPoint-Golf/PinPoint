@@ -184,10 +184,16 @@ public:
     // and DiskReplaySource both skip a video element whose `frames.t_us` is
     // empty, so a clip that lands without them is a file on disk that nothing
     // will ever open.
+    // `playbackFps` is the FILE's frame rate -- what the container plays at,
+    // which for a phone clip is its capture rate.  ⛔ Without it the replay
+    // defaults to 30, decides 719 frames are 24 s of video to fit into a 3 s
+    // window, runs the player at 8x and the clip is over in half a second
+    // (2 Sept 2026).  Measured from the frame times, never assumed.
     static bool updateStreamOrigin(const QString &swingDir, const QString &alias,
                                    const StreamOrigin &origin, QString *error = nullptr,
                                    const QString &fileName = QString(),
-                                   const QVector<qint64> &frameTUs = {});
+                                   const QVector<qint64> &frameTUs = {},
+                                   double playbackFps = 0.0);
 
     // Who the shot belongs to and where it sits — everything a device-only document
     // needs that the reading itself cannot supply.

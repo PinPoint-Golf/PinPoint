@@ -541,6 +541,9 @@ private:
     std::vector<std::pair<QString, QString>> m_captureShot;
     // capture id -> the announced digest, hex (see PpcpClip::digestHex).
     std::vector<std::pair<QString, QString>> m_captureDigest;
+    // capture id -> the announced completeness.  ⛔ Without this a partial clip
+    // was filed as `complete`: PpcpClip's default, never overwritten (2 Sept).
+    std::vector<std::pair<QString, ppcp_completeness>> m_captureCompleteness;
     // capture ids on a preview Stream, so 5.11j is checked on the way in.
     std::vector<QString> m_previewCaptures;
 

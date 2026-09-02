@@ -717,6 +717,9 @@ TEST(VideoInputPpcpPreview, AClipOnBulkSurvivesAPreviewSegmentArrivingMidway)
     EXPECT_EQ(L.clips[0].captureId, QString("cap-clip-1"));
     EXPECT_EQ(L.clips[0].shotId, QString("shot-1"));
     EXPECT_FALSE(L.clips[0].preview);
+    // The announce's completeness rides too: a partial clip was filed as
+    // `complete` while PpcpClip's default went unwritten (2 Sept 2026).
+    EXPECT_EQ(L.clips[0].completeness, PPCP_COMPLETE);
     ASSERT_EQ(static_cast<std::size_t>(L.clips[0].payload.size()), clipBytes.size());
     EXPECT_EQ(std::memcmp(L.clips[0].payload.constData(), clipBytes.data(), clipBytes.size()), 0);
     EXPECT_EQ(L.clips[0].canonicalNs.size(), 3);

@@ -354,13 +354,22 @@ bool PpcpClipFiler::file(Shot &s, const PpcpClip &clip)
                  << "has no per-frame instants — replay will not show it";
     }
 
+    // The file's own frame rate, measured from its frame instants.  The
+    // replay scales its playback rate by this; a missing value defaults to
+    // 30 and plays a 240 fps clip eight times too fast (2 Sept 2026).
+    double playbackFps = 0.0;
+    if (frameTUs.size() >= 2 && frameTUs.back() > frameTUs.front())
+        playbackFps = double(frameTUs.size() - 1)
+                      / (double(frameTUs.back() - frameTUs.front()) / 1e6);
+
     ensureSwingDocument(s.swingDir);
     QString err;
     // ⚠ AND THE FILE, or the element says `complete` while naming nothing and no
     // reader can open it.  Relative to the swing folder, as every other stream's
     // `file` is.
     if (!SwingDocWriter::updateStreamOrigin(s.swingDir, alias, o, &err,
-                                            QFileInfo(path).fileName(), frameTUs))
+                                            QFileInfo(path).fileName(), frameTUs,
+                                            playbackFps))
         ppWarn() << "[ppcp] clip landed but swing.json was not updated —" << err;
 
     ppInfo() << "[ppcp] phone video landed:" << path << clip.payload.size() << "bytes, shot"
