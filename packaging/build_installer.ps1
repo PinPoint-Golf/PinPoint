@@ -30,6 +30,7 @@
 param(
     [string]$BuildDir = 'build\Release-Installer',
     [string]$QtPrefix = 'C:\Qt\6.11.1\msvc2022_64',
+    [string]$OpenSslRoot = 'C:\pp-vcpkg\vcpkg_installed\x64-windows',
     [ValidateSet('both','core','cuda')]
     [string]$Components = 'both'
 )
@@ -104,7 +105,7 @@ $bat = @"
 call "$vcvars"
 set PATH=%PATH%;$jom
 cd /d "$repo"
-"$cmake" -S . -B "$BuildDir" -G "NMake Makefiles JOM" -DCMAKE_BUILD_TYPE=Release -DPP_SHIPPING_BUILD=ON -DCMAKE_PREFIX_PATH="$QtPrefix" || exit /b 1
+"$cmake" -S . -B "$BuildDir" -G "NMake Makefiles JOM" -DCMAKE_BUILD_TYPE=Release -DPP_SHIPPING_BUILD=ON -DCMAKE_PREFIX_PATH="$QtPrefix" -DOPENSSL_ROOT_DIR="$OpenSslRoot" || exit /b 1
 "$cmake" --build "$BuildDir" --target PinPointStudio || exit /b 1
 cd /d "$repo\$BuildDir"
 "$cpack" -G INNOSETUP -D CPACK_INNOSETUP_EXECUTABLE="$iscc" -D CPACK_PACKAGE_FILE_NAME="$pkgName" $cpackComponentArg || exit /b 1
