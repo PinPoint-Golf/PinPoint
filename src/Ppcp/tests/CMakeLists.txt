@@ -106,8 +106,11 @@ message(STATUS "PinPointTests: PPCP plaintext harness listener ON — this is a 
 # checks on every build rather than something somebody verified once by hand.
 
 # CameraCapabilities is Qt-built, so the declaration suite needs Multimedia for
-# the QVideoFrameFormat that video_input_base.h pulls in.
-find_package(Qt6 REQUIRED COMPONENTS Multimedia)
+# the QVideoFrameFormat that video_input_base.h pulls in. Qml is needed by
+# ppcp_clip_filer_test below (VideoInputPpcp.cpp uses QML_ELEMENT) — found here,
+# ahead of every target in this file that links Qt6::Qml, rather than at the
+# later find_package (line ~719) that was written for a target further down.
+find_package(Qt6 REQUIRED COMPONENTS Multimedia Qml)
 
 # libppcp — the declaration suite needs the L4 entity vocabulary, and the
 # transport suites below need the L1 frame/CBOR/envelope writers for link_bind.
