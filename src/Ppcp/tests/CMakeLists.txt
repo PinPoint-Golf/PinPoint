@@ -25,45 +25,23 @@ set(PPCP ${CMAKE_CURRENT_SOURCE_DIR}/..)   # src/Ppcp
 
 # ── DNS-SD, mirroring the app's own probe in the root CMakeLists ────────────
 # ⚠ THIS SUITE HAS ITS OWN BUILD AND INHERITS NOTHING FROM THE APP.  Four
-# targets below compile `ppcp_discovery.cpp`, whose two backends are gated on
-# `PP_HAVE_DNS_SD` off Apple.  Without this block the suite would compile them
-# out, `makePlatformBrowser()`/`makePlatformAdvertiser()` would return null, and
-# the two tests that exercise the REAL responder would quietly go on skipping —
-# so a Linux discovery port would look tested and not be.
+# targets below compile `ppcp_discovery.cpp`. Off Windows, its Bonjour/Avahi
+# backend is gated on `PP_HAVE_DNS_SD`; without this block the suite would
+# compile it out there, `makePlatformBrowser()`/`makePlatformAdvertiser()`
+# would return null, and the two tests that exercise the REAL responder would
+# quietly go on skipping — so a Linux discovery port would look tested and
+# not be. Windows needs none of this any more (W4, second cut): its backend
+# is the native engine, unconditional, no library to find.
 #
 # Directory scope on purpose: the definition is only ever read by
 # `ppcp_discovery.cpp`, and scoping it per-target would mean remembering to add
 # it to a fifth target later.
 if(WIN32)
-    # W4, mirroring the root CMakeLists' Bonjour SDK probe. ⚠ Implicit-linked
-    # here rather than delay-loaded: unlike the shipped app, these binaries
-    # never leave a machine that doesn't also have the SDK's runtime piece.
-    set(_bonjour_hint "$ENV{BONJOUR_SDK_HOME}")
-    find_path(DNSSD_INCLUDE_DIR dns_sd.h
-              HINTS "${_bonjour_hint}/Include" "C:/Program Files/Bonjour SDK/Include")
-    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        set(_bonjour_lib_subdir "Lib/x64")
-    else()
-        set(_bonjour_lib_subdir "Lib/Win32")
-    endif()
-    find_library(DNSSD_LIBRARY dnssd
-                 HINTS "${_bonjour_hint}/${_bonjour_lib_subdir}"
-                       "C:/Program Files/Bonjour SDK/${_bonjour_lib_subdir}")
-    if(DNSSD_INCLUDE_DIR AND DNSSD_LIBRARY)
-        set(DNSSD_INCLUDE_DIRS "${DNSSD_INCLUDE_DIR}")
-        set(DNSSD_LIBRARIES    "${DNSSD_LIBRARY}")
-        set(DNSSD_FOUND TRUE)
-    endif()
-    if(DNSSD_FOUND)
-        include_directories(${DNSSD_INCLUDE_DIRS})
-        add_compile_definitions(PP_HAVE_DNS_SD)
-        link_libraries(${DNSSD_LIBRARIES})
-        message(STATUS "PPCP tests: DNS-SD via ${DNSSD_LIBRARIES}")
-    else()
-        message(STATUS
-            "PPCP tests: no Bonjour SDK found — the real-responder tests will SKIP. "
-            "Install the Bonjour SDK for Windows, or set BONJOUR_SDK_HOME.")
-    endif()
+    # W4, second cut — no probe needed. The native engine (ppcp_mdns_native.cpp,
+    # in every target's SOURCES above) is pure Winsock, always present, no
+    # external SDK to find. See its header for why it replaced the Bonjour
+    # SDK for Windows path this block used to probe for.
+    message(STATUS "PPCP tests: native mDNS engine (no Bonjour SDK dependency)")
 elseif(NOT APPLE)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
@@ -360,6 +338,18 @@ pp_add_test(ppcp_qr_test
     NO_QT
     GTEST)
 
+# ── W4, second cut — the native mDNS engine's wire layer ────────────────────
+# Pure DNS message encode/decode (ppcp_mdns_wire.h/.cpp): no socket, no
+# platform code, no Windows-only guard, so it runs on every CI box regardless
+# of which platform ships the socket engine built on top of it. See the
+# header comment for why this exists instead of the Bonjour SDK path.
+pp_add_test(ppcp_mdns_wire_test
+    SOURCES ppcp_mdns_wire_test.cpp ${PPCP}/ppcp_mdns_wire.cpp
+    INCLUDE ${PPCP}
+    STD 20
+    NO_QT
+    GTEST)
+
 
 # ⚠ EVERYTHING BELOW THIS LINE NEEDS OpenSSL, AND THE DECLARATION SUITE ABOVE
 # DOES NOT.  A box without OpenSSL headers still runs CT-S3 and CT-I19; only the
@@ -488,7 +478,8 @@ pp_add_test(ppcp_rendezvous_test
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp
             ${PPCP}/ppcp_discovery.cpp
-            ${PPCP}/ppcp_dnssd_runtime.cpp
+            ${PPCP}/ppcp_mdns_wire.cpp
+            ${PPCP}/ppcp_mdns_native.cpp
             ${PPCP}/ppcp_transport.cpp
     INCLUDE ${PPCP}
     LINK    ${_rv_link}
@@ -511,7 +502,8 @@ pp_add_test(ppcp_rendezvous_test
 pp_add_test(ppcp_advertise_test
     SOURCES ppcp_advertise_test.cpp
             ${PPCP}/ppcp_discovery.cpp
-            ${PPCP}/ppcp_dnssd_runtime.cpp
+            ${PPCP}/ppcp_mdns_wire.cpp
+            ${PPCP}/ppcp_mdns_native.cpp
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp
             ${PPCP}/ppcp_transport.cpp
@@ -601,7 +593,8 @@ if(NOT WIN32)
         SOURCES ppcp_bootstrap_test.cpp
                 ${PPCP}/ppcp_bootstrap.cpp
                 ${PPCP}/ppcp_discovery.cpp
-                ${PPCP}/ppcp_dnssd_runtime.cpp
+                ${PPCP}/ppcp_mdns_wire.cpp
+            ${PPCP}/ppcp_mdns_native.cpp
         INCLUDE ${PPCP}
         LINK    ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads
         DEFINES PP_PPCP_SRC_DIR="${PPCP}"
@@ -653,7 +646,8 @@ pp_add_test(ppcp_host_service_test
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp
             ${PPCP}/ppcp_discovery.cpp
-            ${PPCP}/ppcp_dnssd_runtime.cpp
+            ${PPCP}/ppcp_mdns_wire.cpp
+            ${PPCP}/ppcp_mdns_native.cpp
             # H10 — the guided-pairing surface QML binds to lives on
             # PpcpHostService, so the initiator comes with it.
             ${PPCP}/ppcp_bootstrap.cpp

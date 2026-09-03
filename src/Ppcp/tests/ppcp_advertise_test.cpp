@@ -589,7 +589,10 @@ TEST(PpcpAdvertise, RegisteringWithTheRealResponderIsVisibleToARealBrowse)
 {
     std::unique_ptr<RvAdvertiser> adv = makePlatformAdvertiser();
     if (!adv) {
-        GTEST_SKIP() << "no DNS-SD responder on this platform (CA5: Windows deferred)";
+        // Windows no longer lands here for want of a dependency (W4, second
+        // cut — the native engine has none); this is now the same "no
+        // usable interface" case every platform can hit under 3.6a.
+        GTEST_SKIP() << "no DNS-SD responder/interface on this platform";
     }
 
     const auto kId = keyOf(0x5a);

@@ -2,7 +2,9 @@
 
 **Audience**: Developers building PinPointStudio with the capture-device link
 **Location**: `src/Ppcp/`, plus the `if(PP_OPENSSL_FOUND AND TARGET ppcp)` block in `CMakeLists.txt`
-**Status**: Linux verified 29 Aug 2026; macOS shipping; Windows deferred (CA5)
+**Status**: Linux verified 29 Aug 2026; macOS shipping; Windows verified 3 Sep
+2026 — mDNS via a native engine with no external dependency (W4, second cut),
+wired (usbmux) still needs Apple Mobile Device Service
 
 ---
 
@@ -101,12 +103,26 @@ usbmux is provided by the OS.
 
 ### Windows
 
-⛔ **Deferred (CA5), and it is a dependency decision rather than a protocol one.**
-There is no `dns_sd.h` on Windows without Apple's Bonjour SDK, which is an
-installer and a system service rather than a header — so `PP_HAVE_DNS_SD` is
-never set and both discovery factories return null. usbmux requires Apple Mobile
-Device Service, which ships with iTunes / Apple Devices and **cannot be
-redistributed with PinPointStudio**. See `wired_transport_impl_plan.md` §Phase 2W.
+✅ **mDNS discovery needs nothing installed at all (W4, second cut).** The
+Bonjour SDK for Windows path this replaced is gone — Apple's runtime
+registers a Winsock namespace provider (`mdnsNSP.dll`, last touched 2015)
+that fails modern Windows Code Integrity / LSA-protection signing checks,
+visibly: a "blocked from loading into the Local Security Authority" popup on
+every boot, plus continuous Code Integrity errors touching `svchost.exe` and
+even Windows Defender's own service, on every machine that has the runtime
+installed — whether or not PinPointStudio is even running. **Do not install
+Bonjour for Windows to get discovery working; it is not needed and actively
+causes this.** `src/Ppcp/ppcp_mdns_native.{h,cpp}` is a from-scratch UDP 5353
+multicast engine (RFC 6762/6763, IPv4 only) that this application owns
+outright — see that header for the full reasoning, and
+`wired_transport_impl_plan.md`'s Log for how the LSA problem was found and
+diagnosed before this was built.
+
+⚠ **usbmux (the WIRED path) is unrelated and still needs Apple Mobile Device
+Service**, which ships with iTunes / Apple Devices and **cannot be
+redistributed with PinPointStudio**. AMDS has no Winsock namespace provider
+and does not trigger the LSA problem above — it is a plain loopback TCP
+service (127.0.0.1:27015). See `wired_transport_impl_plan.md` §Phase 2W.
 
 ---
 

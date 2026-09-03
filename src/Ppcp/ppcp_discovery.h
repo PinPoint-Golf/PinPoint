@@ -35,12 +35,21 @@
 // which either finds the other, and the user would see a protocol that
 // remembers them and still asks for a code every session.
 //
-// ⚠ THIS PROCESS STILL BINDS NO MULTICAST SOCKET.  Both halves ask the
-// platform's existing responder (mDNSResponder on macOS) over a local IPC
-// socket — `DNSServiceBrowse` to query on our behalf, `DNSServiceRegister` to
-// publish on our behalf.  There is no QUdpSocket anywhere in this file and
-// there must never be one: binding 5353 in this process would conflict with
-// the responder that already owns it.
+// ⚠ ON macOS AND LINUX THIS PROCESS BINDS NO MULTICAST SOCKET.  Both halves
+// ask the platform's existing responder (mDNSResponder on macOS, Avahi on
+// Linux) over a local IPC socket — `DNSServiceBrowse` to query on our behalf,
+// `DNSServiceRegister` to publish on our behalf — because binding 5353 in
+// this process would conflict with the responder that already owns it there.
+//
+// ⚠ WINDOWS IS DIFFERENT, DELIBERATELY (W4, second cut).  There is no
+// system-owned responder to ask: the native engine (ppcp_mdns_native.h) is
+// this process's OWN UDP 5353 socket, because the alternative — Apple's
+// Bonjour SDK for Windows — registers a Winsock namespace provider that
+// fails modern Windows Code Integrity / LSA-protection signing checks on
+// every machine that has it installed, visibly (a "blocked from loading
+// into the Local Security Authority" popup on every boot), whether or not
+// this application is even running. Nothing else in this file changes for
+// it: `RvBrowser`/`RvAdvertiser` are the same interface either way.
 //
 // ⚠ AND THE WHOLE THING IS A CONVENIENCE.  RV §3 is "optional.  Reconnection
 // convenience only — a first pairing always uses §4", and 3.6a MUST NOT treat
@@ -155,6 +164,16 @@ public:
     virtual bool process() = 0;
     // Whether this build has a browser at all, for the diagnostic export.
     virtual std::string describe() const = 0;
+
+    // Call as often as convenient — the same discipline `RvReconnectionAdvertisement::tick()`
+    // already keeps, and the same call site (`PpcpHostService::onTick()`) drives both.
+    // A backend whose platform daemon (mDNSResponder, Avahi) already does
+    // continuous querying on its own needs no hook here and inherits the
+    // no-op default. A backend with no daemon of its own — nothing OWNS
+    // UDP 5353 for it except this process's own socket — uses this to
+    // re-send its browse query periodically (RFC 6762 §5.2), because
+    // `process()` alone only fires when something ELSE is already talking.
+    virtual void tick(std::uint64_t /*nowS*/) {}
 };
 
 std::unique_ptr<RvBrowser> makePlatformBrowser();
@@ -168,8 +187,8 @@ std::unique_ptr<RvBrowser> makePlatformBrowser();
 // machine.  On macOS that is mDNSResponder, it is already running, and
 // `DNSServiceRegister` asks it — over the same local IPC socket
 // `DNSServiceBrowse` above already uses — to publish a record on our behalf.
-// This process still binds no multicast socket and still answers no query, so
-// the "no QUdpSocket anywhere in this file" rule stands unchanged.
+// This process still binds no multicast socket and still answers no query on
+// macOS or Linux. Windows is the exception — see the file header comment.
 //
 // ⚠ AND 3.5d — the clause that FORBIDS most desktops from advertising — is
 // satisfied here rather than assumed.  It bars a peer whose platform cannot
@@ -179,13 +198,15 @@ std::unique_ptr<RvBrowser> makePlatformBrowser();
 // start-up.  A peer without it would be discoverable and unable to complete
 // the handshake it advertised for, which is why the clause exists.
 //
-// ⚠ WINDOWS IS DEFERRED, AND IT IS A DEPENDENCY DECISION AND NOT A PROTOCOL
-// ONE (CA5).  There is no `dns_sd.h` on Windows without Apple's Bonjour SDK,
-// which is an installer and a service rather than a header.  So
-// `makePlatformAdvertiser()` returns null there, exactly as
-// `makePlatformBrowser()` does, and 3.6b makes that silent: the pairing code
-// path is unaffected and the user sees a code prompt rather than a failure.
-// Recorded here rather than left as an `#ifdef` nobody reads.
+// ⚠ WINDOWS IS NO LONGER DEFERRED (CA5's original dependency objection is
+// answered, not overridden — see ppcp_mdns_native.h).  `makePlatformAdvertiser()`
+// there returns a native engine that owns its own UDP 5353 socket rather than
+// asking a platform responder, because there is no dependency-free one to
+// ask: Apple's Bonjour SDK for Windows is the alternative CA5 named, and it
+// carries a real cost — its Winsock namespace provider fails modern Windows
+// Code Integrity / LSA-protection checks on every machine that installs it,
+// running or not. `makePlatformAdvertiser()` can still return null there (no
+// usable interface — 3.6a), just never for want of the SDK any more.
 
 // 3.2d — a registration nonce is four CSPRNG bytes, drawn fresh for EACH
 // REGISTRATION, and the instance name is derived from it and from nothing

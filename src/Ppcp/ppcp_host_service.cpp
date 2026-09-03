@@ -2804,6 +2804,10 @@ void PpcpHostService::onTick()
     // until a rotation is actually due, so calling it at 50 Hz costs nothing;
     // when one IS due it is a single TXT update (3.2d), not a re-registration.
     if (m_advert) m_advert->tick(static_cast<std::uint64_t>(QDateTime::currentSecsSinceEpoch()));
+    // The browser's own periodic hook (native Windows engine only — see
+    // RvBrowser::tick()'s header comment; every other backend's default
+    // no-op costs the same integer comparison and nothing else).
+    if (m_browser) m_browser->tick(static_cast<std::uint64_t>(QDateTime::currentSecsSinceEpoch()));
 
     if (m_codeLive) {
         // ⚠ ONCE A SECOND, NOT ONCE A TICK.  m_timer is 20 ms, so emitting

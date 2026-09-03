@@ -19,7 +19,11 @@
 #include "ppcp_discovery.h"
 
 #ifdef _WIN32
-#include "ppcp_dnssd_runtime.h"
+// W4, second cut — the native engine, no Bonjour SDK dependency (see its own
+// header for why). PP_DNS_SD_AVAILABLE below is never set on Windows any
+// more, so BonjourBrowser/BonjourAdvertiser compile out there entirely; this
+// factory pair is what actually answers makePlatformBrowser()/Advertiser().
+#include "ppcp_mdns_native.h"
 #endif
 
 #include <cctype>
@@ -629,13 +633,17 @@ private:
 
 std::unique_ptr<RvBrowser> makePlatformBrowser()
 {
-#if defined(PP_DNS_SD_AVAILABLE)
 #if defined(_WIN32)
-    // W4: dnssd.dll is delay-loaded (CMake's /DELAYLOAD:dnssd.dll). Touching a
-    // DNSService* symbol before confirming the DLL loaded would crash the
-    // process on a machine without the Bonjour SDK's runtime component.
-    if (!pinpoint::ppcp::dnssdRuntimeAvailable()) return nullptr;
-#endif
+    // W4, second cut — a native engine (ppcp_mdns_native.h) rather than the
+    // Bonjour SDK for Windows: Apple's runtime registers a Winsock namespace
+    // provider that fails modern Windows Code Integrity / LSA-protection
+    // signing checks, on every machine that has it installed, whether or not
+    // this application is even running. Unlike the Bonjour SDK path, this
+    // never returns null for want of an installed dependency — there is
+    // none. A `start()` failure later (no usable interface — 3.6a) is the
+    // only way discovery ends up disabled on this platform now.
+    return Ppcp::Mdns::makeNativeBrowser();
+#elif defined(PP_DNS_SD_AVAILABLE)
     return std::unique_ptr<RvBrowser>(new BonjourBrowser);
 #else
     // No DNS-SD client on this platform.  3.6b: failure to discover falls
@@ -974,20 +982,20 @@ private:
 
 std::unique_ptr<RvAdvertiser> makePlatformAdvertiser()
 {
-#if defined(PP_DNS_SD_AVAILABLE)
 #if defined(_WIN32)
-    if (!pinpoint::ppcp::dnssdRuntimeAvailable()) return nullptr;
-#endif
+    // W4, second cut — see makePlatformBrowser()'s comment above; the same
+    // native engine, no Bonjour SDK dependency, no delay-load probe needed
+    // because there is no external DLL to probe for.
+    return Ppcp::Mdns::makeNativeAdvertiser();
+#elif defined(PP_DNS_SD_AVAILABLE)
     return std::unique_ptr<RvAdvertiser>(new BonjourAdvertiser);
 #else
-    // CA5 — Windows is DEFERRED and this is where it is recorded.  There is no
-    // `dns_sd.h` there outside Apple's Bonjour SDK, which is an installer and a
-    // system service rather than a header, and taking that dependency is a
-    // decision about what PinPointStudio ships rather than about the protocol.
-    // 3.6b makes the consequence silent: no advertisement, so such a host is
-    // reached by pairing code every session until somebody decides.
+    // No DNS-SD responder on this platform (CA5's original concern, but no
+    // longer Windows' reason for landing here — see above). 3.6b makes the
+    // consequence silent: no advertisement, so such a host is reached by
+    // pairing code every session until somebody decides.
     //
-    // ⚠ LINUX IS NO LONGER IN THIS BRANCH.  Avahi's compat shim supplies the
+    // ⚠ LINUX IS NOT IN THIS BRANCH EITHER.  Avahi's compat shim supplies the
     // same API, so a Linux box with it installed advertises exactly as macOS
     // does; a Linux box WITHOUT it lands here, which is why this stays a
     // silent null rather than becoming an error.
