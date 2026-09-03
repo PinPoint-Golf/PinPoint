@@ -44,6 +44,15 @@ namespace {
 constexpr const char *kSession = "sess:h5";
 constexpr std::int64_t kMs = 1000000;
 
+// A two-way exchange with truly zero transit time can never produce a
+// nonzero offset_sigma_ns (ppcp_sync.c combines the fit residual with half
+// the measured RTT in quadrature) — real links always have some. 1.5 us is
+// negligible against every test's tolerance in this file (ms-to-second
+// scale) but keeps rtt > 0 so the estimator reports a real, non-degenerate
+// uncertainty instead of one that is merely an artefact of a harness that
+// never modelled transit time.
+constexpr std::int64_t kSimLinkDelayNs = 1500;
+
 // The device's clock, offset and running fast relative to the host's.  Both
 // numbers are recovered by the exchange below and neither is ever handed to the
 // estimator.
@@ -217,12 +226,14 @@ struct Link {
     {
         advance(ns);
         live.pump(hostNowNs());
+        advance(kSimLinkDelayNs);   // host -> device transit
         toDevice();
         // The device answers `sync_probe` inside its own feed path; draining its
         // events keeps the four-deep ring from overwriting.  It answers an
         // `actuator_command` here too — 12.1c is the embedding's, and a tick is
         // a place a command can land.
         pptest::drainEvents(dev.p, devSink());
+        advance(kSimLinkDelayNs);   // device -> host transit
         toHost();
         pptest::drainEvents(host->peer(), [this](const ppcp_event &e) { live.observe(e); });
     }
