@@ -157,7 +157,7 @@ Changes what is *derived*; `value[]` untouched.
       same answers within σ; a still series with white noise gives a rate near 0 and an
       extremum within one σ of the mean; invalid samples are ignored; sparse (27 ms) and dense
       (8 ms) spacing both work.
-- [ ] **2.3** `ChartMetrics::summary` delegates to 2.1 for start/end (windowed At),
+- [x] **2.3** `ChartMetrics::summary` delegates to 2.1 for start/end (windowed At),
       peak/tPeakUs (extremum), delta and rate. Keep `min`/`max`/`range` as the windowed-mean
       extremes for the same reason. `chart_metrics_test.cpp` updated: the old adjacent-frame
       rate assertions are replaced, not deleted; add the spike case.
@@ -348,3 +348,18 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   outside a phase domain (where the degenerate readings live) — recommend clamping; W2's spans
   inherit it. Tracker boxes 2.1/2.2/2.4 ticked on the workers' word; 2.3 (W3 chart) report NOT
   received; 2.5 gate not run.
+
+- **2026-09-04 (Phase 2, W3 report received; all three workers complete, NOTHING BUILT)** — chart
+  adoption landed: summaryMasked lifts once, delegates every reduction, new keys peakSigma /
+  rateSigma / rateOk / tRateUs; PK RATE shows "—" when no window qualifies and displays the
+  MAGNITUDE of the signed rate (what the tile always answered); probe prints a STILL ADDR row
+  with a §7-item-2 PASS/FAIL line. Fixtures rescaled to 8 ms / 27 ms (the old 1 ms fixture was
+  shorter than every window). **W3's four flags for the next session:** (1) §7 item 2's
+  "< 2 units/100 ms" is a property of the SERIES' residual σ (needs ≲ 0.5), not of the reducer —
+  a σ≈0.9 still series yields |rate| ≈ 2.0 with rateSigma ≈ 2.1; (2) the fallback→partial rule
+  fires with no mask when a window edge is > 15 ms outside the data extent, so a pre-validity
+  swing can wear a PARTIAL chip — consider gating it on a mask or on the edge being inside the
+  extent; (3) min/max no longer include the interpolated edges, and `PpSegmentBrush.qml`
+  normalises the RAW curve to st.min/st.max, so unmasked spikes now overshoot the sparkline
+  strip — needs raw extremes or a clip there; (4) the unclamped extremum window lets a P1–P7
+  PEAK borrow 20 ms past Impact — clamp in reduceExtremum. Resume = build + ctest first.

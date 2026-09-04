@@ -51,8 +51,10 @@ bool haveMask(int n, const QVariantList &valid)
     return n > 0 && valid.size() >= n;
 }
 
-// The VALID samples of a series with their ORIGINAL indices kept — the shape the one remaining
-// piece of arithmetic in this file needs (interpValid, the fallback window edge).
+// The VALID samples of a series, in order — the shape the one remaining piece of arithmetic in
+// this file needs (interpValid, the fallback window edge). The original indices are NOT kept any
+// more: they existed for the `bracketSkipped` adjacency test, and a fallback edge is a `partial`
+// window whether or not the two samples it read from were neighbours.
 struct ValidSamples {
     std::vector<int64_t> t;
     std::vector<double>  v;
@@ -328,9 +330,10 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
     // NEW IN PHASE 2. peakSigma / rateSigma are the σ the card prints beside the two tiles a
     // reader's trust is decided on; rateOk gates the rate tile; tRateUs is the centre of the
     // winning slope window, so a caller can mark WHERE the steepest change was, exactly as
-    // tPeakUs does for the peak. Both times are 0 when their reduction had nothing to report —
-    // 0 is a legitimate instant in this (window-relative) timebase, so rateOk, not tRateUs, is
-    // the thing to test.
+    // tPeakUs does for the peak. tRateUs is 0 when no rate was fitted, and 0 is a legitimate
+    // instant in this (window-relative) timebase — so rateOk, never tRateUs, is the thing to test.
+    // (tPeakUs has no such state: with no valid sample in the window the extremes come from the
+    // edges, and it names the edge they came from.)
     r.insert(QStringLiteral("peakSigma"), peakSigma);
     r.insert(QStringLiteral("rateSigma"), rateR.ok ? rateR.sigma : 0.0);
     r.insert(QStringLiteral("rateOk"),    rateR.ok);
@@ -372,7 +375,7 @@ bool ChartMetrics::measuredAt(const QVariantList &tUs, const QVariantList &valid
 
     // ONE short-mask rule for the whole file — see haveMask(). `n` is the CURVE's length, so a
     // mask shorter than it is discarded wholesale rather than bounding the search: bounding it at
-    // qMin(sizes) silently answered a different question than collectValid did about the same
+    // qMin(sizes) silently answered a different question than lift() did about the same
     // series, which is how two views of one curve start disagreeing.
     const int n = tUs.size();
     if (!haveMask(n, valid)) return true;          // nothing marked ⇒ every sample is a measurement

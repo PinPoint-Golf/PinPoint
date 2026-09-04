@@ -42,6 +42,11 @@ pp_add_test(timeline_labels_test
 # The norm stack comes along because metric_providers.cpp -> reference_bands.cpp pulls it in, the
 # same chain metric_catalogue_test links; pp_norm_env's JSON is not read by anything here, so the
 # shipped resources are not needed and the env is left unset.
+#
+# NO ENTRY FOR series_reduce (C8, Phase 2), and that is not an omission: summaryMasked delegates
+# every reduction to src/Analysis/series_reduce.h, which is HEADER-ONLY — the reductions run on
+# borrowed C arrays and only viewOf() touches MetricSeries, so there is nothing to compile or link
+# here or in any other consumer target. Its own suite is series_reduce_test in src/Analysis/tests.
 pp_add_test(chart_metrics_test
     SOURCES chart_metrics_test.cpp
             ${GUI}/review/chart_metrics.cpp
