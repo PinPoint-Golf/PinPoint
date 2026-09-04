@@ -131,7 +131,7 @@ sample all disappear here.
 
 ### 1.4 Gate
 
-- [ ] Corpus before/after + control. `parity_diff.py` must be byte-identical for every swing
+- [x] Corpus before/after + control. `parity_diff.py` must be byte-identical for every swing
       whose series contain no invalid sample. For the rest, the only diffs are: `valid` arrays
       appearing, phase samples disappearing where the design says they must, and nothing in
       `value[]`. Re-run 0.1/0.2; the "phase sample below the ratio" count must be 0.
@@ -299,3 +299,25 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   manifest moved. (7) `bandAtNearest` lost its "good" default and gained a 20 ms tolerance;
   @IMPACT reads "—" when the impact sample is bridged. (8) `channel.maxBridgeUs < 0` is the
   off switch and is now guarded in both modules. Side item (summary-card overflow) fixed.
+
+- **2026-09-04 (Phase 1 gate + probe; committed a290146 + follow-up)** — Gate on the 11-swing
+  2026-08-18 subset, RelWithDebInfo `swinglab_run` before (clean 72bfd42 worktree) vs after,
+  control byte-identical (`tools/metrics/compare_runs.py`, `subset_pass.sh`): `value[]`/`t_us[]`
+  differ ONLY in the five gated channels (hipLineTilt, shoulderPlaneAngle, elbowAlignment,
+  spineSideBend, trailElbowHeight), and only on gated frames, which now carry the bridge and a 0 in
+  `valid`; nothing else in `analysis` moved. Masks appeared on 4 ungated channels from confidence
+  holes with values unchanged. Phase samples removed: the out-of-domain Finish sample on all five
+  narrowed upper-body metrics (11/11 — they had ALWAYS sampled Finish; producers now take a P1–P7
+  list), the Top sample of shoulderPlaneAngle / spineSideBend / trailElbowHeight on 8/11 and
+  elbowAlignment on 3/11 (the gate at the top, as Phase 0 predicted), hipLineTilt kept every
+  P1–P7 sample on 11/11. One 1-ulp phase-sample change (trailElbowHeight P2, one swing) from a
+  bridged neighbour. **Defect the gate caught:** the first cut marked gated frames inside the
+  60 ms budget as valid and bridged them — a 10-frame post-impact hip-tilt run drawn as measured,
+  a P4 shoulder plane of 86° emitted as a bridged 26°. Fixed: gated instants force 0 before any
+  budget applies. **Probe** (`tools/probes/plumb_bob_chart.qml`, offscreen, re-analysed
+  swing_0001): Plumb Bob preset resolves; sway card PEAK 41.5 → 21.8 % once clamped to P1–P7,
+  hip tilt −29.5 → +16.0°, plumb bob 4.6 → −2.8 in; hipLineTilt carries a 9-frame invalid run
+  after impact, shoulderPlaneAngle two runs (53 frames). Probe found the domain end resolving
+  0.6 ms BEFORE the P7 sample (phase samples sit on the nearest frame): `_domainWindow` now
+  snaps to the series' sample grid. Not exercised offscreen: the padded replay axis (no video
+  decode), so the still-address window and dashed rendering want one windowed look.

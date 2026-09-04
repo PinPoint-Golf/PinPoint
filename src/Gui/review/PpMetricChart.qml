@@ -328,8 +328,20 @@ Item {
         var d = cm.domainFor(key)
         var t = s.t_us
         var first = t[0], last = t[t.length - 1]
-        return { fromUs: d.firstNarrowed ? root._phaseUs(d.firstPhase, first) : first,
-                 toUs:   d.lastNarrowed  ? root._phaseUs(d.lastPhase,  last)  : last }
+        // SNAPPED TO THE SERIES' OWN SAMPLE GRID. A phase instant lies between two frames, and the
+        // producer's phase sample sits on the NEAREST frame (metric_channel.h nearestIndex) — on
+        // the 08-18 probe swing the P7 sample was 0.6 ms after the impact instant, so an unsnapped
+        // domain end excluded the very sample it was meant to include and hid every P7 dot on the
+        // narrowed metrics. Same nearest rule, ties to the earlier frame, so the two agree exactly.
+        return { fromUs: d.firstNarrowed ? root._nearestSampleUs(t, root._phaseUs(d.firstPhase, first)) : first,
+                 toUs:   d.lastNarrowed  ? root._nearestSampleUs(t, root._phaseUs(d.lastPhase,  last))  : last }
+    }
+    function _nearestSampleUs(t, us) {
+        if (!t || t.length === 0) return us
+        var lo = 0, hi = t.length - 1
+        while (lo < hi) { var mid = (lo + hi) >> 1; if (t[mid] < us) lo = mid + 1; else hi = mid }
+        if (lo > 0 && (us - t[lo - 1]) <= (t[lo] - us)) lo = lo - 1
+        return t[lo]
     }
 
     // A summary window CLAMPED to one series' domain. The reducers must search only inside the
