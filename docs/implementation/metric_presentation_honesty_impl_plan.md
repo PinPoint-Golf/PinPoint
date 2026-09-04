@@ -145,14 +145,14 @@ sample all disappear here.
 
 Changes what is *derived*; `value[]` untouched.
 
-- [ ] **2.1** `src/Analysis/series_reduce.h` (+ `.cpp` if it will not stay header-only),
+- [x] **2.1** `src/Analysis/series_reduce.h` (+ `.cpp` if it will not stay header-only),
       Qt-only, no Gui: `reduceAt` (±window median, valid-aware), `reduceDelta`,
       `reduceExtremum` (extremum of the centred-window mean; returns value + centre `atUs`),
       `reduceRate` (max-|slope| least-squares over sliding windows ≥ `rateWindowUs`, ≥ 3 valid
       samples; returns slope per 100 ms and its standard error). Tuned constants
       `tuned::reduce::kExtremumWindowUs = 40000`, `kRateWindowUs = 50000`; dark keys
       `reduce.extremumWindowUs`, `reduce.rateWindowUs`.
-- [ ] **2.2** `series_reduce_test.cpp` (new, `src/Analysis/tests`): a clean ramp gives the
+- [x] **2.2** `series_reduce_test.cpp` (new, `src/Analysis/tests`): a clean ramp gives the
       ramp's slope and its endpoint as extremum; the same ramp with one 10σ spike gives the
       same answers within σ; a still series with white noise gives a rate near 0 and an
       extremum within one σ of the mean; invalid samples are ignored; sparse (27 ms) and dense
@@ -161,7 +161,7 @@ Changes what is *derived*; `value[]` untouched.
       peak/tPeakUs (extremum), delta and rate. Keep `min`/`max`/`range` as the windowed-mean
       extremes for the same reason. `chart_metrics_test.cpp` updated: the old adjacent-frame
       rate assertions are replaced, not deleted; add the spike case.
-- [ ] **2.4** `measure_sample.cpp` `buildPhaseGrid`: `PhaseGridSpan.min/max` from
+- [x] **2.4** `measure_sample.cpp` `buildPhaseGrid`: `PhaseGridSpan.min/max` from
       `reduceExtremum` over the span (valid-aware). `kPhaseGridSchemaVersion` → 3 so the
       sidecar cache rebuilds. `measure_sample_test.cpp`: the spike case; the schema bump.
 - [ ] **2.5** Gate: corpus run. For every authored `extremum` measure, before/after of the
@@ -336,3 +336,15 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   live_measure_source_test, model_browser_test; fix whatever W1/W3 left unfinished; ctest; two
   adversarial reviews (Analysis reducers; chart+engine adoption); gate 2.5 = probe STILL ADDRESS
   rate on the 08-18 subset (target < 2 units/100 ms) + card-vs-engine agreement test; commit.
+
+- **2026-09-04 (Phase 2, W1 report received after the WIP commit)** — reducers are header-only
+  (`series_reduce.h`, Qt-only via swing_analysis.h, no .cpp — do NOT add one to any CMake list;
+  `ReduceConfig` gained `minAtSamples`). W1 verified every fixture with a Python replica; not
+  compiled. **Two design points for Mark before gate 2.5:** (1) the least-squares `reduceRate` is
+  NOT spike-proof — a single 99 in a ramp still yields ~100/100 ms (12× better than adjacent-frame,
+  with σ≈57 flagging it); a spike-proof rate needs Theil–Sen or a residual gate, a design change
+  not a tuning; §7 item 2 is about STILL windows, which pass comfortably. (2) the centred
+  extremum window is not clamped to [from, to], so a window-edge mean can borrow 20 ms from
+  outside a phase domain (where the degenerate readings live) — recommend clamping; W2's spans
+  inherit it. Tracker boxes 2.1/2.2/2.4 ticked on the workers' word; 2.3 (W3 chart) report NOT
+  received; 2.5 gate not run.

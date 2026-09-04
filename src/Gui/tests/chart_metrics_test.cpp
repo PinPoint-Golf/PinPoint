@@ -839,25 +839,31 @@ int main()
     // truncated from would invent validity nobody stated; the shared answer is to discard it.
     {
         std::printf("summaryMasked / measuredAt — the short-mask rule\n");
-        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
-                              qlonglong(3000), qlonglong(4000) };
-        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
-        const QVariantList shortMask{ 1, 1, 0 };          // covers 3 of 5 — malformed
+        const int n = 25;
+        const QVariantList t = tAt(n);
+        QVariantList v = flatV(n, 4.0);
+        v[12] = 99.0;                                   // the spike, at t = 96 ms
+        const qlonglong tEnd = qlonglong(n - 1) * kDtUs;
+        const QVariantList shortMask = onesMask(13, 12, 12);   // covers 13 of 25 — malformed
 
-        const QVariantMap full  = cm.summary(t, v, 0, 4000);
-        const QVariantMap trunc = cm.summaryMasked(t, v, shortMask, 0, 4000);
+        const QVariantMap full  = cm.summary(t, v, 0, tEnd);
+        const QVariantMap trunc = cm.summaryMasked(t, v, shortMask, 0, tEnd);
+        // Asserted as an IDENTITY against the unmasked summary rather than against literals, so
+        // this case survives the reducer definitions changing under it — as they just did.
         checkEqD("short mask ⇒ no mask (peak)", trunc.value(QStringLiteral("peak")).toDouble(),
                                                 full.value(QStringLiteral("peak")).toDouble());
         checkEqD("short mask ⇒ no mask (rate)", trunc.value(QStringLiteral("rate")).toDouble(),
                                                 full.value(QStringLiteral("rate")).toDouble());
         checkTrue("short mask ⇒ not partial", !trunc.value(QStringLiteral("partial")).toBool());
-        // measuredAt agrees, rather than bounding its scan at qMin(sizes) and answering a
-        // different question than the reducer did about the very same series.
-        checkTrue("short mask ⇒ measuredAt says measured", cm.measuredAt(t, shortMask, 2000, 0, 0));
-        // A mask LONGER than the curve is still honoured — over-length is not truncation.
-        const QVariantList longMask{ 1, 1, 0, 1, 1, 1, 1 };
-        checkEqD("over-length mask still masks",
-                 cm.summaryMasked(t, v, longMask, 0, 4000).value(QStringLiteral("peak")).toDouble(), 4.0);
+        // C8 puts this rule in the CALLER's hands — SeriesView takes a mask pointer that may be
+        // null — for the same reason it lives in one function here: the shared reducers must not
+        // carry a second opinion about a malformed document.
+        checkTrue("short mask ⇒ measuredAt says measured",
+                  cm.measuredAt(t, shortMask, 12 * kDtUs, 0, 0));
+        // A mask LONGER than the curve is still honoured — over-length is not truncation — and
+        // with the spike marked, the curve reduces to its baseline everywhere.
+        const QVariantMap over = cm.summaryMasked(t, v, onesMask(n + 4, 12, 12), 0, tEnd);
+        checkEqD("over-length mask still masks", over.value(QStringLiteral("peak")).toDouble(), 4.0);
     }
 
     // ── bandAtNearest: no verdict rather than an invented pass ─────────────────────
