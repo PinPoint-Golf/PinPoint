@@ -1556,15 +1556,6 @@
       "source": "heuristic"
     },
     {
-      "measure": "m_pelvisSwayFinish",
-      "context": "any",
-      "mu": 30.0,
-      "sigmaLo": 15.0,
-      "unit": "% stance width",
-      "source": "heuristic",
-      "citation": "Re-expressed from centimetres to a percentage of the golfer's own stance when the producer landed, at roughly 2.5 % of stance per centimetre (a ~40 cm ankle-to-ankle iron stance). The claim is unchanged and still a heuristic: it was never seated on data in either unit, and the conversion factor is itself a round number. Re-seat from the corpus."
-    },
-    {
       "measure": "m_thoraxRotFinish",
       "context": "any",
       "mu": 110.0,

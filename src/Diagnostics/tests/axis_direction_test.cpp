@@ -203,8 +203,11 @@ static const Expect kExpected[] = {
     // ── content extension: finish ───────────────────────────────────────────
     { "sig_offBalanceFinish",     Direction::High,
       "comOverLeadFoot: 'HIGHER MEANS FURTHER FROM THE LEAD ANKLE', so off balance is the high end" },
-    { "sig_weightBackFinish",     Direction::Low,
-      "pelvisSway: 'positive is toward the lead side'; still back at the finish is negative" },
+    // sig_weightBackFinish and sig_offBalanceFinishSway were REMOVED on 2026-09-04. Both read
+    // m_pelvisSwayFinish, which reduced pelvisSway at the finish — outside the P1-P7 domain where
+    // that projection means anything, so the sign each row audited was the sign of the pelvis's
+    // rotation rather than of its lateral travel. The rows go with the signals: this fixture must
+    // cover every corridor signal the pack carries (`unaudited == 0`) and nothing more.
     { "sig_abbreviatedFinish",    Direction::Low,
       "thoraxRotation at the finish: a cut-short follow-through is LESS turn" },
 
@@ -243,9 +246,6 @@ static const Expect kExpected[] = {
     { "sig_slidePelvisImpact",      Direction::High,
       "m_pelvisSwayImpact highMeans 'the pelvis further toward the lead side at impact than at "
       "address'; a slide is too much of it" },
-    { "sig_offBalanceFinishSway",   Direction::High,
-      "m_pelvisSwayFinish highMeans 'the pelvis further toward the target at the finish'; falling "
-      "through it is the high end, where sig_weightBackFinish takes the low" },
     { "sig_hangingBackThoraxDrift", Direction::Low,
       "m_thoraxDrift highMeans 'the chest further toward the lead side by early downswing'; the "
       "chest staying back is the low end, where sig_forwardLunge takes the high" },

@@ -405,6 +405,38 @@ inline constexpr int          kAddrMinFrames = 5;       // fallback address ref 
 inline constexpr std::int64_t kAddrWindowUs  = 250000;  // ±window about the Address event for the robust ref
 } // namespace foot
 
+// --- Sparse-channel resample (src/Analysis/metric_channel.h) ------------------
+// Every face-on producer resamples its sparse channel onto the full frame grid,
+// holding at the ends and bridging gaps so the curve is continuous and never NaN.
+// kMaxBridgeUs is where a bridge stops being a measurement: a grid sample farther
+// than this from any real channel sample is filled as before but MARKED INVALID in
+// MetricSeries::valid, so the reducers skip it, the chart draws it dashed and no
+// phase sample is taken there.
+//
+// 60 ms is chosen so that today's behaviour survives where it was honest and stops
+// where it was not: a one- or two-frame confidence dropout at 150 fps (7–13 ms) still
+// bridges silently, and a run of frames a geometry gate refused — a body line turned
+// out of the image plane for a tenth of a second — does not.
+//
+// ⚠ A FIXED BUDGET IS NOT ENOUGH, and kBridgeSpacingFactor is why. The grid is NOT
+// uniformly sampled: PoseRunner poses every frame only inside the dense zone, and the
+// address region is sampled at addressStride 15 (≈100 ms at 150 fps) or coarseStride 12
+// (≈80 ms) — pose_runner.h. A single dropped frame there is 80–100 ms from its
+// neighbours, so a fixed 60 ms would mark it invalid, and that is the wrong answer: in a
+// sparsely posed STILL address, holding the previous value across one missing sample is a
+// hold, not a fabrication. So the allowance is
+// max(maxBridgeUs, kBridgeSpacingFactor × the local grid spacing). Mid-swing the grid is
+// dense (≈8 ms) and the 60 ms floor dominates, so a genuinely gated run is still marked.
+// At 1.5 a sample bridges while it is within one-and-a-half spacings of a measurement, so a
+// hole of one or two missing samples still holds and the middle of a hole of three or more
+// is marked — one dropped frame is a hold, a run of them is a fabrication.
+//
+// Consumed by LowerBodyConfig / UpperBodyConfig via the "channel.*" dotted keys.
+namespace channel {
+inline constexpr std::int64_t kMaxBridgeUs        = 60000;   // channel.maxBridgeUs
+inline constexpr double       kBridgeSpacingFactor = 1.5;    // channel.bridgeSpacingFactor
+} // namespace channel
+
 // --- Lower-body frontal-plane metrics (src/Analysis/lower_body_metrics.h) -----
 // leadKneeDrift / hipLineTilt / pelvisSway / pelvisLift, from the COCO BODY hips,
 // knees and ankles (11–16). Consumed by LowerBodyConfig::fromOverrides via
@@ -417,11 +449,27 @@ inline constexpr std::int64_t kAddrWindowUs  = 250000;  // ±window about the Ad
 // few pixels of noise by a few pixels of stance and emit hundreds of percent. A
 // floor is the difference between "we could not measure this" and a confident
 // absurdity; 40 px is well under any usable framing and well over the noise.
+//
+// kMinHipSpanRatio guards the hip LINE, which is a different failure from the
+// denominator above. `lineTiltDeg` divides by the hips' horizontal separation, so as
+// the pelvis turns toward the target the two hips foreshorten into the same image
+// column, dx → 0 and the angle swings to ±90° — a −88° hip tilt just after impact is
+// that, and it is not noise. It is a reading of the camera. Below the ratio the frame
+// has NO hip line and is absent. The SAME RATIO is applied to the hip half of
+// spineSideBend in upper_body_metrics, but that module resolves the line against its
+// OWN address reference frames and its own denominator, so one key does not make the
+// two agree frame by frame — one ratio, two references (see the note there).
+// 0.40 of the address span is roughly 66° out of the image
+// plane (acos 0.4), where a 2 px keypoint σ on a 120 px span is about 2.4° of angle
+// error — the same order as the residual jitter; the error grows as 1/ratio below it
+// and passes 10° by 0.1. The value is sweepable and is not the point; that a floor
+// exists is the point.
 namespace lowerBody {
 inline constexpr double       kConfMin        = 0.30;    // lowerBody.confMin — per-keypoint gate
 inline constexpr int          kAddrMinFrames  = 5;       // lowerBody.addrMinFrames
 inline constexpr std::int64_t kAddrWindowUs   = 250000;  // lowerBody.addrWindowUs
 inline constexpr double       kMinStanceSpanPx = 40.0;   // lowerBody.minStanceSpanPx
+inline constexpr double       kMinHipSpanRatio = 0.40;   // lowerBody.minHipSpanRatio
 } // namespace lowerBody
 
 // --- Upper-body frontal-plane metrics (src/Analysis/upper_body_metrics.h) -----
@@ -438,11 +486,32 @@ inline constexpr double       kMinStanceSpanPx = 40.0;   // lowerBody.minStanceS
 // the lower body. It is smaller (30 px) because the shoulder span is genuinely
 // narrower than the stance in the same framing, so reusing the stance floor would
 // refuse usable swings rather than absurd ones.
+//
+// kMinShoulderSpanRatio is the shoulder line's foreshortening gate, exactly what
+// lowerBody::kMinHipSpanRatio is for the hip line and for the same geometric reason —
+// a shoulder plane of +88° AT THE TOP, which is a GRADED phase sample, is the turn
+// collapsing the span rather than a posture. It gates shoulderPlaneAngle, the shoulder
+// half of spineSideBend, and trailElbowHeight — that last one is a height, not a tilt, but it
+// interpolates the shoulder line's y at the elbow's x and so divides by the same dx,
+// and an unbounded % shoulder width is worse than an angle that saturates at 90°.
+// The hip half of spineSideBend uses lowerBody.minHipSpanRatio.
+//
+// kMinElbowSpanPx is the ELBOW line's gate, and it is an ABSOLUTE floor where the
+// others are ratios — deliberately, because a ratio is INERT on this line. The elbows
+// are at their NARROWEST at address (the arms hang together and separate through the
+// swing), so |dx| / address |dx| is ≈1 at address and ≥1 everywhere else: the gate
+// would never fire, and it would be exactly 1.0 at address, where a 20 px elbow
+// separation is pure keypoint noise and `elbowAlignment` is READ. A ratio needs an
+// address value that represents the line at its widest; this line's does the opposite,
+// so the floor is stated in pixels instead. 25 px is a few keypoint σ (≈2 px each) —
+// below it the tilt error exceeds 10° and the reading is noise.
 namespace upperBody {
-inline constexpr double       kConfMin           = 0.30;    // upperBody.confMin — per-keypoint gate
-inline constexpr int          kAddrMinFrames     = 5;       // upperBody.addrMinFrames
-inline constexpr std::int64_t kAddrWindowUs      = 250000;  // upperBody.addrWindowUs
-inline constexpr double       kMinShoulderSpanPx = 30.0;    // upperBody.minShoulderSpanPx
+inline constexpr double       kConfMin              = 0.30;    // upperBody.confMin — per-keypoint gate
+inline constexpr int          kAddrMinFrames        = 5;       // upperBody.addrMinFrames
+inline constexpr std::int64_t kAddrWindowUs         = 250000;  // upperBody.addrWindowUs
+inline constexpr double       kMinShoulderSpanPx    = 30.0;    // upperBody.minShoulderSpanPx
+inline constexpr double       kMinShoulderSpanRatio = 0.40;    // upperBody.minShoulderSpanRatio
+inline constexpr double       kMinElbowSpanPx       = 25.0;    // upperBody.minElbowSpanPx
 } // namespace upperBody
 
 // --- Axial body rotation (src/Analysis/body_rotation.h) -----------------------

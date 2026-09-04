@@ -28,29 +28,91 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace {
 
-// Linear interpolation of `value` at `pos` over the ascending `tUs` samples. Clamps to the
-// end values outside the range. (Distinct from TimelineLabels::valueAtNearest, which snaps
-// to the nearest sample — window edges want a true interpolated value.)
-double interpAt(const QVariantList &tUs, const QVariantList &value, qint64 pos)
+// The VALID samples of a series, lifted out of the QVariantLists once, with their original
+// indices kept. Every reducer below reads this rather than the raw arrays, which is what makes
+// "an invalid sample is not a measurement" true by construction instead of by five separate
+// `if` statements that could each be forgotten.
+//
+// `src` is what the adjacency test needs: two entries whose original indices differ by more
+// than one have invalid samples BETWEEN them, so an interpolation across that bracket reached
+// over something unmeasured and the summary has to admit it (`partial`).
+struct ValidSamples {
+    std::vector<qint64> t;
+    std::vector<double> v;
+    std::vector<int>    src;       // index into the caller's arrays
+    int size() const { return int(t.size()); }
+};
+
+// Collect them. `valid` is the C4 mask (swing.json `metrics[].valid`): EMPTY means every
+// sample is valid — the state of every series written before the field existed, so the empty
+// case must cost nothing and behave identically to the old code. A mask entry of 0 marks a
+// sample the grid bridged across a gated or absent run.
+//
+// ⚠ THE SHORT-MASK RULE, and it is deliberately the same one measure_sample.cpp's buildPhaseGrid
+// applies: a mask is honoured only when it covers the whole curve (`size >= n`); a SHORTER one is
+// a malformed document rather than a partial statement and is treated as NO MASK AT ALL. Guessing
+// which end it was truncated from would invent validity nobody told us about, and having the chart
+// and the diagnostics grid disagree about a malformed file is worse than either answer. Everything
+// that consults validity in this file — collectValid and measuredAt — goes through haveMask().
+bool haveMask(int n, const QVariantList &valid)
 {
+    return n > 0 && valid.size() >= n;
+}
+
+ValidSamples collectValid(const QVariantList &tUs, const QVariantList &value,
+                          const QVariantList &valid)
+{
+    ValidSamples s;
     const int n = qMin(tUs.size(), value.size());
+    const bool masked = haveMask(n, valid);
+    s.t.reserve(size_t(n)); s.v.reserve(size_t(n)); s.src.reserve(size_t(n));
+    for (int i = 0; i < n; ++i) {
+        if (masked && valid.at(i).toInt() == 0) continue;
+        s.t.push_back(tUs.at(i).toLongLong());
+        s.v.push_back(value.at(i).toDouble());
+        s.src.push_back(i);
+    }
+    return s;
+}
+
+// Linear interpolation at `pos` over the ascending valid samples. Clamps to the end values
+// outside the range. (Distinct from TimelineLabels::valueAtNearest, which snaps to the nearest
+// sample — window edges want a true interpolated value.)
+//
+// `bracketSkipped` reports whether the two samples it read from are non-adjacent in the
+// ORIGINAL series, i.e. whether this edge value came from across a bridged run. A clamped edge
+// (outside the valid extent) never sets it: the invalid samples it was clamped past are inside
+// the window and set `partial` on the window-scan rule instead.
+double interpValid(const ValidSamples &s, qint64 pos, bool *bracketSkipped = nullptr)
+{
+    if (bracketSkipped) *bracketSkipped = false;
+    const int n = s.size();
     if (n == 0) return 0.0;
-    if (pos <= tUs.at(0).toLongLong())     return value.at(0).toDouble();
-    if (pos >= tUs.at(n - 1).toLongLong()) return value.at(n - 1).toDouble();
+    if (pos <= s.t.front()) return s.v.front();
+    if (pos >= s.t.back())  return s.v.back();
 
     int lo = 0, hi = n - 1;
     while (lo < hi) {
         const int mid = (lo + hi) / 2;
-        if (tUs.at(mid).toLongLong() < pos) lo = mid + 1;
-        else                                hi = mid;
+        if (s.t[size_t(mid)] < pos) lo = mid + 1;
+        else                        hi = mid;
     }
-    const qint64 tHi = tUs.at(lo).toLongLong();
-    const qint64 tLo = tUs.at(lo - 1).toLongLong();
-    const double vLo = value.at(lo - 1).toDouble();
-    const double vHi = value.at(lo).toDouble();
+    // ⚠ `pos < t[lo]` matters: the search leaves t[lo-1] < pos <= t[lo], and when pos lands
+    // EXACTLY on a valid sample the value is that sample's, whatever is on the other side of it.
+    // Without this a window edge sitting on the first good sample after a bridged run reported
+    // itself interpolated, and every such card wore a PARTIAL chip it had not earned.
+    if (bracketSkipped)
+        *bracketSkipped = pos < s.t[size_t(lo)]
+                          && (s.src[size_t(lo)] - s.src[size_t(lo - 1)]) > 1;
+
+    const qint64 tHi = s.t[size_t(lo)];
+    const qint64 tLo = s.t[size_t(lo - 1)];
+    const double vLo = s.v[size_t(lo - 1)];
+    const double vHi = s.v[size_t(lo)];
     if (tHi == tLo) return vLo;
     const double f = double(pos - tLo) / double(tHi - tLo);
     return vLo + (vHi - vLo) * f;
@@ -105,16 +167,29 @@ QVariantList ChartMetrics::segments(const QVariantList &phases, qint64 spanUs) c
 QVariantMap ChartMetrics::summary(const QVariantList &tUs, const QVariantList &value,
                                   qint64 startUs, qint64 endUs) const
 {
+    // An empty mask IS "every sample is valid" (C4), so this is not a shortcut around the
+    // masked path — it is the same computation with nothing marked, and one implementation.
+    return summaryMasked(tUs, value, QVariantList{}, startUs, endUs);
+}
+
+QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantList &value,
+                                        const QVariantList &valid,
+                                        qint64 startUs, qint64 endUs) const
+{
     QVariantMap r;
     const int n = qMin(tUs.size(), value.size());
 
     if (startUs > endUs) std::swap(startUs, endUs);
 
-    // Window edges, linearly interpolated.
-    const double start = interpAt(tUs, value, startUs);
-    const double end   = interpAt(tUs, value, endUs);
+    const ValidSamples s = collectValid(tUs, value, valid);
 
-    // Extremes over the interpolated edges plus every sample strictly inside the window.
+    // Window edges, linearly interpolated — between the nearest VALID samples, which is the
+    // only place this reducer is allowed to cross a bridged run at all, and it reports it.
+    bool skipStart = false, skipEnd = false;
+    const double start = interpValid(s, startUs, &skipStart);
+    const double end   = interpValid(s, endUs,   &skipEnd);
+
+    // Extremes over the interpolated edges plus every VALID sample strictly inside the window.
     double mn = qMin(start, end), mx = qMax(start, end);
     qint64 tMin = (start <= end) ? startUs : endUs;
     qint64 tMax = (start >= end) ? startUs : endUs;
@@ -124,17 +199,39 @@ QVariantMap ChartMetrics::summary(const QVariantList &tUs, const QVariantList &v
     double prevV = 0.0;
     qint64 prevT = 0;
 
-    for (int i = 0; i < n; ++i) {
-        const qint64 t = tUs.at(i).toLongLong();
+    for (int i = 0; i < s.size(); ++i) {
+        const qint64 t = s.t[size_t(i)];
         if (t < startUs || t > endUs) continue;
-        const double v = value.at(i).toDouble();
+        const double v = s.v[size_t(i)];
         if (v < mn) { mn = v; tMin = t; }
         if (v > mx) { mx = v; tMax = t; }
+        // "Consecutive" now means consecutive VALID samples, so a slope is never taken with a
+        // bridged value at either end. Where that spans a gap the Δt is the real elapsed time,
+        // which makes the rate SMALLER — the safe direction: a gap must not be able to invent
+        // the steepest slope in the window.
         if (havePrev && t != prevT) {
             const double dv = qAbs(v - prevV) / (double(t - prevT) / 1.0e5);
             if (dv > rate) rate = dv;
         }
         prevV = v; prevT = t; havePrev = true;
+    }
+
+    // ── partial: this window's numbers do not rest on a continuous measurement ──────────────
+    //
+    // Rule 1 — an invalid sample lies inside the window. Whatever the reducers returned, part of
+    // the span they cover was never measured, so a reader comparing this card against a
+    // neighbour is comparing different amounts of evidence.
+    //
+    // Rule 2 — an edge value was interpolated across invalid samples (see interpValid). This is
+    // the case rule 1 misses: a window that sits entirely INSIDE a bridged run contains no valid
+    // sample to scan, and every number in it came from the two measurements bracketing it.
+    bool partial = skipStart || skipEnd;
+    if (!partial && haveMask(n, valid)) {
+        for (int i = 0; i < n; ++i) {
+            if (valid.at(i).toInt() != 0) continue;
+            const qint64 t = tUs.at(i).toLongLong();
+            if (t >= startUs && t <= endUs) { partial = true; break; }
+        }
     }
 
     const bool maxWins = qAbs(mx) >= qAbs(mn);
@@ -150,7 +247,61 @@ QVariantMap ChartMetrics::summary(const QVariantList &tUs, const QVariantList &v
     r.insert(QStringLiteral("delta"),   end - start);
     r.insert(QStringLiteral("rate"),    rate);
     r.insert(QStringLiteral("tPeakUs"), tPeak);
+    r.insert(QStringLiteral("partial"), partial);
     return r;
+}
+
+QVariantMap ChartMetrics::domainFor(const QString &key) const
+{
+    // The DEFAULT-CONSTRUCTED domain is the whole swing (Address..Finish), and using it here
+    // rather than writing 0 and 7 out means the fallback for an unknown key is authored in
+    // exactly one place — metric_descriptor.h — alongside the value every descriptor that does
+    // not override it already carries.
+    const pinpoint::analysis::MetricDescriptor *d = m_catalogue.descriptor(key);
+    const pinpoint::analysis::PhaseDomain dom = d ? d->domain
+                                                  : pinpoint::analysis::PhaseDomain{};
+
+    // Narrowing is measured against the DEFAULT, not against the swing, and per side. See the
+    // header: the axis is the padded swing, so "clip to Address..Finish" is not a no-op — it is a
+    // 250 ms bite out of both ends of every metric the manifest never narrowed. A side the
+    // manifest left alone must not be clipped at all.
+    const pinpoint::analysis::PhaseDomain whole{};
+    const bool firstNarrowed = dom.first != whole.first;
+    const bool lastNarrowed  = dom.last  != whole.last;
+
+    return QVariantMap{ { QStringLiteral("firstPhase"),    int(dom.first) },
+                        { QStringLiteral("lastPhase"),     int(dom.last)  },
+                        { QStringLiteral("firstNarrowed"), firstNarrowed  },
+                        { QStringLiteral("lastNarrowed"),  lastNarrowed   },
+                        { QStringLiteral("narrowed"),      firstNarrowed || lastNarrowed } };
+}
+
+bool ChartMetrics::measuredAt(const QVariantList &tUs, const QVariantList &valid,
+                             qint64 us, qint64 fromUs, qint64 toUs) const
+{
+    // Outside the domain first: no amount of validity makes a reading of a foreshortened body
+    // line mean something, so the domain test does not depend on there being samples at all.
+    if (toUs > fromUs && (us < fromUs || us > toUs)) return false;
+
+    // ONE short-mask rule for the whole file — see haveMask(). `n` is the CURVE's length, so a
+    // mask shorter than it is discarded wholesale rather than bounding the search: bounding it at
+    // qMin(sizes) silently answered a different question than collectValid did about the same
+    // series, which is how two views of one curve start disagreeing.
+    const int n = tUs.size();
+    if (!haveMask(n, valid)) return true;          // nothing marked ⇒ every sample is a measurement
+
+    // Nearest sample. Linear, because the ONE remaining caller asks this once per phase dot
+    // (≤10 a series) at data-change time — every per-frame caller answers it in JS off an index
+    // instead (PpChartPlot._measured), since marshalling a whole series per frame is not free.
+    int    best = -1;
+    qint64 bestD = std::numeric_limits<qint64>::max();
+    for (int i = 0; i < n; ++i) {
+        const qint64 d = qAbs(tUs.at(i).toLongLong() - us);
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    // No sample at all is not the same as an invalid one: there is nothing here to call bridged,
+    // and the caller's own "is there a curve" test already gated it.
+    return best < 0 || valid.at(best).toInt() != 0;
 }
 
 QVariantList ChartMetrics::niceTicks(double lo, double hi, int maxTicks) const
@@ -220,7 +371,15 @@ QString ChartMetrics::bandAtNearest(const QVariantList &phaseSamples, qint64 us)
         const qint64 d = qAbs(m.value(QStringLiteral("t_us")).toLongLong() - us);
         if (d < bestD) { bestD = d; best = m.value(QStringLiteral("band")).toString(); }
     }
-    return best.isEmpty() ? QStringLiteral("good") : best;
+    // ⚠ A DISTANCE TOLERANCE, and no default. "Nearest" over a whole swing means the Address
+    // sample is 900 ms away and still nearest, so an unconditional nearest-band answer tinted a
+    // card by a verdict passed at a completely different instant — and an empty list fell through
+    // to a bare "good", which is a pass grade invented from no data at all. Both cases now return
+    // "" and the caller tints neutrally. kBandNearUs is one generous frame (20 ms at 50 fps): a
+    // phaseSample IS stamped at an instant, so anything further away is a different reading.
+    static constexpr qint64 kBandNearUs = 20000;
+    if (bestD > kBandNearUs) return QString();
+    return best;
 }
 
 QString ChartMetrics::shortLabel(const QString &key) const

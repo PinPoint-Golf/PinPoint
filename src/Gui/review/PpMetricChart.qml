@@ -284,11 +284,133 @@ Item {
             if (s && s.t_us && s.t_us.length > 1 && s.value && s.value.length === s.t_us.length) {
                 var d = Object.assign({}, s)
                 d.color = root._color(i)
+                // The metric's PHASE DOMAIN as instants — decorated on here rather than resolved
+                // in the plot and again in the summary, so both surfaces clip the same curve at
+                // the same two times. (`valid` rides along from the bridge via Object.assign.)
+                var dom = root._domainWindow(s.key, s)
+                d.validFromUs = dom.fromUs
+                d.validToUs   = dom.toUs
                 out.push(d)
             }
         }
         return out
     }
+
+    // ── Phase domains: where a metric's geometry means something ───────────────────
+    //
+    // ChartMetrics.domainFor gives the manifest's { firstPhase, lastPhase } as Phase ENUM values;
+    // only the swing knows when its own P1 and P7 happened, so the ints are resolved here against
+    // root.phases. Past impact a frontal-plane pelvis reading is measuring rotation rather than
+    // translation, and the design's answer is not to hide the curve but to stop claiming it:
+    // outside [fromUs, toUs] the trace is dashed, carries no phase dots, and contributes nothing
+    // to a summary card (design §5.1).
+    //
+    // ⚠ A SIDE THE MANIFEST DID NOT NARROW IS NOT CLIPPED AT ALL. The default domain is
+    // Address..Finish, but this chart's AXIS is the PADDED swing (Segmentation swingStart/End
+    // ± boundPadUs = 250 ms), so Address is 250 ms inside the axis start and Finish 250 ms inside
+    // its end. Clipping to the default would therefore dash a quarter-second off both ends of
+    // EVERY whole-swing metric — headSway, xFactor, clubheadSpeed — and move its Full-window
+    // PEAK/Δ/RATE on every swing, breaking the property this whole phase rests on: nothing changes
+    // where the design does not fire. It would also empty any legitimately pre-address window.
+    // So each side is clipped only when domainFor reports that side `firstNarrowed`/`lastNarrowed`.
+    //
+    // ⚠ AND A MISSING LANDMARK CLIPS NOTHING EITHER, per side. A swing whose ladder never resolved
+    // the domain's last phase falls back to THIS SERIES' last sample time, which by construction
+    // excludes not one sample. The series' own extent, not the axis: the axis is the FIRST series'
+    // extent and would have dimmed the leading samples of any series that starts earlier. Absent
+    // from the ladder is a reason to claim LESS about where the domain ends, not to hide a curve.
+    function _phaseUs(phase, fallback) {
+        for (var i = 0; i < root.phases.length; ++i)
+            if (root.phases[i].phase === phase) return root.phases[i].t_us
+        return fallback
+    }
+    function _domainWindow(key, s) {
+        var d = cm.domainFor(key)
+        var t = s.t_us
+        var first = t[0], last = t[t.length - 1]
+        return { fromUs: d.firstNarrowed ? root._phaseUs(d.firstPhase, first) : first,
+                 toUs:   d.lastNarrowed  ? root._phaseUs(d.lastPhase,  last)  : last }
+    }
+
+    // A summary window CLAMPED to one series' domain. The reducers must search only inside the
+    // domain (design §5.1), so every window handed to ChartMetrics goes through this pair.
+    //
+    // ORDERED on purpose: the end is floored at the start, so a window entirely past the domain
+    // (say P7→P10 on a P1→P7 metric) collapses to a point at the domain's end instead of
+    // inverting — summaryMasked would swap an inverted pair back into a window spanning the gap
+    // between them, i.e. into exactly the out-of-domain region the clamp exists to remove.
+    // ⚠ The same two lines live in PpChartSummary.qml, which clamps per CARD; they must agree.
+    function _domWinStart(s, winStart) {
+        return Math.max(winStart, s.validFromUs !== undefined ? s.validFromUs : winStart)
+    }
+    function _domWinEnd(s, winStart, winEnd) {
+        return Math.max(root._domWinStart(s, winStart),
+                        Math.min(winEnd, s.validToUs !== undefined ? s.validToUs : winEnd))
+    }
+    // A window the clamp EMPTIED: the reader picked a span (IMP→P8, say) that lies wholly outside
+    // this metric's domain. Every reduction over it would be four confident numbers taken at one
+    // instant, so the readouts print "—" instead. Guarded on a non-empty selection so a chart that
+    // has not sized its window yet is not reported as out of domain.
+    function _domWinEmpty(s, winStart, winEnd) {
+        return winEnd > winStart && root._domWinEnd(s, winStart, winEnd) <= root._domWinStart(s, winStart)
+    }
+
+    // The split-mode gutter's "@end" readout — the same domain-clamped, mask-aware summary the
+    // cards use, and the same "—" when the clamp emptied the window.
+    //
+    // BARE: PpChartPlot's split gutter prints unitLabel directly above this, so spelling it again
+    // put the unit twice in one 40px column. Unclamped and unmasked it printed the FINISH value of
+    // a metric that stops meaning anything at impact, in the gutter, as the facet's headline.
+    function _facetEndText(s) {
+        if (root._domWinEmpty(s, root.viewStartUs, root.viewEndUs)) return "@end —"
+        return "@end " + cm.formatBare(
+            cm.summaryMasked(s.t_us, s.value, s.valid || [],
+                             root._domWinStart(s, root.viewStartUs),
+                             root._domWinEnd(s, root.viewStartUs, root.viewEndUs)).end, s.unit)
+    }
+
+    // Was this series MEASURED at `t`, or is the value there bridged / outside the domain? Same
+    // predicate PpChartPlot dashes the stroke and drops the phase dot on, so the readouts and the
+    // curve cannot say different things.
+    //
+    // ⚠ ANSWERED IN JS, NOT VIA ChartMetrics.measuredAt, and that is a performance requirement
+    // rather than a preference: every call into C++ marshals the WHOLE series across the QML
+    // boundary, and both callers here re-evaluate per frame — the hover tooltip on every cursor
+    // move, the legend chip on every replay frame at 240 fps. With twenty visible series of a few
+    // hundred samples that is millions of QVariant conversions a second. The C++ form stays as the
+    // reference implementation and serves the one binding that changes only with the data.
+    //
+    // The short-mask rule is the C++ one (chart_metrics.h): a mask that does not cover the curve
+    // is discarded wholesale, not applied to the part it does cover.
+    function _nearestIndex(s, t) {
+        var tt = s.t_us
+        if (!tt || tt.length === 0) return -1
+        var best = -1, bd = Infinity
+        for (var i = 0; i < tt.length; ++i) {
+            var d = Math.abs(tt[i] - t)
+            if (d < bd) { bd = d; best = i }
+        }
+        return best
+    }
+    function _measuredAt(s, t) {
+        if (s.validFromUs !== undefined && s.validToUs !== undefined
+            && s.validToUs > s.validFromUs && (t < s.validFromUs || t > s.validToUs))
+            return false
+        if (!s.valid || s.valid.length < (s.t_us ? s.t_us.length : 0)) return true
+        var i = root._nearestIndex(s, t)
+        return i < 0 || s.valid[i] !== 0
+    }
+    // …and the value there as TEXT, or "—" where there was no measurement. One helper for the
+    // hover tooltip and the legend readout, both of which print a number with a unit beside it
+    // and so both make the same claim. Printing the bridged number is the confident absurdity
+    // this whole design exists to stop; a blank or a "0" would each read as a measurement
+    // instead of as its absence.
+    function _valueTextAt(s, t) {
+        return root._measuredAt(s, t)
+             ? cm.formatValue(labels.valueAtNearest(s.t_us, s.value, t), s.unit)
+             : "—"
+    }
+
     // What the LEGEND lists — the preset's metrics, not the swing's. Listing every plottable
     // series here put the whole wall of metrics back on screen one row further down, which is
     // exactly what the combo exists to stop; the chips are part of the same crowding problem as
@@ -742,13 +864,9 @@ Item {
                         gutterLeft:    root._gutterLeft
                         padR:          root._padR
                         facetName:     facetSeries ? root._name(facetSeries) : ""
-                        // Bare: PpChartPlot's split gutter prints unitLabel directly above this,
-                        // so spelling it again here put the unit twice in one 40px column.
-                        facetEndText:  facetSeries
-                            ? "@end " + cm.formatBare(cm.summary(facetSeries.t_us, facetSeries.value,
-                                                             root.viewStartUs, root.viewEndUs).end,
-                                                  facetSeries.unit)
-                            : ""
+                        // Domain-clamped, mask-aware, and "—" on an emptied window — see
+                        // root._facetEndText, which states why for all three.
+                        facetEndText:  facetSeries ? root._facetEndText(facetSeries) : ""
 
                         onHoverMoved: (t) => root._cursorUs =
                             Math.max(root.viewStartUs, Math.min(root.viewEndUs, t))
@@ -808,9 +926,9 @@ Item {
                                 color: Theme.colorText2
                             }
                             Text {
-                                text: cm.formatValue(labels.valueAtNearest(trow.modelData.t_us,
-                                                                      trow.modelData.value, root._cursorUs),
-                                                trow.modelData.unit)
+                                // "—" where the nearest sample was bridged or lies outside the
+                                // metric's domain — see root._valueTextAt.
+                                text: root._valueTextAt(trow.modelData, root._cursorUs)
                                 font.family: Theme.fontData; font.pixelSize: Theme.fontSzLabel
                                 font.weight: Font.Medium
                                 color: Theme.colorText
@@ -853,8 +971,19 @@ Item {
                         color: Theme.colorText2
                     }
                     Text {
-                        text: cm.formatValue(chip.val, chip.modelData.unit)
-                              + "  Δ" + cm.formatValue(chip.val - root._addrValue(chip.modelData), chip.modelData.unit)
+                        id: chipVal
+                        // Same rule as the hover tooltip: this chip prints a number with a unit
+                        // beside it at the playhead, so it makes the same claim and has to be
+                        // able to withdraw it. The Δ-from-address goes with it — a difference
+                        // against an unmeasured reading is not a smaller claim, it is the same
+                        // one arithmetically disguised.
+                        readonly property bool measured:
+                            root._measuredAt(chip.modelData, root._readoutUs)
+                        text: chipVal.measured
+                              ? cm.formatValue(chip.val, chip.modelData.unit)
+                                + "  Δ" + cm.formatValue(chip.val - root._addrValue(chip.modelData),
+                                                         chip.modelData.unit)
+                              : "—"
                         anchors.verticalCenter: parent.verticalCenter
                         font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                         color: Theme.colorText3

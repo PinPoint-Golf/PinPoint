@@ -17,13 +17,18 @@
  */
 
 // PpChartSummary — the per-window summary cards row: one card per series, each fed by
-// ChartMetrics.summary(series.t_us, series.value, startUs, endUs). A card shows @impact /
-// peak / Δ-segment / peak-rate over the active window, with the @impact value tinted by the
-// band of the swing state at impact. @impact is the value at the impact landmark (read from
-// the whole series, a fixed reference more useful to compare against PEAK than the window
-// edge); peak/Δ/rate stay window-scoped, so selecting TOP→IMP shows the downswing's numbers.
-// Recomputes live as the segment chips / brush move the window. Pure binding; all stats come
-// from ChartMetrics (value-at-impact via TimelineLabels.valueAtNearest).
+// ChartMetrics.summaryMasked(series.t_us, series.value, series.valid, winStart, winEnd), where
+// the window is the active one CLAMPED to the metric's phase domain. A card shows @impact /
+// peak / Δ-segment / peak-rate, with the @impact value tinted by the band of the swing state at
+// impact. @impact is the value at the impact landmark (read from the whole series, a fixed
+// reference more useful to compare against PEAK than the window edge); peak/Δ/rate stay
+// window-scoped, so selecting TOP→IMP shows the downswing's numbers. Recomputes live as the
+// segment chips / brush move the window. Pure binding; all stats come from ChartMetrics.
+//
+// Nothing here shows a number it cannot stand behind (design metric_presentation_honesty.md §5.1):
+// a bridged sample is excluded from every reduction, a window the domain clamp emptied prints "—"
+// in the three window-scoped tiles, @impact prints "—" where it was not measured at impact, and a
+// window with any unmeasured part in it wears a PARTIAL chip.
 
 pragma ComponentBehavior: Bound
 
@@ -35,8 +40,13 @@ import PinPointStudio
 ColumnLayout {
     id: root
 
-    // series: [{ key, label, unit, t_us, value, phaseSamples, color, sigma? }]
-    // `sigma` is OPTIONAL and its absence is meaningful — see the chip below.
+    // series: [{ key, label, unit, t_us, value, phaseSamples, color,
+    //            sigma?, valid?, validFromUs?, validToUs? }]
+    // `sigma` is OPTIONAL and its absence is meaningful — see the chip below. So are the last
+    // three (design metric_presentation_honesty.md §5.1): `valid` is the per-sample validity mask
+    // (0 = bridged across a gated or absent run), and validFromUs/validToUs are the metric's phase
+    // domain resolved to instants by the host. Absent ⇒ nothing is masked and nothing is clamped,
+    // which is every series that predates the field.
     property var    series:      []
     property real   startUs:     0
     property real   endUs:       0
@@ -67,10 +77,49 @@ ColumnLayout {
     function _unit(unit) {
         return cm.shortUnit((unit === undefined || unit === null || unit === "") ? "°" : unit)
     }
+    // "" ⇒ NO VERDICT, tinted like any other unlabelled value. This used to fall through to
+    // colorGood, and combined with bandAtNearest's old "good" default that meant a series with no
+    // phaseSample anywhere near impact showed its @impact reading in PASS GREEN — a grade invented
+    // from an empty list. A missing verdict is not a good one.
     function _bandColor(b) {
         return b === "warn"      ? Theme.colorWarn
              : b === "attention" ? Theme.colorAttention
-             :                     Theme.colorGood
+             : b === "good"      ? Theme.colorGood
+             :                     Theme.colorText
+    }
+    // The measured-at-an-instant test, in JS for the reason chart_metrics.h gives: cm.measuredAt
+    // marshals the whole series per call, and these bindings re-evaluate as the window moves.
+    // Same rule, same short-mask discipline (a mask that does not cover the curve is discarded).
+    function _measuredAt(s, t) {
+        if (s.validFromUs !== undefined && s.validToUs !== undefined
+            && s.validToUs > s.validFromUs && (t < s.validFromUs || t > s.validToUs))
+            return false
+        var tt = s.t_us
+        if (!tt || tt.length === 0) return true
+        if (!s.valid || s.valid.length < tt.length) return true
+        var best = -1, bd = Infinity
+        for (var i = 0; i < tt.length; ++i) {
+            var d = Math.abs(tt[i] - t)
+            if (d < bd) { bd = d; best = i }
+        }
+        return best < 0 || s.valid[best] !== 0
+    }
+
+    // The card's window: the active window CLAMPED to this metric's phase domain, because the
+    // reducers must search only where the geometry means something (design §5.1). A pelvis-sway
+    // peak found after impact is a reading of the pelvis TURNING, not of it sliding, and it was
+    // beating the real peak on the corpus.
+    //
+    // ORDERED: the end is floored at the start, so a window entirely past the domain collapses to
+    // a point at the domain's end rather than inverting — summaryMasked swaps an inverted pair,
+    // which would turn the clamp into a window over exactly the region it was removing.
+    // ⚠ The same two lines live in PpMetricChart.qml (the split-mode @end readout); keep them equal.
+    function _winStart(s) {
+        return Math.max(root.startUs, s.validFromUs !== undefined ? s.validFromUs : root.startUs)
+    }
+    function _winEnd(s) {
+        return Math.max(root._winStart(s),
+                        Math.min(root.endUs, s.validToUs !== undefined ? s.validToUs : root.endUs))
     }
 
     // Header — "SUMMARY · <segment>" + a hairline rule.
@@ -100,15 +149,45 @@ ColumnLayout {
             delegate: Rectangle {
                 id: card
                 required property var modelData
-                readonly property var    st:  cm.summary(card.modelData.t_us, card.modelData.value,
-                                                         root.startUs, root.endUs)
+                readonly property real   winStartUs: root._winStart(card.modelData)
+                readonly property real   winEndUs:   root._winEnd(card.modelData)
+                readonly property var    st:  cm.summaryMasked(card.modelData.t_us,
+                                                         card.modelData.value,
+                                                         card.modelData.valid || [],
+                                                         card.winStartUs, card.winEndUs)
+                // THE DOMAIN CLAMP EMPTIED THE WINDOW: the reader picked a span (IMP→P8 on a
+                // P1–P7 metric, say) lying wholly outside where this metric means anything. The
+                // three window-scoped tiles then print "—" rather than a delta of 0.0, a rate of
+                // 0 and a peak — all four of which are reductions over a single instant and read
+                // as measurements of a still, well-behaved curve. Guarded on a non-empty
+                // selection so a chart that has not sized its window yet is not called empty.
+                readonly property bool   collapsed: card.winEndUs <= card.winStartUs
+                                                    && root.endUs > root.startUs
+                // The card's numbers do not rest on a continuous measurement — summaryMasked says
+                // so (invalid samples inside the window, or an edge read from across them), or the
+                // window was emptied above and there is nothing behind any of them.
+                readonly property bool   partial: card.st.partial === true || card.collapsed
+
                 // Value at the impact landmark — a fixed anatomical reference, so it reads the
                 // whole series (not the view window); the more useful thing to compare against
                 // PEAK. Falls back to the window @end when no impact is known.
+                //
+                // ⚠ AND IT IS GATED ON HAVING BEEN MEASURED THERE. valueAtNearest snaps to the
+                // nearest sample unconditionally, so a series whose geometry was gated across
+                // impact — which is exactly what design §5.1 arranges — printed the bridged value
+                // as its headline number, in the band colour, as the one figure on the card a
+                // reader trusts most. `impMeasured` false ⇒ the tile prints "—" in a neutral
+                // colour. It is NOT gated on the window: this tile is deliberately not
+                // window-scoped, and an emptied window says nothing about the impact landmark.
+                readonly property bool   impMeasured: root.impactUs > 0
+                                                      && root._measuredAt(card.modelData, root.impactUs)
                 readonly property real   impVal: root.impactUs > 0
                                                  ? labels.valueAtNearest(card.modelData.t_us,
                                                        card.modelData.value, root.impactUs)
                                                  : card.st.end
+                // "" = NO VERDICT, and it must stay neutral rather than green: bandAtNearest now
+                // refuses to answer when the nearest phaseSample is a frame or more away, or when
+                // there are none, instead of defaulting to "good" off nothing at all.
                 readonly property string bnd: cm.bandAtNearest(card.modelData.phaseSamples,
                                                   root.impactUs > 0 ? root.impactUs : root.endUs)
                 readonly property string nm:  cm.shortLabel(card.modelData.key)
@@ -179,49 +258,127 @@ ColumnLayout {
                         }
                     }
 
-                    GridLayout {                      // 2×2 metric grid
+                    // PARTIAL — part of this window was never measured. Styled exactly like the
+                    // σ chip above (fontData, micro, colorText3) because it belongs to the same
+                    // track: both qualify the numbers below without changing one of them. It is a
+                    // caveat, not an error, so it is NOT warn-coloured — the values are the best
+                    // the valid samples support, and that is what it says.
+                    //
+                    // ⚠ ITS OWN LINE, not the header row. That row is name + unit + ±σ, and only
+                    // the NAME can give up width (it is the fillWidth item); adding a fourth token
+                    // meant three fixed-width chips competing for what was left of a 150px card and
+                    // overlapping each other on the narrow ones. A caveat that is illegible is
+                    // worse than absent, since the reader still sees ink and mistrusts the number.
+                    Text {
+                        visible: card.partial
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        text: qsTr("PARTIAL")
+                        font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
+                        font.letterSpacing: Theme.trackingData
+                        color: Theme.colorText3
+                        HoverHandler { id: partialHover }
+                        ToolTip.visible: partialHover.hovered
+                        ToolTip.delay: 400
+                        ToolTip.text: qsTr("Part of this window had no valid measurement.")
+                    }
+
+                    // ── THE 2×2 VALUE GRID, AND WHY EVERY CELL IS A LAYOUT ───────────────────
+                    //
+                    // These four cells were plain `Column`s: a Column takes its width FROM its
+                    // widest child, so `Layout.fillWidth` on it granted the cell room the Texts
+                    // inside never received, and a Text with no width and no elide simply drew
+                    // past the cell into its neighbour. In a three-across row on a narrow panel
+                    // the PEAK value overprinted Δ SEGMENT's label.
+                    //
+                    // ColumnLayout + Layout.fillWidth + elide is the fix: the cell's width now
+                    // reaches the Texts, so they truncate at their own boundary instead of over
+                    // the next one. Nothing about the look changes at a width where it already
+                    // fitted — an elide is inert until it is needed.
+                    GridLayout {
                         Layout.fillWidth: true
                         columns: 2
                         columnSpacing: Theme.sp(12); rowSpacing: Theme.sp(9)
 
                         // @ impact — the landmark value, tinted by band at impact.
-                        Column {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Text { text: qsTr("@ IMPACT"); font.family: Theme.fontData
+                            spacing: 0
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   text: qsTr("@ IMPACT"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
-                            Text { text: cm.formatBare(card.impVal, card.modelData.unit); font.family: Theme.fontData
-                                   font.pixelSize: Theme.fontSzData; color: root._bandColor(card.bnd) }
+                            // "—" where impact was not measured on this series, in the neutral
+                            // colour: a band tint on a withheld reading would still claim a verdict.
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   text: card.impMeasured
+                                         ? cm.formatBare(card.impVal, card.modelData.unit) : "—"
+                                   font.family: Theme.fontData
+                                   font.pixelSize: Theme.fontSzData
+                                   color: card.impMeasured ? root._bandColor(card.bnd)
+                                                           : Theme.colorText3 }
                         }
-                        Column {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Text { text: qsTr("PEAK"); font.family: Theme.fontData
+                            spacing: 0
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   text: qsTr("PEAK"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
-                            Text { text: cm.formatBare(card.st.peak, card.modelData.unit); font.family: Theme.fontData
-                                   font.pixelSize: Theme.fontSzData; color: Theme.colorText }
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   text: card.collapsed ? "—"
+                                         : cm.formatBare(card.st.peak, card.modelData.unit)
+                                   font.family: Theme.fontData
+                                   font.pixelSize: Theme.fontSzData
+                                   color: card.collapsed ? Theme.colorText3 : Theme.colorText }
                         }
-                        Column {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Text { text: qsTr("Δ SEGMENT"); font.family: Theme.fontData
+                            spacing: 0
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   text: qsTr("Δ SEGMENT"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
-                            Text { text: cm.formatBare(card.st.delta, card.modelData.unit); font.family: Theme.fontData
-                                   font.pixelSize: Theme.fontSzData; color: Theme.colorText }
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   text: card.collapsed ? "—"
+                                         : cm.formatBare(card.st.delta, card.modelData.unit)
+                                   font.family: Theme.fontData
+                                   font.pixelSize: Theme.fontSzData
+                                   color: card.collapsed ? Theme.colorText3 : Theme.colorText }
                         }
-                        Column {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Text { text: qsTr("PK RATE"); font.family: Theme.fontData
+                            spacing: 0
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   text: qsTr("PK RATE"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
-                            Row {
+                            RowLayout {
+                                Layout.fillWidth: true
                                 spacing: Theme.sp(3)
+                                // Both halves take AlignBaseline — a RowLayout aligns to a shared
+                                // baseline only for the items that ask, and the plain `Row` this
+                                // replaced sat the unit on the value's baseline by anchor (which a
+                                // Layout forbids on its children).
+                                // The VALUE elides as well, and needs to: once the unit token
+                                // below has collapsed to its ellipsis there is nothing left to give
+                                // way, and an un-elided number then drew straight over it.
                                 Text { id: rateVal
-                                       text: Math.round(card.st.rate); font.family: Theme.fontData
-                                       font.pixelSize: Theme.fontSzData; color: Theme.colorText }
+                                       Layout.alignment: Qt.AlignBaseline
+                                       Layout.fillWidth: true
+                                       elide: Text.ElideRight
+                                       text: card.collapsed ? "—" : Math.round(card.st.rate)
+                                       font.family: Theme.fontData
+                                       font.pixelSize: Theme.fontSzData
+                                       color: card.collapsed ? Theme.colorText3 : Theme.colorText }
                                 // The ONE value whose unit differs from the card's — a rate, not a
-                                // reading — so it says so, and is the only one that may.
-                                Text { anchors.baseline: rateVal.baseline
+                                // reading — so it says so, and is the only one that may. It is also
+                                // the half that gives way when the cell is too narrow: the NUMBER is
+                                // the reading, and eliding "°/100ms" to "°/1…" costs less than
+                                // eliding the digits.
+                                Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                       Layout.alignment: Qt.AlignBaseline
+                                       visible: !card.collapsed
                                        text: root._unit(card.modelData.unit) + qsTr("/100ms")
                                        font.family: Theme.fontData
                                        font.pixelSize: Theme.fontSzMicro; color: Theme.colorText3 }

@@ -34,7 +34,18 @@ Item {
     id: root
 
     // ── Data (decorated by the parent) ────────────────────────────────────────────
-    // series: [{ key, label, unit, t_us:[…], value:[…], phaseSamples:[…], color }]
+    // series: [{ key, label, unit, t_us:[…], value:[…], phaseSamples:[…], color,
+    //            valid?:[0|1…], validFromUs?, validToUs? }]
+    //
+    // The last three are the HONESTY triple (design metric_presentation_honesty.md §5.1) and all
+    // three are OPTIONAL, because absence is the common case and must cost nothing:
+    //   `valid`       — swing.json metrics[].valid, parallel to t_us; 0 = a sample the grid
+    //                   BRIDGED across a gated or absent run. Absent/empty ⇒ every sample valid.
+    //   `validFromUs` / `validToUs` — the metric's phase domain resolved to INSTANTS by the host
+    //                   against this swing's own ladder (PpMetricChart._domainWindow). Absent, or
+    //                   a degenerate pair, ⇒ no domain clipping. NOT to be confused with
+    //                   domStartUs/domEndUs below, which are the VISIBLE TIME WINDOW: one is
+    //                   "where does this metric mean anything", the other "what is on screen".
     property var  series:  []
     property var  phases:  []            // [{ phase, t_us, conf }]
     property real valueLo: 0
@@ -103,6 +114,94 @@ Item {
         return b === "warn"      ? Theme.colorWarn
              : b === "attention" ? Theme.colorAttention
              :                     Theme.colorGood
+    }
+
+    // ── Measured vs bridged: how a curve says which of it is a measurement ────────
+    //
+    // A sample is drawn SOLID only when it was measured: inside the metric's phase domain
+    // (validFromUs..validToUs) AND not marked 0 in `valid`. Everything else — the invalid runs
+    // and the whole out-of-domain region — is drawn in the SAME colour at low opacity with a
+    // dashed stroke. A gap would be honest too, but a dashed bridge is honest AND keeps the eye
+    // on where the curve resumes (design §5.1, the Chart bullet).
+    //
+    // ⚠ THIS IS NOT A FILTER AND NOT A SMOOTHER. Every persisted sample is on screen at its
+    // persisted value; only the stroke changes. Display-only smoothing is forbidden outright
+    // (design §4 principle 1) — a chart that shows one thing while the card computes another is
+    // where dishonesty starts, and it hides the measurement problem from whoever must fix it.
+    function _hasDomain(s) {
+        return s.validFromUs !== undefined && s.validToUs !== undefined
+               && s.validToUs > s.validFromUs
+    }
+    // The INDEX form of the predicate — three comparisons, no marshalling. ChartMetrics.measuredAt
+    // is the same rule at an arbitrary instant and stays the reference implementation, but every
+    // call into it copies the whole series across the QML boundary, so it is reserved for bindings
+    // that change only with the DATA (the phase dots). Anything that re-evaluates with the cursor,
+    // the playhead or the view window answers it here instead.
+    //
+    // Short-mask rule, shared with the C++ (chart_metrics.h) and with measure_sample.cpp: a `valid`
+    // list that does not cover the curve is a malformed document and is discarded WHOLESALE, not
+    // applied to the prefix it covers — two views of one curve must not disagree about it.
+    function _measured(s, i) {
+        if (root._hasDomain(s) && (s.t_us[i] < s.validFromUs || s.t_us[i] > s.validToUs))
+            return false
+        if (!s.valid || s.valid.length < s.t_us.length) return true
+        return s.valid[i] !== 0
+    }
+    // Nearest sample index to `t`, or -1 on an empty curve — what the per-frame callers need so
+    // they can use the index form above.
+    function _nearestIndex(s, t) {
+        var tt = s.t_us
+        if (!tt || tt.length === 0) return -1
+        var best = -1, bd = Infinity
+        for (var i = 0; i < tt.length; ++i) {
+            var d = Math.abs(tt[i] - t)
+            if (d < bd) { bd = d; best = i }
+        }
+        return best
+    }
+    function _measuredAtT(s, t) {
+        var i = root._nearestIndex(s, t)
+        return i < 0 || root._measured(s, i)
+    }
+
+    // Each series split into RUNS of one drawn state: [{ color, dashed, t:[…], v:[…] }] in time
+    // order. Index ranges, not screen points, so a resize or a Y-range change re-runs only the
+    // cheap coordinate map in the PathPolyline binding below and not the splitting.
+    //
+    // A DASHED run reaches one sample BACKWARD and one sample FORWARD into its solid neighbours.
+    // That does two things: it closes the seam (consecutive runs share an endpoint, so the curve
+    // is continuous), and it means the two segments that TOUCH an unmeasured sample are
+    // themselves dashed — a segment with one unmeasured end is not a measured segment. Solid runs
+    // therefore stay strictly inside their own samples, and a solid run left with fewer than two
+    // samples draws nothing: its neighbours already cover those segments.
+    readonly property var _traceRuns: {
+        var out = []
+        for (var k = 0; k < (root.series ? root.series.length : 0); ++k) {
+            var s = root.series[k]
+            if (!s || !s.t_us || !s.value || s.t_us.length < 2) continue
+
+            // Per-sample drawn state first, so the run walk below reads a plain boolean array.
+            var solid = []
+            for (var i = 0; i < s.t_us.length; ++i) solid.push(root._measured(s, i))
+
+            var i0 = 0
+            while (i0 < solid.length) {
+                var i1 = i0
+                while (i1 + 1 < solid.length && solid[i1 + 1] === solid[i0]) ++i1
+                var a = i0, b = i1
+                if (!solid[i0]) {                  // dashed: reach into the solid neighbours
+                    if (a > 0) --a
+                    if (b + 1 < solid.length) ++b
+                }
+                if (b > a) {
+                    var t = [], v = []
+                    for (var j = a; j <= b; ++j) { t.push(s.t_us[j]); v.push(s.value[j]) }
+                    out.push({ color: s.color, dashed: !solid[i0], t: t, v: v })
+                }
+                i0 = i1 + 1
+            }
+        }
+        return out
     }
 
     // ── Y grid + tick labels (absolute coords; gutter holds the labels) ────────────
@@ -219,24 +318,41 @@ Item {
         width: root._plotW; height: root._plotH
         clip: true
 
-        // Traces — one Shape per series.
+        // Traces — one Shape per RUN (see _traceRuns): a series is one run when everything in it
+        // was measured, which is every series that predates the validity mask.
         Repeater {
-            model: root.series
+            model: root._traceRuns
             delegate: Shape {
                 id: curve
                 required property var modelData
                 anchors.fill: parent
-                preferredRendererType: Shape.CurveRenderer
+                // ⚠ RENDERER PER RUN, deliberately. The curve renderer is what gives the solid
+                // traces their quality, but dash patterns are a stroking feature of the geometry
+                // renderer; asking the curve renderer for a DashLine gets a solid line and the
+                // distinction the design rests on disappears silently. Solid runs keep the good
+                // renderer; the dimmed dashed runs take the plainer one, which is invisible at
+                // 0.35 opacity on a 2px line.
+                preferredRendererType: curve.modelData.dashed ? Shape.GeometryRenderer
+                                                              : Shape.CurveRenderer
+                // Same colour, low opacity: the reader is meant to follow the curve across a
+                // bridged run, not lose it. A different HUE would read as a different series.
+                opacity: curve.modelData.dashed ? 0.35 : 1.0
                 ShapePath {
                     strokeColor: curve.modelData.color
                     strokeWidth: Theme.sp(2)
                     fillColor:   "transparent"
                     joinStyle:   ShapePath.RoundJoin
                     capStyle:    ShapePath.RoundCap
+                    strokeStyle: curve.modelData.dashed ? ShapePath.DashLine
+                                                        : ShapePath.SolidLine
+                    // Dash lengths are MULTIPLES OF strokeWidth, so this is ~8px on / ~6px off
+                    // at the 2px stroke above — long enough to read as deliberate at a glance,
+                    // short enough that a 40ms bridged run still shows two dashes.
+                    dashPattern: [4, 3]
                     PathPolyline {
-                        path: (curve.modelData.t_us || []).map(function (t, i) {
+                        path: (curve.modelData.t || []).map(function (t, i) {
                             return Qt.point(root.xForT(t),
-                                            root.yForV(curve.modelData.value[i]))
+                                            root.yForV(curve.modelData.v[i]))
                         })
                     }
                 }
@@ -254,7 +370,22 @@ Item {
                     id: dot
                     required property var modelData
                     readonly property real r: Theme.sp(3.2)
-                    visible: root._inDom(dot.modelData.t_us)
+                    // NO DOT ON AN UNMEASURED SAMPLE, and none outside the metric's domain. The
+                    // producers stopped emitting those phaseSamples (design §5.1), but a swing
+                    // analysed before that still has them persisted, and a band-coloured dot is
+                    // the single most confident thing on this chart — it says "graded reading
+                    // here". It must not sit on a bridged value or on a foreshortened body line.
+                    //
+                    // Held in its own property rather than inlined into `visible`: `visible` also
+                    // depends on the view window, which changes on every frame of a brush drag,
+                    // and measuredAt marshals the whole series across the QML boundary. This way
+                    // it is evaluated once per dot, when the data changes.
+                    readonly property bool measured:
+                        cm.measuredAt(dots.modelData.t_us, dots.modelData.valid || [],
+                                      dot.modelData.t_us,
+                                      root._hasDomain(dots.modelData) ? dots.modelData.validFromUs : 0,
+                                      root._hasDomain(dots.modelData) ? dots.modelData.validToUs   : 0)
+                    visible: dot.measured && root._inDom(dot.modelData.t_us)
                     width: 2 * r; height: 2 * r; radius: r
                     x: root.xForT(dot.modelData.t_us) - r
                     y: root.yForV(dot.modelData.value) - r
@@ -288,6 +419,13 @@ Item {
                 readonly property real r: Theme.sp(3)
                 readonly property real cv: labels.valueAtNearest(cmark.modelData.t_us,
                                                                  cmark.modelData.value, root.cursorUs)
+                // The readout beside it prints "—" here (PpMetricChart._valueTextAt), so the
+                // marker has to go too: a dot pinned to the bridged value with a dash beside it
+                // would tell the reader the number exists and is merely being withheld.
+                //
+                // JS, not cm.measuredAt: this binding re-evaluates on EVERY cursor move, and the
+                // C++ form would copy every series across the QML boundary each time.
+                visible: root._measuredAtT(cmark.modelData, root.cursorUs)
                 width: 2 * r; height: 2 * r; radius: r
                 x: root.xForT(root.cursorUs) - r
                 y: root.yForV(cv) - r

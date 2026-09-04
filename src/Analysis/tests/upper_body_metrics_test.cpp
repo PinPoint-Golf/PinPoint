@@ -28,6 +28,7 @@
 
 #include "../upper_body_metrics.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -75,7 +76,11 @@ static Upper addressPose()
 {
     Upper p;
     p.lSh  = QPointF(0.42, 0.30);   p.rSh  = QPointF(0.58, 0.30);
-    p.lEl  = QPointF(0.40, 0.42);   p.rEl  = QPointF(0.60, 0.42);
+    // 120 px apart, INSIDE the 160 px shoulders. The fixture used to splay them to 200 px, wider
+    // than the shoulders, which no address has: the arms hang together at address and separate
+    // through the swing, and that ordering is the whole reason the elbow line takes an absolute
+    // pixel floor rather than a ratio against its address span (§11).
+    p.lEl  = QPointF(0.44, 0.42);   p.rEl  = QPointF(0.56, 0.42);
     p.lWr  = QPointF(0.48, 0.52);   p.rWr  = QPointF(0.52, 0.52);
     p.lHip = QPointF(0.45, 0.55);   p.rHip = QPointF(0.55, 0.55);
     p.lAnk = QPointF(0.44, 0.90);   p.rAnk = QPointF(0.56, 0.90);
@@ -135,6 +140,38 @@ static bool hasSeries(const std::vector<MetricSeries> &all, const char *key)
 {
     for (const MetricSeries &m : all)
         if (m.key == QLatin1String(key)) return true;
+    return false;
+}
+
+// The five channels whose PHASE DOMAIN is Address→Impact (design §5.1, and the `domain` field on
+// MetricDescriptor). Past impact the body has turned, and a frontal-plane reading of a rotating
+// torso is projection rather than the quantity the metric names — so those five sample P1/P4/P7 and
+// NOTHING at the finish. The other four are read at the finish (the balance and swing-width
+// measures), so they keep the default Address/Top/Impact/Finish.
+//
+// A domain violation is not a small error: an out-of-domain sample is persisted, drawn and graded
+// like any other, so it is a confident reading of a quantity that does not exist at that instant —
+// the same class of fault as the ±90° body-line degeneracy the gates in this file exist for.
+static bool isAddressToImpactMetric(const QString &key)
+{
+    return key == QLatin1String("secondaryAxisTilt")
+        || key == QLatin1String("spineSideBend")
+        || key == QLatin1String("thoraxLateralDrift")
+        || key == QLatin1String("shoulderPlaneAngle")
+        || key == QLatin1String("elbowAlignment");
+}
+
+// How many phase samples a fully segmented swing should give this series: three inside the narrowed
+// domain, four outside it.
+static size_t expectedPhaseSamples(const QString &key)
+{
+    return isAddressToImpactMetric(key) ? 3u : 4u;
+}
+
+static bool hasPhaseSample(const MetricSeries &m, Phase p)
+{
+    for (const PhaseSample &s : m.phaseSamples)
+        if (s.phase == p) return true;
     return false;
 }
 
@@ -313,18 +350,40 @@ int main()
         CHECK("the SMOOTHED pose is what was measured", std::fabs(v) > 20.0);
     }
 
-    // ── 9. Every series carries the finish sample the balance measures read ────────────────────
+    // ── 9. Each series samples its DOMAIN's phases, and no others ──────────────────────────────
     {
         const Upper a = addressPose();
         const auto series = runOn(a, a);
-        bool allFour = !series.empty();
+        bool perDomain = !series.empty();
         for (const MetricSeries &m : series)
-            allFour = allFour && m.phaseSamples.size() == 4;
-        CHECK("every series samples Address / Top / Impact / Finish", allFour);
+            perDomain = perDomain && m.phaseSamples.size() == expectedPhaseSamples(m.key);
+        CHECK("Address/Top/Impact inside the narrowed domain, plus Finish outside it", perDomain);
+
+        // THE DOMAIN RULE, asserted directly rather than inferred from a count. The five
+        // Address→Impact channels must never carry a Finish reading: past impact the torso has
+        // turned and a frontal-plane angle or lateral distance is measuring the rotation, not the
+        // posture — a number that is wrong in a way no corridor can catch, because it looks exactly
+        // like a real one. Every one of the nine used to sample the finish, so this had been in every
+        // swing.json.
+        bool noFinishInDomain = true;
+        for (const MetricSeries &m : series)
+            if (isAddressToImpactMetric(m.key))
+                noFinishInDomain = noFinishInDomain && !hasPhaseSample(m, Phase::Finish);
+        CHECK("NO Address→Impact channel emits a Finish sample", noFinishInDomain);
+
+        // …and the four that are genuinely read there still do. The balance and swing-width measures
+        // have no other instant to read, so narrowing them too would delete the metric.
+        bool finishKept = true;
+        for (const MetricSeries &m : series)
+            if (!isAddressToImpactMetric(m.key))
+                finishKept = finishKept && hasPhaseSample(m, Phase::Finish);
+        CHECK("…while the four read at the finish keep it", finishKept);
 
         // …and when the ladder has NO finish, the sample is absent rather than taken at frame 0.
         // The balance measures read this phase, so a fabricated value here would be graded as the
-        // golfer's finish position on any swing the segmenter failed to close out.
+        // golfer's finish position on any swing the segmenter failed to close out. It is the four
+        // finish-samplers that carry this case now — the other five never ask for the phase — so
+        // three samples each is the answer for every series either way.
         {
             const std::vector<PhaseEvent> noFinish{
                 { Phase::Address, 20000,  1.f, SegmentRole::Unknown },
@@ -343,6 +402,273 @@ int main()
         CHECK("no stray keys", hasSeries(series, "leadHandWidth")
                                    && !hasSeries(series, "hipAlignment")
                                    && !hasSeries(series, "shoulderAlignment"));
+    }
+
+    // ── 10. The body lines' foreshortening gate ────────────────────────────────────────────────
+    //
+    // `lineTiltDeg` divides by the line's horizontal separation, so a golfer turning out of the
+    // image plane collapses two joints into the same image column and the angle runs to ±90° while
+    // the posture it claims to describe has not changed. On the swing that prompted this work
+    // `shoulderPlaneAngle` reads +88° AT THE TOP — a GRADED phase sample. Below
+    // upperBody.minShoulderSpanRatio the frame has NO shoulder line and is absent from the channel;
+    // the resample still bridges it so the curve stays continuous, and MetricSeries::valid says
+    // which of that curve is a measurement.
+    //
+    // The track rotates about the vertical from square to 80° over 20 frames, so |dx| / address |dx|
+    // is exactly cos θ and the 0.40 gate bites at 66.4° — frames 16..19 of the turn, grid 22..25.
+    {
+        const double kPi = 3.14159265358979323846;
+        const int kAddr = 6, kTurn = 20;
+
+        const auto find = [](const std::vector<MetricSeries> &all,
+                             const char *key) -> const MetricSeries * {
+            for (const MetricSeries &m : all)
+                if (m.key == QLatin1String(key)) return &m;
+            return nullptr;
+        };
+        const auto maskedTail = [](const MetricSeries *m) {
+            if (m == nullptr || m->valid.size() != m->t_us.size()) return false;
+            for (size_t i = 0; i < m->valid.size(); ++i)
+                if (m->valid[i] != (i >= 22 ? 0u : 1u)) return false;
+            return true;
+        };
+
+        // Address at 20 ms; Top on a frame the gate PASSES (200 ms, θ = 58.9°); Impact and Finish
+        // inside the run it REFUSES (240 / 250 ms). One sample must survive and two must not exist.
+        const std::vector<PhaseEvent> phases{
+            { Phase::Address, 20000,  1.f, SegmentRole::Unknown },
+            { Phase::Top,     200000, 1.f, SegmentRole::Unknown },
+            { Phase::Impact,  240000, 1.f, SegmentRole::Unknown },
+            { Phase::Finish,  250000, 1.f, SegmentRole::Unknown } };
+
+        // The address window must cover the HELD ADDRESS ONLY: with the shipped 250 ms the reference
+        // median would be taken over the turn as well, and the ratio's denominator would be the very
+        // foreshortening it is supposed to detect.
+        UpperBodyConfig cfg; cfg.addrWindowUs = 30000;
+
+        const auto rotate = [&](bool shoulders, bool hips) {
+            std::vector<Upper> poses;
+            for (int k = 0; k < kAddr; ++k) poses.push_back(addressPose());
+            for (int k = 0; k < kTurn; ++k) {
+                const double th   = 80.0 * k / double(kTurn - 1);
+                const double c    = std::cos(th * kPi / 180.0);
+                const double rise = 0.020 * k / double(kTurn - 1);
+                Upper p = addressPose();
+                if (shoulders) {
+                    p.lSh = QPointF(0.50 - 0.08 * c, 0.30);
+                    p.rSh = QPointF(0.50 + 0.08 * c, 0.30 - rise);
+                }
+                if (hips) {
+                    p.lHip = QPointF(0.50 - 0.05 * c, 0.55);
+                    p.rHip = QPointF(0.50 + 0.05 * c, 0.55 - rise);
+                }
+                poses.push_back(p);
+            }
+            const UpperBodyResult r = trackUpperBody(trackOf(poses), kW, kH, true, 20000, cfg);
+            return buildUpperBodySeries(r, phases);
+        };
+
+        // (a) The shoulders turn; the hips stay square.
+        {
+            const auto series = rotate(true, false);
+            const MetricSeries *sp = find(series, "shoulderPlaneAngle");
+            CHECK("shoulderPlaneAngle still emitted — a gated run is not a refused metric",
+                  sp != nullptr);
+            CHECK("its mask is 0 across the foreshortened run and 1 elsewhere", maskedTail(sp));
+            if (sp) {
+                double worst = 0.0;
+                for (double v : sp->value) worst = std::max(worst, std::fabs(v));
+                // Ungated, the last frame reads atan2(20 px, 27.8 px) ≈ 36° and is heading for 90°.
+                CHECK("nothing in the series approaches ±90°", worst < 25.0);
+                // TWO different absences, and they must not be confused. This channel's domain is
+                // Address→Impact, so it never asks for the Finish at all; of the three it does ask
+                // for, the Impact instant sits inside the gated run and is refused. What is left is
+                // Address and Top.
+                bool addrAndTopOnly = sp->phaseSamples.size() == 2;
+                for (const PhaseSample &s : sp->phaseSamples)
+                    addrAndTopOnly = addrAndTopOnly
+                                     && (s.phase == Phase::Address || s.phase == Phase::Top);
+                CHECK("A PHASE INSTANT INSIDE THE INVALID RUN EMITS NO SAMPLE (Impact)",
+                      addrAndTopOnly);
+                CHECK("…and the out-of-domain Finish was never asked for in the first place",
+                      !hasPhaseSample(*sp, Phase::Finish));
+            }
+
+            // spineSideBend is a DIFFERENCE of two tilts, so a degenerate shoulder line poisons it
+            // even though the hip line is perfect.
+            CHECK("spineSideBend goes with the shoulder line", maskedTail(find(series, "spineSideBend")));
+
+            // trailElbowHeight is a HEIGHT, not a tilt, and is gated all the same: heightAboveLine
+            // interpolates the shoulder line's y at the elbow's x, so it divides by the very dx that
+            // is collapsing. It is the worse case of the two — an angle saturates at 90°, an
+            // unbounded % shoulder width does not — so it carries shoulderPlaneAngle's mask exactly.
+            CHECK("trailElbowHeight is masked on the same run as the shoulder line it divides by",
+                  maskedTail(find(series, "trailElbowHeight")));
+
+            // The elbows never turned, so their line was never gated.
+            const MetricSeries *el = find(series, "elbowAlignment");
+            CHECK("elbowAlignment is untouched — a different line, its own span",
+                  el && el->valid.empty()
+                     && el->phaseSamples.size() == expectedPhaseSamples(el->key));
+
+            // The audited un-gated set: their divisors are address constants or Euclidean lengths,
+            // which do not vanish as the body turns, so withholding them would withhold a real
+            // measurement. secondaryAxisTilt divides by the VERTICAL neck→pelvis rise, and the neck
+            // is the shoulders' MIDPOINT — which is exactly as well located when they foreshorten.
+            for (const char *key : { "secondaryAxisTilt", "thoraxLateralDrift", "leadHandWidth",
+                                     "leadUpperArmToChest", "leadArmToTorso" }) {
+                const MetricSeries *m = find(series, key);
+                // Sample count per the metric's DOMAIN — three for the Address→Impact pair at the
+                // front of this list, four for the three that are read at the finish.
+                CHECK(key, m && m->valid.empty()
+                             && m->phaseSamples.size() == expectedPhaseSamples(m->key));
+            }
+        }
+
+        // (b) The hips turn; the shoulders stay square. The other half of "BOTH lines valid".
+        {
+            const auto series = rotate(false, true);
+            CHECK("spineSideBend goes with the HIP line too", maskedTail(find(series, "spineSideBend")));
+            const MetricSeries *sp = find(series, "shoulderPlaneAngle");
+            CHECK("…while the shoulder line, which never turned, is unmasked",
+                  sp && sp->valid.empty()
+                     && sp->phaseSamples.size() == expectedPhaseSamples(sp->key));
+        }
+
+        // (c) The gate that never fires changes NOTHING. This is the promise the corpus gate is
+        // judged on: a swing with no gated frame serialises exactly as it did before
+        // MetricSeries::valid existed. EMPTY means all valid — never an all-ones array.
+        {
+            const auto series = rotate(false, false);
+            bool untouched = series.size() == 9;
+            for (const MetricSeries &m : series)
+                untouched = untouched && m.valid.empty()
+                            && m.phaseSamples.size() == expectedPhaseSamples(m.key);
+            CHECK("no gated frame ⇒ every mask EMPTY and every phase sample its domain allows",
+                  untouched);
+        }
+    }
+
+    // ── 11. The elbow line's ABSOLUTE floor, and a gated run mid-track ─────────────────────────
+    //
+    // Why this gate is not a ratio like the other two: the elbows are at their NARROWEST at address
+    // (the arms hang together and separate through the swing), so |dx| / address |dx| is 1.0 at
+    // address by construction and ≥1 after it. A ratio could never fire — least of all at address,
+    // which is exactly where `elbowAlignment` is read and where a 20 px separation is pure keypoint
+    // noise. Only an absolute floor can refuse the frame the metric is graded on.
+    {
+        const auto find = [](const std::vector<MetricSeries> &all,
+                             const char *key) -> const MetricSeries * {
+            for (const MetricSeries &m : all)
+                if (m.key == QLatin1String(key)) return &m;
+            return nullptr;
+        };
+        // 15 px apart on a 1000 px frame — under the 25 px floor.
+        const auto narrowElbows = [] {
+            Upper p = addressPose();
+            p.lEl = QPointF(0.4925, 0.42);   p.rEl = QPointF(0.5075, 0.42);
+            return p;
+        };
+
+        // (a) Narrow throughout ⇒ the metric does not exist. Not a 0°, not a noisy angle: absent.
+        {
+            std::vector<Upper> poses(12, narrowElbows());
+            const UpperBodyResult r = trackUpperBody(trackOf(poses), kW, kH, true, 20000);
+            const auto series = buildUpperBodySeries(r, phasesAt(20000, 60000, 100000));
+            CHECK("a 15 px elbow separation produces NO elbowAlignment at all",
+                  !hasSeries(series, "elbowAlignment"));
+            CHECK("…and costs nothing else — the shoulder line is untouched",
+                  hasSeries(series, "shoulderPlaneAngle") && series.size() == 8);
+        }
+
+        // (b) GATED is not the same as MISSING, mid-track. §10's runs sit at the tail, where the
+        // extent rule marks them on its own; a run INSIDE the track can only be marked by the mask's
+        // own reasoning, and the first version of that reasoning got it wrong — on a real swing a
+        // 23-frame gated shoulder run came back with 30 of its frames flagged VALID because each sat
+        // within 60 ms of a measurement, and a P4 sample of 25.8° was emitted from the bridge.
+        //
+        // Two holes, the same length (10 frames) at the same spacing (7 ms ≈ 150 fps), OPPOSITE
+        // answers:
+        //   frames 10–19  elbows CONFIDENT, 15 px apart ⇒ the line is refused ⇒ GATED ⇒ 0.
+        //   frames 30–39  every keypoint below the confidence gate ⇒ MISSING ⇒ bridged, valid.
+        {
+            const int64_t dt7 = 7000;
+            PoseTrack2D t;
+            for (int k = 0; k < 50; ++k) {
+                const bool gated = (k >= 10 && k <= 19);
+                const bool dark  = (k >= 30 && k <= 39);
+                t.frames.push_back(makeUpper(k * dt7, gated ? narrowElbows() : addressPose(),
+                                             dark ? 0.05f : 0.9f));
+            }
+            UpperBodyConfig cfg; cfg.addrWindowUs = 30000;   // the reference is the opening frames
+            const std::vector<PhaseEvent> phases{
+                { Phase::Address, 2 * dt7,  1.f, SegmentRole::Unknown },
+                { Phase::Top,     15 * dt7, 1.f, SegmentRole::Unknown },   // inside the GATED run
+                { Phase::Impact,  35 * dt7, 1.f, SegmentRole::Unknown },   // inside the CONF hole
+                { Phase::Finish,  49 * dt7, 1.f, SegmentRole::Unknown } };
+            const UpperBodyResult r = trackUpperBody(t, kW, kH, true, 2 * dt7, cfg);
+            CHECK("the ten refused frames are recorded as GATED, not merely absent",
+                  r.gatedElbowLine.size() == 10 && r.gatedElbowLine.front() == 10 * dt7
+                      && r.gatedElbowLine.back() == 19 * dt7);
+
+            const auto series = buildUpperBodySeries(r, phases);
+            const MetricSeries *el = find(series, "elbowAlignment");
+            CHECK("elbowAlignment emitted", el != nullptr);
+            if (el) {
+                bool exact = el->valid.size() == 50;
+                for (size_t i = 0; i < el->valid.size(); ++i)
+                    exact = exact && (el->valid[i] == ((i >= 10 && i <= 19) ? 0u : 1u));
+                CHECK("ALL TEN gated frames are 0 — no budget excuses refused geometry", exact);
+                CHECK("the same-length CONFIDENCE hole stays valid, bridged as it always was",
+                      el->valid.size() == 50 && el->valid[30] == 1u && el->valid[35] == 1u
+                          && el->valid[39] == 1u);
+                CHECK("the mask starts and ends VALID, so none of it came from the extent rule",
+                      el->valid.size() == 50 && el->valid.front() == 1u && el->valid.back() == 1u);
+                bool top = false, impact = false;
+                for (const PhaseSample &s : el->phaseSamples) {
+                    if (s.phase == Phase::Top)    top = true;
+                    if (s.phase == Phase::Impact) impact = true;
+                }
+                CHECK("a phase instant inside the GATED run emits nothing", !top);
+                CHECK("…while one inside the confidence hole still does", impact);
+            }
+
+            // The shoulder line was never refused on this track, and its only hole is the confidence
+            // one, inside the budget. Nothing gated, nothing over budget, so: no mask at all.
+            const MetricSeries *sp = find(series, "shoulderPlaneAngle");
+            CHECK("a channel with nothing gated and no over-budget hole carries NO mask",
+                  sp && sp->valid.empty());
+        }
+    }
+
+    // ── 12. One ratio, TWO references: the whole-swing-absent path ─────────────────────────────
+    //
+    // `LowerBodyState::hipLineValid` is NOT how this module learns about the hip line — the two
+    // modules are separate analysis stages with no shared result, so each resolves the line against
+    // its own address reference. This module's reference admission test asks for shoulders, ankles
+    // and the lead arm, NOT the hips, so an address whose hips were unconfident leaves it with no hip
+    // denominator at all — and then `spineSideBend` is absent for the WHOLE swing while the
+    // lower-body module, whose admission test does require the hips, still produces `hipLineTilt`.
+    //
+    // That is a real asymmetry and it is pinned here so it is documented behaviour rather than a
+    // silent one. A ratio with no denominator is not a measurement, and inventing one from the
+    // mid-swing frames would put the gate's denominator inside the collapse it is meant to detect.
+    {
+        std::vector<Upper> poses(12, addressPose());
+        PoseTrack2D t = trackOf(poses);
+        for (size_t i = 0; i < 6; ++i) {                    // the address block only
+            t.frames[i].conf[kLHip] = 0.05f;
+            t.frames[i].conf[kRHip] = 0.05f;
+        }
+        UpperBodyConfig cfg; cfg.addrWindowUs = 30000;      // so the reference IS that block
+        const UpperBodyResult r = trackUpperBody(t, kW, kH, true, 20000, cfg);
+        CHECK("the reference still resolves without the hips", r.ref.valid);
+        CHECK("…but it has no hip denominator", r.ref.hipDxPx == 0.0);
+        const auto series = buildUpperBodySeries(r, phasesAt(20000, 60000, 100000));
+        CHECK("spineSideBend is absent for the whole swing, not gated frame by frame",
+              !hasSeries(series, "spineSideBend"));
+        CHECK("…while the shoulder line, which HAS its reference, is produced",
+              hasSeries(series, "shoulderPlaneAngle"));
     }
 
     std::printf(g_fail == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", g_fail);

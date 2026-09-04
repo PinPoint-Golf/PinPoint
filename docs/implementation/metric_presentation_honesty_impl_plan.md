@@ -1,0 +1,301 @@
+# Honest metric presentation — implementation plan and tracker
+
+**This is the tracker.** Maintain it here. A new session should read: this file, then the
+design doc, then the Log at the bottom.
+
+**Design:** `docs/design/metric_presentation_honesty.md`
+**Repo:** `PinPointStudio` only. No PinPointCapture or libppcp involvement.
+
+---
+
+## Context, in four lines
+
+The review chart's curves carry residual detector jitter, the body-line angles go degenerate
+when the body turns out of the image plane (−88° hip tilt after impact, +88° shoulder plane at
+the top), and the PEAK / PK RATE tiles are raw argmax and adjacent-frame slope, which reward a
+single bad sample. The design separates those into validity (Phase 1), robust reducers
+(Phase 2), σ propagation and σ-governed display (Phase 3), and a longer smoother window for
+slow joints (Phase 4). Phases 1–3 change no persisted `value`; Phase 4 does and is gated on
+its own.
+
+**Order is deliberate.** Phase 1 removes every implausible number in the motivating screenshot
+with the smallest change and is worth shipping alone. Phase 4 is last because a smoother curve
+would hide Phases 1–3's problems without fixing them.
+
+## How to use this file
+
+Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked · `[-]` dropped
+
+Update the boxes and the **Log** as work lands. Commit per phase (Mark approves each commit;
+never push without approval). Build with
+`cmake --build build/Qt_6_11_1_for_macOS_Debug --target <target> -j 8` and run tests **only
+through ctest** (`ctest --test-dir build/Qt_6_11_1_for_macOS_Debug -R <name>`); a bare test
+binary lacks `PINPOINT_CORE_NORMS` and fake-fails. At most two or three builds per phase.
+
+**Corpus gate, every phase.** The 108-swing corpus on `/mnt/swingdata` (pose2 cache), via
+`tools/swinglab/reanalyze_corpus.py` on GOLFSIMPC for the bulk run, or a single-swing check on
+the Mac. Always run a **control** (same code twice) beside the before/after: pose runs are
+non-deterministic and ~20 metrics differ at 1e-14 between identical runs, so a diff without a
+control cannot attribute anything. Judge a run by metric COUNT first, never the score.
+`tools/swinglab/parity_diff.py` is the byte-identical gate for the swings a phase must not
+touch.
+
+---
+
+## Phase 0 — Measure the baseline `[x]`
+
+Nothing ships from this phase; it produces the numbers the definition of done is judged against.
+
+- [x] **0.1** Script `tools/metrics/series_noise.py` (new): for every swing.json under a root,
+      for the lower-body and body-line keys, report median / p95 frame-to-frame jitter, the
+      current `summary()`-style PK RATE over (a) the whole swing and (b) a still address window
+      (Address − 300 ms → Address), the raw range, and every phase sample. One CSV row per
+      (swing, key). This is the one-off probe from 2026-09-04 made repeatable.
+- [x] **0.2** Add a foreshortening column: per frame, `|dx_hips| / addrHipSpanPx` and the
+      shoulder equivalent, read from `pose2d.smoothed` (fall back to `frames`). Report, per
+      swing, the fraction of P1–P7 frames below 0.4 and whether any P1–P7 phase instant is
+      below it. This is what decides the default in 1.1 and whether the gate ever fires inside
+      the domain (it should be rare; if it is common, the ratio is wrong, not the swings).
+- [x] **0.3** Run on the corpus; commit the CSV under `docs/validation/data/` with the run's
+      commit hash in the filename. Record the headline numbers in the Log.
+
+**Done when:** the CSV exists and the Log has the baseline table.
+
+---
+
+## Phase 1 — Validity: geometric gates and phase domains `[~]`
+
+Changes no persisted `value`. Adds absence. The screenshot's −88°, +35 % and the 88° top
+sample all disappear here.
+
+### 1.1 Series validity mask
+
+- [x] `swing_analysis.h`: `MetricSeries` gains `std::vector<uint8_t> valid;` (empty ⇒ all
+      valid). Comment it beside `sigma` with the same absent-means-what discipline.
+- [x] `metric_channel.h`: add `buildChannelSeriesMasked(grid, channel, …)` (or extend the
+      existing builder with a `maxBridgeUs` argument): a grid sample farther than
+      `maxBridgeUs` from the nearest real channel sample, or inside a gated run, is filled by
+      `interpChannel` as now **and** marked invalid. Default `maxBridgeUs` = 60 ms so a
+      one-frame conf dropout still bridges silently (today's behaviour) and only a real run is
+      marked. Tuned constant `tuned::channel::kMaxBridgeUs`, dark key `channel.maxBridgeUs`.
+- [x] `shot_processor.cpp` `toAnalysisDetail` and `disk_replay_source.cpp`: bridge `valid`
+      as an int list, present only when any sample is 0 (mirror pair; a live shot and its
+      reload must agree). Schema note in `docs/reference/swing_json_schema.md` §metrics.
+- [x] Phase samples: in `buildLowerBodySeries` / `buildUpperBodySeries`, do not emit a
+      phaseSample whose grid index is invalid (extend the existing "an unsegmented phase
+      produces no sample" rule to "an invalid instant produces no sample").
+
+### 1.2 Geometric gates
+
+- [x] `pp_tuned_constants.h`: `lowerBody::kMinHipSpanRatio = 0.40`,
+      `upperBody::kMinShoulderSpanRatio = 0.40`; dark keys `lowerBody.minHipSpanRatio`,
+      `upperBody.minShoulderSpanRatio`; register both in
+      `docs/validation/tunable_parameters_reference.md`. Revisit 0.40 against 0.2's numbers.
+- [x] `lower_body_metrics.cpp`: the address hip span (`|addrTrailHipPx.x − addrLeadHipPx.x|`)
+      joins the address reference; `hipTilt` is pushed only when the frame's `|dx| / addrHipSpan`
+      clears the ratio. `LowerBodyState` gains `hipLineValid` so the upper-body module can ask
+      the same question of the same frame.
+- [x] `upper_body_metrics.cpp`: the same for the shoulder line (`shoulderPlane`), the elbow
+      line (`elbowLine`, against the address elbow span) and `sideBend` (needs both lines valid).
+- [x] Tests, `lower_body_metrics_test.cpp` / `upper_body_metrics_test.cpp`: a synthetic frame
+      sequence that rotates the hips (or shoulders) from square to 80° about the vertical:
+      the tilt channel must go absent, not to ±90°, once the ratio crosses the gate; the
+      series' `valid` mask must be 0 there; no phase sample lands on an invalid index.
+
+### 1.3 Phase domains
+
+- [x] `metric_descriptor.h`: `struct PhaseDomain { Phase first = Address; Phase last = Finish; }`,
+      `MetricDescriptor::domain`, default whole swing. `metric_catalogue_manifest.cpp`: author
+      Address→Impact on the ten metrics in design §5.1's table.
+- [x] `metric_catalogue_test.cpp`: every phase in `descriptor.phases` lies inside
+      `descriptor.domain` (ladder order, not enum order — reuse the manifest's `kP1toP7`
+      ordering helper, or add one to `swing_analysis.h` beside the Phase enum).
+- [x] `measure_facets.cpp` `checkReducer`: a `delta`/`rate`/`extremum` window, or an `at`
+      anchor, outside the metric's domain is refused with a reason naming the domain. Run
+      `core_pack_test` / `diagnostics_catalogue_integrity_test`; fix any content the validator
+      now refuses as a content bug (expected: none, since the pack reads P1–P7 only).
+- [x] `chart_metrics.cpp`: `ChartMetrics::domainFor(key)` returning `{firstPhase, lastPhase}`
+      from the catalogue; `summary()` gains a `valid` argument and skips invalid samples
+      (min/max/peak/rate); returns `partial: true` when a window edge had to interpolate from
+      non-adjacent valid samples.
+- [x] `PpMetricChart.qml` / `PpChartSummary.qml`: the summary window is clamped to the
+      metric's domain (resolved through the phase list to instants; a swing lacking the
+      domain's last phase falls back to the window end). A "partial" chip on the card when
+      `partial` is set.
+- [x] `PpChartPlot.qml`: split each series into valid / invalid runs; invalid runs drawn
+      with `strokeStyle: ShapePath.DashLine` at 0.35 opacity; the region outside the domain
+      gets the same treatment plus no phase dots. Hover value reads "—" on an invalid sample.
+      Probe with an offscreen `--probe` build rather than screenshots (see memory).
+- [x] `chart_metrics_test.cpp`: summary skips invalid samples; window edges on invalid
+      samples set `partial`; domain clamp.
+
+### 1.4 Gate
+
+- [ ] Corpus before/after + control. `parity_diff.py` must be byte-identical for every swing
+      whose series contain no invalid sample. For the rest, the only diffs are: `valid` arrays
+      appearing, phase samples disappearing where the design says they must, and nothing in
+      `value[]`. Re-run 0.1/0.2; the "phase sample below the ratio" count must be 0.
+
+**Done when:** design §7 items 1 and 6 hold on the corpus, and the Plumb Bob preset on the
+2026-08-18 swing shows no tilt below −30° anywhere and dashed runs past P7.
+
+---
+
+## Phase 2 — Robust reducers, one implementation `[ ]`
+
+Changes what is *derived*; `value[]` untouched.
+
+- [ ] **2.1** `src/Analysis/series_reduce.h` (+ `.cpp` if it will not stay header-only),
+      Qt-only, no Gui: `reduceAt` (±window median, valid-aware), `reduceDelta`,
+      `reduceExtremum` (extremum of the centred-window mean; returns value + centre `atUs`),
+      `reduceRate` (max-|slope| least-squares over sliding windows ≥ `rateWindowUs`, ≥ 3 valid
+      samples; returns slope per 100 ms and its standard error). Tuned constants
+      `tuned::reduce::kExtremumWindowUs = 40000`, `kRateWindowUs = 50000`; dark keys
+      `reduce.extremumWindowUs`, `reduce.rateWindowUs`.
+- [ ] **2.2** `series_reduce_test.cpp` (new, `src/Analysis/tests`): a clean ramp gives the
+      ramp's slope and its endpoint as extremum; the same ramp with one 10σ spike gives the
+      same answers within σ; a still series with white noise gives a rate near 0 and an
+      extremum within one σ of the mean; invalid samples are ignored; sparse (27 ms) and dense
+      (8 ms) spacing both work.
+- [ ] **2.3** `ChartMetrics::summary` delegates to 2.1 for start/end (windowed At),
+      peak/tPeakUs (extremum), delta and rate. Keep `min`/`max`/`range` as the windowed-mean
+      extremes for the same reason. `chart_metrics_test.cpp` updated: the old adjacent-frame
+      rate assertions are replaced, not deleted; add the spike case.
+- [ ] **2.4** `measure_sample.cpp` `buildPhaseGrid`: `PhaseGridSpan.min/max` from
+      `reduceExtremum` over the span (valid-aware). `kPhaseGridSchemaVersion` → 3 so the
+      sidecar cache rebuilds. `measure_sample_test.cpp`: the spike case; the schema bump.
+- [ ] **2.5** Gate: corpus run. For every authored `extremum` measure, before/after of the
+      reduced value per swing; expected: peaks move toward the mean by about one σ, none
+      moves the other way beyond the control's spread. For `at`/`delta`: unchanged within
+      the control (already windowed medians). Record the table in the Log. Design §7 items 2,
+      3 and 5 are checked here.
+
+**Done when:** PK RATE over a still address window is under 2 units per 100 ms on every
+lower-body and body-line series across the corpus, and the card and the engine agree to
+display precision on every authored measure.
+
+---
+
+## Phase 3 — σ propagation and σ-governed display `[ ]`
+
+- [ ] **3.1** `lower_body_metrics.cpp`: `LowerBodyState` gains per-keypoint σ (px) read from
+      `pose.smoothedAux[frame].sigma[k]`; `trackLowerBody` takes `const PoseTrack2D&` already,
+      so no signature change. Propagate per design §5.3, median over valid frames, set
+      `m.sigma` only where at least one frame had a smoothed σ (tier ≠ Off). Same in
+      `upper_body_metrics.cpp` for the three lines and side bend.
+- [ ] **3.2** Tests: a synthetic track with a known constant keypoint σ gives the closed-form
+      series σ within 5 %; a track with `smoothedAux` empty leaves `sigma` unset.
+- [ ] **3.3** `ChartMetrics::formatBare(v, unit, sigma = 0)`: step = the nicest of
+      {1, 2, 5}×10ⁿ not below σ, floored at 1. `formatValue` likewise. Every QML caller
+      passes the series' sigma (the summary card, the legend chip, the hover tooltip in
+      `PpMetricChart.qml`). Test: σ = 2.5 → step 5; σ = 0.3 → step 1; σ = 0 → today's
+      behaviour exactly.
+- [ ] **3.4** `PpChartSummary.qml`: "± σ" beside PEAK, "± σ_rate" beside PK RATE (from 2.1's
+      standard error). Keep the existing unit-side chip and its tooltip.
+- [ ] **3.5** (dark, optional) `PpChartPlot.qml`: a ±σ ribbon as a filled `ShapePath` at
+      0.06 opacity behind each curve, behind a `showSigmaBand` property defaulting to false.
+- [ ] **3.6** Gate: `parity_diff.py` shows only `sigma` keys appearing; design §7 item 4 holds
+      (every lower-body and body-line series carries σ on every swing the smoother ran on).
+      Look at the Plumb Bob preset with the step rule on and decide the open question in
+      design §8 (step rule vs chip alone). Record the decision.
+
+**Done when:** the σ chip renders on every card in the Plumb Bob preset and no displayed digit
+is finer than the series' σ.
+
+---
+
+## Phase 4 — Smoother window for slow joints `[ ]`
+
+The only phase that moves `value[]`. Separate commit, separate gate.
+
+- [ ] **4.1** `pose_smoother.h/.cpp`: `legsSigmaScale` / `legsJerkScale` over keypoints
+      11–16, default 1.0 (byte-identical). Dark keys `poseSmooth.legsJerkScale`,
+      `poseSmooth.legsSigmaScale` through the existing tuning path in `PoseSmoothStage`.
+      `pose_smoother_test.cpp`: scale 1.0 is byte-identical; scale 0.1 on a noisy stationary
+      hip reduces residual σ and keeps a 0.5 Hz sinusoid's amplitude within 5 %.
+- [ ] **4.2** Sweep on the corpus: `legsJerkScale` ∈ {1, 0.3, 0.1, 0.05, 0.02}. Metrics:
+      residual jitter (0.1's script) on the hip series, amplitude of the P1→P4 sway excursion
+      (must not shrink beyond the control's spread; if it does the window is too long), and
+      the phase-sample values at P4/P7 (must move by less than σ). Pick the largest window
+      that preserves the excursion.
+- [ ] **4.3** Promote the default only with a before/after + control table in the Log and
+      Mark's approval; the corridor content was seeded on the current smoothing and a
+      systematic shift at P4 would need the norms looked at (`docs/design/norm_shapes.md`).
+
+**Done when:** median hip-series jitter is at least halved on the corpus with the P1→P4
+excursion preserved, or the sweep shows it cannot be and the phase is closed as measured.
+
+---
+
+## Side items (not gating any phase)
+
+- [x] `PpChartSummary.qml` text overflow: the 2×2 grid's value texts overrun their cells at
+      narrow widths (second screenshot of 2026-09-04). Give the value `Text`s
+      `Layout.fillWidth` + `elide`, or reduce the unit token. Independent fix, own commit.
+
+---
+
+## What is shared, and must not be re-litigated per phase
+
+- **One curve.** No display-only smoothing anywhere in QML, in any phase. If a curve needs to
+  look different, the producer or the reducer changes and the swing.json changes with it.
+- **Absent, never a sentinel.** A gated frame is absent from the channel; a bridged grid
+  sample is marked invalid; neither is a 0, a NaN, or a clamp.
+- **`sigma` absent means uncharacterised.** Never write 0.
+- **Reducers live in `src/Analysis`.** The chart is one consumer of two.
+- **Corpus runs need a control.** Non-deterministic pose; no exceptions.
+
+---
+
+## Log
+
+- **2026-09-04** — Design doc and this plan written from the Plumb Bob screenshot and a probe of
+  `2026-08-18_Mark-Liversedge_Wrist_01/swing_0001`. Baseline (that swing, whole-swing window):
+  hipLineTilt PK RATE 291°/100 ms, range −85..+16°; shoulderPlaneAngle Top sample +88°;
+  pelvisSway PK RATE 39 %/100 ms, range −19..+42 %; plumbBob PK RATE 11 in/100 ms. Nothing
+  built.
+
+- **2026-09-04 (Phase 0 done)** — `tools/metrics/series_noise.py`; CSVs in `docs/validation/data/`
+  (`series_noise_baseline_corpus.csv`, run at 72bfd42; 108 files, 83 carry body metrics — the
+  other 25 are the LM-only `2026-08-04_Wrist_05` session). Corpus medians (p95 jitter / PK RATE
+  whole / still-address / P1–P7): hipLineTilt 8.1° / 322 / 4.8 / 30; shoulderPlaneAngle 10.2° /
+  375 / 4.0 / 347; pelvisSway 3.5 % / 38 / 7.3 / 24; plumbBob 1.6 in / 13.8 / 3.0 / 8.0.
+  **Gate evidence:** hip span ratio at P4 median 0.76 (min 0.64), at P7 median 1.00; only 2/83
+  swings have any P1–P7 hip instant below 0.40, both at P7 and both with an absurd tilt (−58°,
+  −23°) — 0.40 is right for the hips. **Shoulders are different:** P4 ratio median 0.32 (IQR
+  0.22–0.44); 55/83 swings sit below 0.40 at the Top, ~1/3 of the P1–P7 curve is below it. At
+  0.40 the graded Top `shoulderPlaneAngle` sample is absent on two thirds of the corpus. That is
+  what a face-on camera can honestly say about a full turn; flagged for Mark at the Phase 1
+  checkpoint (the alternative, 0.20, still cuts ~30 swings and admits ~7° of angle error).
+  Also: the P1–P7 domain alone does NOT fix the body-line angles (their degeneracy is at P4,
+  inside the domain) — only the gate does; still-address PK RATE fails §7 item 2 corpus-wide
+  today (that is Phase 2's job; the 2-unit target will be re-judged there); five old swings
+  show shoulder ratios of 1.5–3.6 (a collapsed address denominator — ratio gates have no upper
+  bound; noted, out of scope); grid spacing corpus-wide has median dt_max 81 ms, so the 60 ms
+  bridge floor will mark runs on most swings and the byte-identical parity set will be small —
+  the Phase 1 gate compares `value[]` directly instead.
+
+- **2026-09-04 (Phase 1 built, gate pending)** — Three Opus workstreams (Analysis / catalogue+
+  diagnostics / Gui) plus three adversarial reviews; 14 suites green through ctest in
+  `build/tests`. Decisions taken by the orchestrator, for Mark's review at the checkpoint:
+  (1) **shoulder gate 0.40 kept** although Phase 0 shows the Top shoulder ratio at median 0.32:
+  on most swings `shoulderPlaneAngle`, `spineSideBend` and `trailElbowHeight` (whose ONLY
+  scored phase is Top) have no P4 reading — absence, per the design; the alternative worth
+  considering is a foreshortening-corrected tilt `asin(dy / L_address)`, which is a definition
+  change and Mark's call. (2) `trailElbowHeight` joined the shoulder gate (same 1/dx, and
+  unbounded); the elbow-line gate became an ABSOLUTE floor `upperBody.minElbowSpanPx = 25`
+  because a ratio against the address span (where the elbows are narrowest) can never fire.
+  (3) Bridge budget is now `max(60 ms, 1.5 × local grid spacing)` so one dropped frame in the
+  sparsely posed address is a hold, not a fabrication; two adjacent dropped frames still bridge,
+  three mark the middle. (4) The one out-of-domain measure `m_pelvisSwayFinish` and its two
+  signals were DELETED (not retired — `notCapturable` is a statement about the metric and the
+  integrity test rightly refused it); `weight_back_at_finish` is now `confirmedBy: asserted`
+  with no detector (its in-domain content is covered by `sig_hangingBackPelvisDown`), and
+  `off_balance_finish` keeps its comOverLeadFoot detector. A coverage regression, the honest
+  one; Mark to confirm. (5) The domain check is armed in `diagnosticsHealth()` as an Error row
+  and in the integrity test's rung sweep; it is NOT enforced at pack load (would need catalogue
+  plumbing into `merged_pack_provider` — tracked, not done). (6) Default (whole-swing) domains
+  clip nothing: `domainFor` reports per-side narrowing and the chart clips only a side the
+  manifest moved. (7) `bandAtNearest` lost its "good" default and gained a 20 ms tolerance;
+  @IMPACT reads "—" when the impact sample is bridged. (8) `channel.maxBridgeUs < 0` is the
+  off switch and is now guarded in both modules. Side item (summary-card overflow) fixed.

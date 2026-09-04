@@ -243,10 +243,32 @@ int main()
                                 qPrintable(m.id), qPrintable(k), qPrintable(d->unit),
                                 qPrintable(m.metricKey), qPrintable(own->unit));
                 }
+
+                // ── And every rung's PHASE DOMAIN must admit the reducer ────────────────────
+                //
+                // The same argument as the unit, one axis along. A ladder is one quantity measured
+                // twice, so a corridor authored over P1→P7 has to MEAN P1→P7 whichever rung
+                // answered; a rung whose geometry expires earlier would grade the golfer off a
+                // reading of something that is not there — silently, and ONLY on the swings where
+                // the preferred instrument happened to be the one that answered.
+                //
+                // Here rather than in validatePack(): that validator sees one metricKey and cannot
+                // see the catalogue at all, so `measureOutsideDomain` deliberately asks only about
+                // `metricKey` (see validateMeasureDomains). This test is the one place that holds
+                // both registries AND walks every rung, so the rest of the ladder is checked here,
+                // beside the units it already checks. Today nothing fires: every ladder rung is
+                // either a whole-swing metric or an `lm.*` device reading, none of which narrows.
+                const ReducerCheck rd = validateReducer(m.reducer, d->domain);
+                if (!rd.valid) {
+                    ++broken;
+                    std::printf("        measure '%s': rung '%s' cannot be read there — %s\n",
+                                qPrintable(m.id), qPrintable(k), qPrintable(rd.reason));
+                }
             }
         }
         std::printf("        %d measures prefer a better instrument\n", ladders);
-        check(broken == 0, "every preferred instrument exists and states the measure's unit");
+        check(broken == 0,
+              "every preferred instrument exists, states the measure's unit, and admits its reducer");
     }
 
     // ── 6. Capture gaps are marked consistently in both registries ─────────────

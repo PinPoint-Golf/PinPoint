@@ -532,6 +532,39 @@ cat.addDescriptor({
 `Direct` / `Estimated` / `PLANNED` aliases beside it — six designated initialisers per rung buried
 the thing the ladder exists to show.
 
+**`.domain` — where the metric still means something.** A `PhaseDomain {first, last}`, inclusive,
+defaulting to the whole swing, which is the right answer for almost every metric: leave it out.
+Narrow it only where the geometry itself expires, not where the number merely gets noisy. The ten
+frontal-plane metrics do — `pelvisSway`, `pelvisLift`, `leadKneeDrift`, `plumbBobDistance`,
+`hipLineTilt`, `shoulderPlaneAngle`, `elbowAlignment`, `spineSideBend`, `secondaryAxisTilt`,
+`thoraxLateralDrift` all take the file-local `P1toP7` constant — because past impact the body has
+turned far enough that a face-on lateral reading is reporting the *rotation* in a translation's
+units. `comOverLeadFoot` deliberately does not narrow: a distance along the stance line survives the
+turn, and it is read at the finish on purpose.
+
+The domain is read in **ladder order** (`phaseLadderIndex` / `phaseInDomain` in
+`metric_descriptor.h`), never in enum order. `Phase` is append-only, so sorted by value it reads
+`P1, takeaway, P4, transition, downswing, P7, release, P10, P3, P6, max speed, P9, P2, P5, P8` — a
+numeric comparison against an Address→Impact domain would wrongly **exclude P2, P3, P5 and P6**
+(enum values 12, 8, 13 and 9, all above Impact's 5) and wrongly **include the finish** (value 7).
+P8 happens to come out right at 14; that is luck, not a rule.
+
+**Two things read the domain at runtime**, and they are the two places a wrong number would reach a
+person:
+
+- the **pack validator** (`validateMeasureDomains`, called from `validatePack` and from
+  `diagnostics_health`) refuses an `at` anchor, or a delta/rate/extremum window, that reaches
+  outside it — reported as `measureOutsideDomain`;
+- the **chart** dims and dashes the region beyond it, draws no phase dots there, and clamps the
+  summary window to it.
+
+**Phase samples are not suppressed by the domain, and do not need to be.** Producers sample the
+descriptor's own `phases` list, and `metric_catalogue_test` asserts `phases ⊂ domain` — that
+containment is what keeps every emitted phase sample inside the domain, and it is checked at build
+time rather than filtered at run time. So a metric documenting itself at a phase it cannot be read
+at fails the build, because a descriptor contradicting itself is the bug; there is no runtime pass
+that would quietly paper over it. See design §5.1.
+
 **Declare a second rung when a metric genuinely has one**, and only then. Reference the docs, not
 your intuition: an upgrade route is a claim that some kit produces a better number, and one invented
 here becomes a filter chip that sends a reader shopping.

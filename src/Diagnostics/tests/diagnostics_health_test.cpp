@@ -801,6 +801,100 @@ int main()
               "…and separately, one that does not say what it is trying to change");
     }
 
+    // ── A measure read outside its metric's phase domain ────────────────────
+    //
+    // The only check here that needs both registries to exist at once, so it is the only one whose
+    // wiring can silently be absent: `validatePack()` owns the rule but has never been able to see
+    // the metric catalogue, so it takes a resolver, and diagnosticsHealth() is what hands it one.
+    // Before this block the rule existed and fired nowhere — indistinguishable from a rule that
+    // passes. Every assertion below is therefore about the WIRING as much as the rule.
+    std::printf("=== a measure read outside its metric's phase domain ===\n");
+    {
+        // Real catalogue keys, because the domain comes from the real descriptor: pelvisSway is
+        // authored Address->Impact, headSway is not narrowed at all.
+        CharacteristicPack p;
+        // The unit is the CATALOGUE's for each key, so `measureUnitMismatch` — which is not scoped
+        // to Live and would otherwise fire on these fixtures — stays out of the way of the one code
+        // this block is about.
+        auto provided = [&p](const char *id, const char *metricKey, const char *unit,
+                             MeasureStatus st, std::optional<Phase> anchor) {
+            Measure m;
+            m.id        = QLatin1String(id);
+            m.kind      = MeasureKind::Provided;
+            m.metricKey = QLatin1String(metricKey);
+            m.label     = QLatin1String(id);
+            m.status    = st;
+            m.unit      = QLatin1String(unit);
+            m.reducer   = Reducer{};
+            m.reducer.anchor = anchor;
+            p.measures.push_back(m);
+        };
+        provided("m_swayAtImpact", "pelvisSway", "% stance width",
+                 MeasureStatus::Live, Phase::Impact);
+        provided("m_swayAtFinish", "pelvisSway", "% stance width",
+                 MeasureStatus::Live, Phase::Finish);
+        provided("m_swayRetired",  "pelvisSway", "% stance width",
+                 MeasureStatus::NotCapturable, Phase::Finish);
+        provided("m_headAtFinish", "headSway",   "cm",
+                 MeasureStatus::Live, Phase::Finish);
+        provided("m_unknownKey",   "noSuchMetricAnywhere", "cm",
+                 MeasureStatus::Live, Phase::Finish);
+
+        FakeNorms norms;
+        const auto issues = diagnosticsHealth(p, norms, cat, g_noScreens, g_noDrills);
+
+        check(hasSubject(issues, "measureOutsideDomain", QStringLiteral("m_swayAtFinish")),
+              "reading pelvisSway at the finish is reported — past P7 the lateral projection is "
+              "the pelvis's rotation, not its translation");
+        check(!hasSubject(issues, "measureOutsideDomain", QStringLiteral("m_swayAtImpact")),
+              "…and reading the same metric at P7, inside its domain, is not");
+
+        // The severity is the point of the exception documented on this header: every other code
+        // here reports work outstanding, this one reports a number already being graded wrongly.
+        bool isError = false;
+        for (const ValidationIssue &i : issues)
+            if (i.code == QLatin1String("measureOutsideDomain")
+                && i.subject == QLatin1String("m_swayAtFinish"))
+                isError = (i.severity == IssueSeverity::Error);
+        check(isError, "it is an ERROR, not a warning — the one exception in this file");
+
+        // The reason has to name the domain, or an author is told no and not told what to change.
+        for (const ValidationIssue &i : issues)
+            if (i.code == QLatin1String("measureOutsideDomain")
+                && i.subject == QLatin1String("m_swayAtFinish"))
+                check(i.message.contains(QStringLiteral("P1"))
+                          && i.message.contains(QStringLiteral("P7"))
+                          && i.message.contains(QStringLiteral("pelvisSway")),
+                      "…and it names both the domain and the metric key");
+
+        // SCOPED TO LIVE, and this fixture is the only place that is pinned. A measure nothing can
+        // produce cannot be graded outside its domain either, so accusing a non-live row of the
+        // fault would put a check in the roadmap's queue. NB the shipped pack does NOT use that
+        // escape: `m_pelvisSwayFinish` was DELETED rather than parked, because `notCapturable` is a
+        // statement about the METRIC and pelvisSway is produced on every camera swing.
+        check(!hasSubject(issues, "measureOutsideDomain", QStringLiteral("m_swayRetired")),
+              "a RETIRED (non-live) measure is out of scope — that is how a withdrawal is stated");
+
+        // A metric with no authored domain means the whole swing, which is what almost every metric
+        // means. If the default ever stopped being the whole swing this would light up half the pack.
+        check(!hasSubject(issues, "measureOutsideDomain", QStringLiteral("m_headAtFinish")),
+              "a metric with no narrowed domain can be read anywhere, finish included");
+
+        // An unknown key answers the whole swing rather than refusing: it already has its own row,
+        // and inventing a narrow domain for it would accuse one omission of being two.
+        check(!hasSubject(issues, "measureOutsideDomain", QStringLiteral("m_unknownKey")),
+              "a measure naming nothing in the catalogue is not accused of a domain violation too");
+
+        // Nothing else the pack validator would find turns up here. diagnosticsHealth() calls
+        // `validateMeasureDomains()` — the domain pass on its own — rather than running the whole
+        // validator and sieving one code out of the result. These fixtures are deliberately thin (no
+        // signals, no conditions), so a full validatePack() over them would return a pile of rows
+        // the provider that loaded the pack has already reported, and listing them again would
+        // double every structural row in the health list.
+        check(countCode(issues, "unusedMeasure") == 0 && countCode(issues, "badReducer") == 0,
+              "only the domain pass runs — the standalone validator's rows are not repeated");
+    }
+
     // ── The shipped library ─────────────────────────────────────────────────
     //
     // Run for real. This is not a "no issues" assertion — the shipped set has known content debts
@@ -863,6 +957,18 @@ int main()
         check(countCode(issues, "unknownNormContext") == 0, "every shipped norm keys on a real context");
         check(countCode(issues, "normNotCapturable") == 0,
               "no shipped norm sits on a measure no sensor can produce");
+
+        // THE GATE for the phase-domain rule over real content. It shipped at ONE:
+        // `m_pelvisSwayFinish` read pelvisSway — a P1–P7 quantity — at the finish, where the
+        // lateral offset of a turned pelvis is its rotation and not the translation the measure
+        // named, and graded it against a heuristic corridor. On 2026-09-04 the measure, its norm row
+        // and both signals reading it (`sig_weightBackFinish`, `sig_offBalanceFinishSway`) were
+        // DELETED; `off_balance_finish` kept its `m_comOverLeadFootFinish` detector and
+        // `weight_back_at_finish` became Asserted with no signal. A NEW row here is not a backlog
+        // item: it is a number a golfer is being shown and graded on while measuring something that
+        // does not exist at the instant it was read.
+        check(countCode(issues, "measureOutsideDomain") == 0,
+              "NO shipped live measure reads its metric outside the domain where it means anything");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

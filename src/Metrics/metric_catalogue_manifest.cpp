@@ -94,6 +94,15 @@ void installMetricManifest(MetricCatalogue &cat)
     constexpr RouteQuality Estimated = RouteQuality::Estimated;   // → Bridged
     constexpr bool         PLANNED   = true;                      // this ROUTE has no producer yet
 
+    // ADDRESS → IMPACT (P1 → P7) — the frontal-plane family's phase domain, design §5.1's table.
+    // Every metric that takes it is a LATERAL displacement or a LINE TILT read in the face-on
+    // image, and past impact the body has turned far enough that the projection is measuring the
+    // ROTATION rather than the quantity named. A hip line 66° out of the image plane still yields
+    // an `atan2`, which is how a −88° tilt and a +35 % sway reached the screen looking like
+    // measurements. `comOverLeadFoot` deliberately does NOT narrow: it is a distance ALONG the
+    // stance line, which survives the turn, and it is read at the finish on purpose.
+    constexpr PhaseDomain P1toP7{ Phase::Address, Phase::Impact };
+
     // One acquisition route. Spelling each rung as six designated initialisers buried the thing the
     // ladder exists to show — that a metric can be got several ways, best first — under its own
     // syntax, so it is a call instead, and a descriptor's `.routes` reads as a list of methods.
@@ -801,6 +810,11 @@ void installMetricManifest(MetricCatalogue &cat)
         .signPositive = QStringLiteral("side bend toward the TRAIL side"),
         .signNegative = QStringLiteral("side bend toward the lead side"),
         .phases = { P::Impact },
+        // Side bend is the shoulder line MINUS the hip line, so it inherits BOTH lines'
+        // foreshortening and expires with them — read past impact it reports the turn. The
+        // geometry, and why ten metrics share this domain, is on P1toP7 at the top of this
+        // function; the nine below point back at it rather than repeat it.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("lateral trunk flexion, read in the frontal plane the face-on "
@@ -838,6 +852,8 @@ void installMetricManifest(MetricCatalogue &cat)
         // conditions hang off m_axisTiltAtTop — and the descriptor said Impact only, so the metric
         // documented itself for one phase while the library graded it at two.
         .phases = { P::Top, P::Impact },
+        // Frontal-plane trunk lean: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("the frontal spine vector against vertical, in the face-on image")) },
@@ -872,6 +888,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .signPositive = QStringLiteral("the pelvis moved toward the LEAD side"),
         .signNegative = QStringLiteral("moved away from the lead side"),
         .phases = { P::Top, P::Impact },
+        // A lateral projection of a rotating pelvis: see P1toP7. This is the channel the
+        // design's screenshot showed at +35 % past impact.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("lateral travel of the hip centre in the face-on image, against "
@@ -879,8 +898,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("characteristic:hanging_back"),
                     QStringLiteral("characteristic:slide"),
                     QStringLiteral("characteristic:sway"),
-                    QStringLiteral("characteristic:weight_back_at_finish"),
-                    QStringLiteral("characteristic:off_balance_finish"),
+                    // weight_back_at_finish / off_balance_finish were read off this curve AT
+                    // THE FINISH until 2026-09-04; past impact the lateral projection is
+                    // rotation, so the measure was deleted (domain = P1-P7) and both left.
                     QStringLiteral("characteristic:pelvis_drift_lead_backswing") },
     });
 
@@ -941,6 +961,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .signPositive = QStringLiteral("the pelvis rose"),
         .signNegative = QStringLiteral("the pelvis dropped"),
         .phases = { P::Top, P::Impact },
+        // Same projection, vertical half: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("vertical travel of the hip centre in the face-on image, against "
@@ -981,6 +1003,8 @@ void installMetricManifest(MetricCatalogue &cat)
         // shown and not graded, which is the honest state of them.
         .phases = { P::Address, P::ShaftParallelBack, P::MidBackswing, P::Top,
                     P::ArmParallelDown, P::Delivery, P::Impact },
+        // The hip line foreshortens to noise as the pelvis turns: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("the hip line's angle to horizontal, in the face-on image")) },
@@ -1028,6 +1052,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .signNegative = QStringLiteral("the hips sit behind centre, toward the trail side"),
         .phases = { P::Address, P::ShaftParallelBack, P::MidBackswing, P::Top,
                     P::ArmParallelDown, P::Delivery, P::Impact },
+        // The hip centre over the stance, in the same frontal plane: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOnBall", RM::Projected, Direct,
                 { .faceOnCamera = true, .ballTrack = true },
@@ -1066,6 +1092,8 @@ void installMetricManifest(MetricCatalogue &cat)
         // inward THROUGH impact is a different fault from it working in at the top, and the
         // model carried only the second. See lead_knee_valgus_impact.
         .phases = { P::Top, P::Impact },
+        // Lateral knee travel, same projection: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("lateral travel of the lead knee in the face-on image, against the "
@@ -1735,6 +1763,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .signPositive = QStringLiteral("the TRAIL elbow sits above the lead elbow"),
         .signNegative = QStringLiteral("the lead elbow sits above the trail elbow"),
         .phases = { P::Address, P::Impact },
+        // The elbow line foreshortens as the arms cross the body: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("the elbow line's angle, in the face-on image")) },
@@ -1960,6 +1990,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .signPositive = QStringLiteral("the TRAIL shoulder sits above the lead shoulder"),
         .signNegative = QStringLiteral("the lead shoulder sits above the trail shoulder"),
         .phases = { P::Address, P::Top, P::Impact },
+        // The shoulder line foreshortens as the thorax turns: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("the shoulder line's angle to horizontal, in the face-on image")) },
@@ -2080,6 +2112,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .signPositive = QStringLiteral("the chest moved toward the LEAD side"),
         .signNegative = QStringLiteral("moved away from the lead side"),
         .phases = { P::Address, P::ArmParallelDown },
+        // Lateral chest travel, same projection: see P1toP7.
+        .domain = P1toP7,
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("lateral travel of the chest centre in the face-on image, against "

@@ -91,6 +91,17 @@
 // A denominator is measured over the SAME address reference frames as its numerators,
 // so the ratio shares its scale by construction rather than by luck — the reason
 // foot_metrics captures shoulder width on the stance-width frames.
+//
+// ── ⚠ THE SHOULDER GATE IS NOT A RARE EVENT ─────────────────────────────────
+//
+// Read `upperBody.minShoulderSpanRatio` (0.40) with this number in front of you: on the
+// 108-swing corpus the shoulder span ratio AT THE TOP has a median of 0.32, and 55 of 83
+// measured swings sit below the gate there. So on most swings `shoulderPlaneAngle`,
+// `spineSideBend` and `trailElbowHeight` have NO reading at P4 at all — not a worse one, none.
+// That is the honest consequence of the geometry (a golfer who has turned 90° has no shoulder
+// line in a face-on image), and it is a deliberate product decision rather than an accident:
+// the alternative was continuing to grade +88° as a posture. Anyone tempted to treat the gate
+// as an edge case, or to wonder why a Top corridor stopped firing, should start here.
 
 #include <QPointF>
 #include <QString>
@@ -112,15 +123,46 @@ struct UpperBodyConfig {
     int     addrMinFrames     = tuned::upperBody::kAddrMinFrames;     // upperBody.addrMinFrames
     int64_t addrWindowUs      = tuned::upperBody::kAddrWindowUs;      // upperBody.addrWindowUs
     double  minShoulderSpanPx = tuned::upperBody::kMinShoulderSpanPx; // upperBody.minShoulderSpanPx
+    // The body LINES' foreshortening gates — |dx| now over |dx| at address. A different
+    // failure from minShoulderSpanPx, which guards a percentage denominator: these guard
+    // ANGLES whose divisor is the live horizontal separation, and which run to ±90° as the
+    // turn collapses two joints into one image column (+88° of "shoulder plane" AT THE TOP).
+    // Gates shoulderPlaneAngle, the shoulder half of spineSideBend, and trailElbowHeight —
+    // which is a height rather than a tilt but interpolates the shoulder line's y at the
+    // elbow's x, so it divides by the same dx and is UNBOUNDED where an angle at least
+    // saturates at 90°. See the ⚠ note at the top of this file for how often it fires.
+    double  minShoulderSpanRatio = tuned::upperBody::kMinShoulderSpanRatio; // upperBody.minShoulderSpanRatio
+    // The ELBOW line's gate, and an ABSOLUTE pixel floor rather than a ratio — a ratio is
+    // INERT here. The elbows are NARROWEST at address (the arms hang together and separate
+    // through the swing), so |dx|/address|dx| is ≈1 at address and ≥1 after it: the gate
+    // would never fire, and it would read exactly 1.0 at address, where a 20 px elbow
+    // separation is pure keypoint noise and `elbowAlignment` is READ.
+    double  minElbowSpanPx       = tuned::upperBody::kMinElbowSpanPx;       // upperBody.minElbowSpanPx
+    // The HIP line's gate, for spineSideBend's other half. Deliberately the LOWER-BODY key:
+    // it is the same geometric question about the same line, so it takes the same ratio.
+    // ⚠ It does NOT make the two modules agree frame by frame — this module resolves the hip
+    // line against its own address reference frames and its own denominator (see
+    // LowerBodyState::hipLineValid). One ratio, two references.
+    double  minHipSpanRatio      = tuned::lowerBody::kMinHipSpanRatio;      // lowerBody.minHipSpanRatio
+    // Where a bridge stops being a measurement (metric_channel.h channelValidityMask).
+    // Carried in the config, then on the result, so buildUpperBodySeries keeps its signature.
+    // NEGATIVE maxBridgeUs = do not mask at all, the pre-mask behaviour.
+    int64_t maxBridgeUs          = tuned::channel::kMaxBridgeUs;            // channel.maxBridgeUs
+    double  bridgeSpacingFactor  = tuned::channel::kBridgeSpacingFactor;    // channel.bridgeSpacingFactor
 
     static UpperBodyConfig fromOverrides(const QVariantMap &ov)
     {
         using namespace tuning;
         UpperBodyConfig c;
-        apply(ov, "upperBody.confMin",           c.confMin);
-        apply(ov, "upperBody.addrMinFrames",     c.addrMinFrames);
-        apply(ov, "upperBody.addrWindowUs",      c.addrWindowUs);
-        apply(ov, "upperBody.minShoulderSpanPx", c.minShoulderSpanPx);
+        apply(ov, "upperBody.confMin",              c.confMin);
+        apply(ov, "upperBody.addrMinFrames",        c.addrMinFrames);
+        apply(ov, "upperBody.addrWindowUs",         c.addrWindowUs);
+        apply(ov, "upperBody.minShoulderSpanPx",    c.minShoulderSpanPx);
+        apply(ov, "upperBody.minShoulderSpanRatio", c.minShoulderSpanRatio);
+        apply(ov, "upperBody.minElbowSpanPx",       c.minElbowSpanPx);
+        apply(ov, "lowerBody.minHipSpanRatio",      c.minHipSpanRatio);
+        apply(ov, "channel.maxBridgeUs",            c.maxBridgeUs);
+        apply(ov, "channel.bridgeSpacingFactor",    c.bridgeSpacingFactor);
         return c;
     }
 };
@@ -134,6 +176,28 @@ struct UpperBodyReference {
     double  leadArmLenPx   = 0.0;   // shoulder→elbow + elbow→wrist, the % arm length denominator
     double  leadSign       = 1.0;   // +1 if the lead side is image +x at address, else −1
     bool    valid          = false; // a shoulder span above the floor was resolved
+
+    // The two body lines' HORIZONTAL address spans, px — the denominators of the
+    // foreshortening ratios. There is no elbow entry: that line takes an absolute pixel
+    // floor (cfg.minElbowSpanPx) because a ratio against its address value is inert, the
+    // elbows being at their narrowest exactly there.
+    //
+    // ⚠ shoulderDxPx IS NOT shoulderSpanPx. That one is the EUCLIDEAN separation, because
+    // that is what "% shoulder width" has always meant here and in foot_metrics; this one
+    // is |Δx| in the image, because the degeneracy the gate exists for is horizontal
+    // foreshortening and a Euclidean length stays comfortably large while Δx goes to zero.
+    // Two different numbers for two different jobs; conflating them would silently disable
+    // the gate on exactly the frames it is for.
+    //
+    // 0.0 means the line's address span was never measured (its joints were not confident
+    // over the reference window), and the channel it gates is then ABSENT for the whole
+    // swing rather than ungated — the same refusal `leadArmLenPx == 0` already makes for
+    // leadHandWidth. A ratio with no denominator is not a measurement. For hipDxPx that has
+    // a visible consequence worth knowing: an address whose hips were never confident leaves
+    // spineSideBend absent for the whole swing even though the lower-body module, with its
+    // own reference, still produces hipLineTilt.
+    double  shoulderDxPx   = 0.0;
+    double  hipDxPx        = 0.0;
 };
 
 // Every channel this module produces, sparse (valid frames only) and already in its final unit.
@@ -150,7 +214,22 @@ struct UpperBodyResult {
     MetricChannel leadArmGap;       // leadUpperArmToChest      % shoulder width
     MetricChannel leadArmToTorso;   // leadArmToTorso           °   (unsigned, 0–180)
 
+    // The instants each gated channel's geometry was REFUSED at — the joints were confident and the
+    // LINE was not usable. Ascending, one entry per such frame.
+    //
+    // ⚠ These are NOT "the instants the channel lacks", and the difference decides whether a value is
+    // drawn as measured. A frame the detector dropped is a HOLD the resample may bridge; a frame the
+    // geometry refused has nothing to hold, so channelValidityMask forces it to 0 whatever the bridge
+    // budget. Without the distinction a 23-frame gated shoulder run came back with 30 of its frames
+    // flagged valid, and a P4 shoulder-plane sample of 25.8° was emitted from the bridge (see the
+    // note in metric_channel.h).
+    std::vector<int64_t> gatedShoulderLine;   // shoulderPlaneAngle, trailElbowHeight
+    std::vector<int64_t> gatedElbowLine;      // elbowAlignment
+    std::vector<int64_t> gatedSideBend;       // spineSideBend — EITHER line refused
+
     UpperBodyReference ref;
+    int64_t maxBridgeUs = tuned::channel::kMaxBridgeUs;  // carried from the config for the builder
+    double  bridgeSpacingFactor = tuned::channel::kBridgeSpacingFactor;   // likewise
     int  frameW = 0, frameH = 0;
     bool valid  = false;            // the address reference resolved AND at least one channel has samples
 };
@@ -167,6 +246,11 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
 // Resample the sparse channels onto the full per-frame grid and emit the nine series. Empty when
 // the address reference is unresolved or the shoulder span is below its floor — below that the
 // percentages are noise divided by noise, and the honest answer is that nothing was measured.
+//
+// Each series carries MetricSeries::valid: 0 on every frame whose geometry this module GATED (always,
+// whatever the bridge budget — a refused line has no value to hold) and 0 where the resample had to
+// bridge more than res.maxBridgeUs across frames the DETECTOR lost; empty when neither happened. AN
+// INVALID INSTANT EMITS NO PHASE SAMPLE, the same rule an unsegmented phase already obeys.
 std::vector<MetricSeries> buildUpperBodySeries(const UpperBodyResult &res,
                                                const std::vector<PhaseEvent> &phases);
 

@@ -18,6 +18,8 @@
 
 #include "lower_body_metrics.h"
 
+#include "metric_channel.h"   // channelValidityMask + the shared interp / phase / nearest helpers
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -25,6 +27,10 @@
 
 namespace pinpoint::analysis {
 namespace {
+
+// The empty gated-instant list, at namespace scope because a default argument cannot name a
+// local of the enclosing function (even a static one).
+const std::vector<int64_t> kNoneGated;
 
 // COCO-17 body indices, shared by both layouts (anatomy_vocabulary.h kp::).
 constexpr int kLHip = 11, kRHip = 12, kLKnee = 13, kRKnee = 14, kLAnkle = 15, kRAnkle = 16;
@@ -95,42 +101,15 @@ LowerBodyState computeState(const PoseFrame2D &f, int frameW, int frameH, double
     return s;
 }
 
-// Linear interp of an ascending sparse channel at t (hold at ends, bridge gaps). Same contract as
-// head_track / foot_metrics: never NaN.
-double interpChannel(const std::vector<int64_t> &xs, const std::vector<double> &ys, int64_t x)
-{
-    if (xs.empty()) return 0.0;                 // guarded upstream (channel non-empty)
-    if (x <= xs.front()) return ys.front();
-    if (x >= xs.back())  return ys.back();
-    const auto it = std::lower_bound(xs.begin(), xs.end(), x);
-    const size_t hi = size_t(it - xs.begin());
-    const size_t lo = hi - 1;
-    const int64_t span = xs[hi] - xs[lo];
-    if (span <= 0) return ys[lo];               // coincident samples (defensive)
-    const double f = double(x - xs[lo]) / double(span);
-    return ys[lo] + (ys[hi] - ys[lo]) * f;
-}
-
-// The instant of a phase in the ladder, or nullopt when the segmenter never found it. Same
-// contract as metric_channel.h's phaseTimeOpt(), and OPTIONAL FOR THE REASON STATED THERE: a
-// fallback to the grid front would emit a first-frame reading wearing an unsegmented phase's
-// label, and P2/P3/P5/P6 are genuinely missing on real swings.
-std::optional<int64_t> phaseTimeOpt(const std::vector<PhaseEvent> &phases, Phase p)
-{
-    for (const PhaseEvent &e : phases)
-        if (e.phase == p) return e.t_us;
-    return std::nullopt;
-}
-
-int nearestIndex(const std::vector<int64_t> &grid, int64_t t)
-{
-    if (t <= grid.front()) return 0;
-    if (t >= grid.back())  return int(grid.size()) - 1;
-    const auto it = std::lower_bound(grid.begin(), grid.end(), t);
-    const int hi = int(it - grid.begin());
-    const int lo = hi - 1;
-    return (t - grid[lo] <= grid[hi] - t) ? lo : hi;
-}
+// interpChannel / phaseTimeOpt / nearestIndex USED TO LIVE HERE, as private copies of the same
+// three functions metric_channel.h holds. They are gone, and this note is the reason: the validity
+// mask below has to call metric_channel.h's channelValidityMask, and the moment that header is
+// included an unqualified call to a private copy of `interpChannel` is AMBIGUOUS between the
+// anonymous namespace and pinpoint::analysis. The copies were character-for-character identical to
+// the shared ones (nearestIndex there adds an empty-grid guard that cannot fire here — the caller
+// checks res.states first), so deleting them changes no output. metric_channel.h's own note about
+// the three unmigrated producers is updated to say so; head_track and foot_metrics still carry
+// theirs, and still have no reason to be opened.
 
 } // namespace
 
@@ -140,6 +119,8 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
     LowerBodyResult res;
     res.frameW = frameW;
     res.frameH = frameH;
+    res.maxBridgeUs = cfg.maxBridgeUs;   // the builder reads these off the result, not off a config
+    res.bridgeSpacingFactor = cfg.bridgeSpacingFactor;
     if (frameW <= 0 || frameH <= 0)
         return res;
 
@@ -182,12 +163,25 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
     if (ref.empty())
         return res;   // no usable lower body anywhere — leave valid == false
 
-    std::vector<double> lhx, lhy, thx, thy, lkx, spans, leadAnkX, trailAnkX;
+    std::vector<double> lhx, lhy, thx, thy, lkx, spans, hipSpans, leadAnkX, trailAnkX;
     for (const LowerBodyState *s : ref) {
         lhx.push_back(s->leadHipPx.x());   lhy.push_back(s->leadHipPx.y());
         thx.push_back(s->trailHipPx.x());  thy.push_back(s->trailHipPx.y());
         lkx.push_back(s->leadKneePx.x());
         spans.push_back(std::abs(s->trailAnklePx.x() - s->leadAnklePx.x()));
+        // The hip line's own address span, |dx| in the IMAGE — the same quantity the live frames are
+        // compared against, taken over the same reference frames and by the same median, so the
+        // ratio cannot inherit a scale difference. Deliberately NOT the Euclidean hip separation:
+        // the degeneracy the gate exists for is horizontal foreshortening, and a Euclidean length
+        // stays comfortably large while dx goes to zero.
+        //
+        // NB the contract asked for |median(trailX) − median(leadX)|, i.e. the span between the two
+        // reference points above; this is median(|dx_i|), the span measured per frame and then
+        // reduced. They differ by well under a pixel on a still address and the per-frame form is
+        // the more honest of the two: it is the same quantity the live frames are compared against,
+        // measured the same way, and a median of a length cannot go negative or collapse when one
+        // endpoint is noisier than the other.
+        hipSpans.push_back(std::abs(s->trailHipPx.x() - s->leadHipPx.x()));
         leadAnkX.push_back(s->leadAnklePx.x());
         trailAnkX.push_back(s->trailAnklePx.x());
     }
@@ -196,6 +190,7 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
     res.addrTrailHipPx = QPointF(medianOf(thx), medianOf(thy));
     res.addrLeadKneePx = QPointF(medianOf(lkx), 0.0);
     res.addrSpanPx     = medianOf(spans);
+    res.addrHipSpanPx  = medianOf(hipSpans);
 
     // Which image direction the lead side is, resolved from the address geometry rather than
     // assumed. A camera can be mirrored and an operator can flip the preview, so a convention that
@@ -214,7 +209,29 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
     const double addrMidX      = 0.5 * (res.addrLeadHipPx.x() + res.addrTrailHipPx.x());
     const double addrMidY      = 0.5 * (res.addrLeadHipPx.y() + res.addrTrailHipPx.y());
 
-    for (const LowerBodyState &s : res.states) {
+    // The hip LINE's validity gate. A tilt is atan2(dy, |dx|), so as the pelvis turns toward the
+    // target the two hips foreshorten into the same image column and the angle runs to ±90° while
+    // nothing about the golfer's posture changed — the −88° hip tilt a review chart shows just after
+    // impact is exactly this, and it is a reading of the camera, not of the player. Below the ratio
+    // the frame HAS no hip line and hipLineTilt is ABSENT for it (never a sentinel, never the 0.0
+    // lineTiltDeg returns for a vertically stacked pair, which would read as "perfectly level").
+    //
+    // The other channels are deliberately NOT gated on this: sway, lift, knee drift, the plumb bob
+    // and comOverLeadFoot are POSITIONS, differences of positions, or projections onto the Euclidean
+    // stance line. The same turn distorts them, but it does not divide them by a vanishing span —
+    // that is a domain question (design §5.1's Address→Impact domains) answered one layer up, not a
+    // validity question answered here.
+    //
+    // feetAlignment IS a lineTiltDeg and so is the one exception in this file, ungated by judgement
+    // rather than by construction: the feet stay planted, so unlike the pelvis the stance line does
+    // not turn out of the image plane and its dx never collapses. If a corpus swing is ever found
+    // where it does, it takes this same gate against the address ankle span.
+    const bool hipRatioMeasurable = res.addrHipSpanPx > 1e-9;
+    for (LowerBodyState &s : res.states) {
+        if (s.hipsValid && hipRatioMeasurable) {
+            const double dx = std::abs(s.trailHipPx.x() - s.leadHipPx.x());
+            s.hipLineValid = (dx / res.addrHipSpanPx) >= cfg.minHipSpanRatio;
+        }
         // leadKneeDrift — the knee's displacement MINUS its own hip's. See the header: this
         // difference is what survives the projection of a genuine pelvic turn, and the raw knee
         // travel is not.
@@ -232,9 +249,16 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
             // Positive UP, so the address height minus the current one (image y grows downward).
             res.pelvisLift.t_us.push_back(s.t_us);
             res.pelvisLift.value.push_back((addrMidY - midY) * toPct);
-            // ABSOLUTE, not address-referenced — see the header.
+        }
+        // ABSOLUTE, not address-referenced — see the header. Gated on the hip LINE rather than on
+        // hipsValid: both hips can be perfectly confident and still not describe a line.
+        if (s.hipLineValid) {
             res.hipTilt.t_us.push_back(s.t_us);
             res.hipTilt.value.push_back(lineTiltDeg(s.leadHipPx, s.trailHipPx));
+        } else if (s.hipsValid) {
+            // Confident hips, refused geometry: record the instant as GATED, not merely missing. The
+            // resample may bridge a detector dropout; it must never bridge this.
+            res.gatedHipLine.push_back(s.t_us);
         }
         // feetAlignment — the ankle line, absolute, in the same convention as the hip line.
         if (s.anklesValid) {
@@ -294,10 +318,13 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
     for (const LowerBodyState &s : res.states)
         grid.push_back(s.t_us);
 
+    // `gated` = the instants THIS channel's geometry was refused at (ascending, empty for a channel
+    // with no gate). Distinct from the instants it merely lacks — see LowerBodyResult::gatedHipLine.
     const auto pushSeries = [&](const LowerBodyChannel &ch, const QString &key, const QString &label,
                                 const QString &unit,
                                 const std::vector<Phase> &at = { Phase::Address, Phase::Top,
-                                                                 Phase::Impact }) {
+                                                                 Phase::Impact },
+                                const std::vector<int64_t> &gated = kNoneGated) {
         if (ch.t_us.empty())
             return;
         std::vector<double> vals(grid.size());
@@ -309,23 +336,55 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
         m.unit  = unit;
         m.t_us  = grid;
         m.value = vals;
+        // WHICH OF THOSE VALUES WE ACTUALLY MEASURED. The resample still fills every grid sample —
+        // the renderer wants a continuous curve and a hole invites "did it crash" — but a sample
+        // bridged across more than res.maxBridgeUs of absence is a straight line we drew ourselves,
+        // and the mask is what stops PEAK, PK RATE and the diagnostics corridors from grading it.
+        // EMPTY when every sample is a measurement, which is the common case — and on such a swing no
+        // `valid` array is emitted at all, so nothing about it changed.
+        //
+        // ⚠ THE >= 0 GUARD IS THE OFF-SWITCH, not defensive noise. channel.maxBridgeUs < 0 means "do
+        // not mask" (buildChannelSeries documents the same sentinel), and calling the mask with a
+        // negative budget would fail `d <= allowance` on every sample INCLUDING the measured ones —
+        // an all-zeros mask, six metrics silently ungraded, from the knob that was supposed to
+        // restore the old behaviour.
+        //
+        // A GATED instant is 0 whatever the budget says — the geometry was seen and refused, so there
+        // is nothing to hold across. Only a CONFIDENCE hole gets the budget. Conflating the two is
+        // what let a 10-frame gated run of hipLineTilt at 7 ms spacing come back flagged as measured.
+        if (res.maxBridgeUs >= 0)
+            m.valid = channelValidityMask(grid, ch.t_us, res.maxBridgeUs, res.bridgeSpacingFactor,
+                                          gated);
         // Address / Top / Impact by default, the same three every other frontal-plane channel
         // samples. Top is P4 — the reading the knee-drift and hip-tilt corridors are both keyed on.
         // The caller may ask for more: comOverLeadFoot is read at the FINISH, which nothing sampled
         // before it existed, and hipLineTilt / plumbBobDistance are read across the whole P1–P7
-        // ladder. The four channels that predate those keep their original list deliberately, so
-        // their serialized phaseSamples stay byte-identical and no corpus gate has to be re-run to
-        // prove this change was additive.
+        // ladder. The four channels that predate those keep their original list deliberately, so the
+        // SET of phases they sample is unchanged.
+        //
+        // ⚠ That is no longer a byte-identical promise, and the sentence that used to claim one has
+        // been deleted rather than softened. Since the validity mask landed, ANY channel — including
+        // those four — loses a phaseSample whose instant the resample had to bridge, so a confidence
+        // dropout wider than the bridge allowance can remove a P1 or P7 reading that used to be
+        // emitted. Only the CORPUS GATE can say which swings that touches (plan §1.4: value[]
+        // equality plus an accounting of every removed sample); no comment here can.
         //
         // AN UNSEGMENTED PHASE PRODUCES NO SAMPLE. It used to coast to the grid front, which was
         // invisible while the list was Address/Top/Impact and is a fabricated reading the moment
         // P2/P3/P5/P6 are asked for — those come off the P-position bridge and are genuinely
         // missing on plenty of swings.
+        //
+        // AN INVALID INSTANT PRODUCES NO SAMPLE EITHER, and for the same reason: measure_sample.cpp
+        // falls back to the LABELLED sample where the curve has nothing, so a bridged value wearing
+        // a P4 label would be graded against the P4 corridor. That is how a +88° shoulder plane at
+        // the top became a graded reading, and the hip line has the identical degeneracy.
         for (const Phase p : at) {
             const std::optional<int64_t> t = phaseTimeOpt(phases, p);
             if (!t)
                 continue;
             const int idx = nearestIndex(grid, *t);
+            if (!m.valid.empty() && m.valid[size_t(idx)] == 0u)
+                continue;
             m.phaseSamples.push_back({ p, grid[idx], vals[idx], QString() });
         }
         out.push_back(std::move(m));
@@ -353,7 +412,7 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
     pushSeries(res.pelvisLift, QStringLiteral("pelvisLift"),
                QStringLiteral("Pelvis lift"), pct);
     pushSeries(res.hipTilt,    QStringLiteral("hipLineTilt"),
-               QStringLiteral("Hip line tilt"), QStringLiteral("°"), kP1toP7);
+               QStringLiteral("Hip line tilt"), QStringLiteral("°"), kP1toP7, res.gatedHipLine);
     pushSeries(res.feetAlign,  QStringLiteral("feetAlignment"),
                QStringLiteral("Feet alignment"), QStringLiteral("°"));
     pushSeries(res.comOverLead, QStringLiteral("comOverLeadFoot"),

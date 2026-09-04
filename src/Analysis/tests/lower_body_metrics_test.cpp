@@ -27,7 +27,9 @@
 // whole reason the channel is a difference rather than a position.
 
 #include "../lower_body_metrics.h"
+#include "../metric_channel.h"   // channelValidityMask / nearestIndex — §6d and §6e test them directly
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -479,6 +481,346 @@ int main()
         CHECK("no ball ruler ⇒ no plumb bob at all",
               findSeries(without, "plumbBobDistance") == nullptr);
         CHECK("…and every other channel is unaffected", without.size() == 6);
+    }
+
+    // ── 6d) The hip LINE's foreshortening gate ─────────────────────────────
+    //
+    // THE CASE THIS SECTION CARRIES, and the reason the gate exists at all: `lineTiltDeg` divides by
+    // the hips' horizontal separation, so a pelvis turning toward the target collapses the two hips
+    // into the same image column and the angle runs to ±90° while the posture it claims to describe
+    // has not changed. A real review chart shows −88° of "hip line tilt" just after impact. That is a
+    // reading of the camera, and the honest answer is that the frame has NO hip line.
+    //
+    // The track below rotates the hips about the vertical from square to 80° over 20 frames, with the
+    // trail hip rising as it goes so there IS a genuine tilt to lose. |dx| / addrHipSpan is exactly
+    // cos θ, so the 0.40 gate bites at 66.4° — frames 16..19 of the rotation, grid indices 22..25.
+    {
+        std::printf("=== 6d) hip line foreshortening gate ===\n");
+        const double kPi     = 3.14159265358979323846;
+        const double hipHalf = 0.04;      // ±40 px about the stance centre ⇒ an 80 px address span
+        const int    kAddr   = 6;         // held address frames, for the robust reference
+        const int    kTurn   = 20;
+
+        std::vector<PoseFrame2D> frames;
+        for (int k = 0; k < kAddr; ++k) frames.push_back(makeLower(k * dt, addressPose()));
+        for (int k = 0; k < kTurn; ++k) {
+            const double th   = 80.0 * k / double(kTurn - 1);
+            const double c    = std::cos(th * kPi / 180.0);
+            const double rise = 0.020 * k / double(kTurn - 1);   // trail hip up to 20 px above lead
+            Lower p = addressPose();
+            p.lHip = QPointF(0.50 - hipHalf * c, 0.50);
+            p.rHip = QPointF(0.50 + hipHalf * c, 0.50 - rise);
+            frames.push_back(makeLower((kAddr + k) * dt, p));
+        }
+        PoseTrack2D pose; pose.frames = frames;
+        LowerBodyConfig cfg; cfg.addrWindowUs = 30000;
+
+        // Top lands on a frame the gate PASSES (θ = 58.9°) and Impact inside the run it REFUSES
+        // (θ = 75.8°) — the pair is the point: one sample survives and the other must not exist.
+        const int64_t topUs = 20 * dt, impactUs = 24 * dt;
+        const auto phases = ladder({ { Phase::Address, 2 * dt },
+                                     { Phase::Top,     topUs },
+                                     { Phase::Impact,  impactUs } });
+
+        const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt, cfg);
+        CHECK("the hip line's ADDRESS span is measured, |dx| not a Euclidean length",
+              near(res.addrHipSpanPx, hipHalf * 2.0 * W, 0.5));
+        CHECK("the last four turned frames have no hip line",
+              res.states.size() == size_t(kAddr + kTurn)
+                  && res.states[21].hipLineValid && !res.states[22].hipLineValid
+                  && !res.states[25].hipLineValid);
+        CHECK("…and the channel simply does not carry them", res.hipTilt.t_us.size() == 22);
+
+        const auto series = buildLowerBodySeries(res, phases);
+        const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+        CHECK("hipLineTilt still emitted — a gated run is not a refused metric", tilt != nullptr);
+        if (tilt) {
+            // The mask, not the value, is where the absence lives: the curve stays continuous for
+            // the renderer and says which of itself is a measurement.
+            CHECK("a validity mask is present and parallel to t_us",
+                  tilt->valid.size() == tilt->t_us.size());
+            bool maskExact = tilt->valid.size() == 26;
+            for (size_t i = 0; i < tilt->valid.size(); ++i)
+                maskExact = maskExact && (tilt->valid[i] == (i >= 22 ? 0u : 1u));
+            CHECK("0 across the bridged run, 1 everywhere else", maskExact);
+
+            // What the gate BOUGHT. Ungated, the last frame reads atan2(20 px, 13.9 px) ≈ 55° and is
+            // heading for 90°; the last real measurement is 23.6°, and that is what the bridge holds.
+            const double ungatedLast = std::atan2(20.0, 2.0 * hipHalf * W * std::cos(80.0 * kPi / 180.0))
+                                       * 57.29577951308232;
+            CHECK("the ungated angle really would have run away", ungatedLast > 50.0);
+            double worst = 0.0;
+            for (double v : tilt->value) worst = std::max(worst, std::fabs(v));
+            CHECK("nothing in the series approaches ±90°", worst < 30.0);
+            CHECK("the bridge HOLDS the last measurement rather than reporting the collapse",
+                  near(valueAt(*tilt, 25 * dt), valueAt(*tilt, 21 * dt), 1e-9));
+
+            CHECK("a phase instant on a valid frame still samples", hasPhase(*tilt, Phase::Top));
+            CHECK("A PHASE INSTANT INSIDE THE INVALID RUN EMITS NO SAMPLE",
+                  !hasPhase(*tilt, Phase::Impact));
+        }
+
+        // The ungated channels are untouched: sway, lift and knee drift are POSITIONS, which the same
+        // turn distorts by projection but does not divide by a vanishing span. That is a phase-domain
+        // question answered one layer up, not a validity question answered here.
+        const MetricSeries *sway = findSeries(series, "pelvisSway");
+        CHECK("pelvisSway is not gated by the hip line",
+              sway && sway->valid.empty() && hasPhase(*sway, Phase::Impact));
+
+        // The invariant every consumer relies on, asserted over the whole emission.
+        bool noSampleOnInvalid = true;
+        for (const MetricSeries &m : series) {
+            if (m.valid.empty()) continue;
+            for (const PhaseSample &ps : m.phaseSamples)
+                noSampleOnInvalid = noSampleOnInvalid
+                                    && m.valid[size_t(nearestIndex(m.t_us, ps.t_us))] == 1u;
+        }
+        CHECK("no phase sample anywhere lands on an invalid index", noSampleOnInvalid);
+    }
+
+    // ── 6d2) GATED is not the same as MISSING, mid-track ───────────────────
+    //
+    // THE CASE THE CORPUS GATE FOUND. §6d's run is at the tail, where the extent rule marks it on its
+    // own; a run INSIDE the track can only be marked by the mask's own reasoning, and the first
+    // version of that reasoning got it wrong. On the real 2026-08-18 swing a 10-frame gated run in
+    // hipLineTilt at 7 ms spacing came back flagged VALID — every frame of it was within 60 ms of the
+    // last measurement — so the bridge was drawn and graded as a reading.
+    //
+    // The two holes below are the same length (10 frames) at the same spacing (7 ms), and must get
+    // OPPOSITE answers:
+    //
+    //   frames 10–19  the hips are CONFIDENT and the line is refused (80° of turn) ⇒ GATED ⇒ 0.
+    //                 The geometry was seen. There is no hip tilt at that instant to hold.
+    //   frames 30–39  the keypoints are below the confidence gate ⇒ MISSING ⇒ bridged, valid.
+    //                 The geometry was there; we just did not see it, and holding across 70 ms of a
+    //                 pelvis is honest — that is what the budget is for.
+    {
+        std::printf("=== 6d2) a gated run vs a confidence hole, same length, same spacing ===\n");
+        const int64_t dt7 = 7000;                     // ≈150 fps, the dense zone
+        // 80° of turn: |dx| collapses to 0.174 of the address span, well under the 0.40 gate.
+        const auto turned = [] {
+            Lower p = addressPose();
+            p.lHip = QPointF(0.50 - 0.04 * 0.1736, 0.50);
+            p.rHip = QPointF(0.50 + 0.04 * 0.1736, 0.48);
+            return p;
+        };
+        std::vector<PoseFrame2D> frames;
+        for (int k = 0; k < 50; ++k) {
+            const bool gated = (k >= 10 && k <= 19);
+            const bool dark  = (k >= 30 && k <= 39);
+            frames.push_back(makeLower(k * dt7, gated ? turned() : addressPose(),
+                                       dark ? 0.10f : 0.9f));
+        }
+        PoseTrack2D pose; pose.frames = frames;
+        LowerBodyConfig cfg; cfg.addrWindowUs = 30000;   // the reference is the opening square frames
+
+        // Top inside the GATED run (must emit nothing) and Impact inside the CONFIDENCE hole (must
+        // still emit, from the bridge — the honest hold).
+        const auto phases = ladder({ { Phase::Address,  2 * dt7 },
+                                     { Phase::Top,     15 * dt7 },
+                                     { Phase::Impact,  35 * dt7 } });
+        const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt7, cfg);
+        CHECK("the ten refused frames are recorded as GATED, not merely absent",
+              res.gatedHipLine.size() == 10 && res.gatedHipLine.front() == 10 * dt7
+                  && res.gatedHipLine.back() == 19 * dt7);
+
+        const auto series = buildLowerBodySeries(res, phases);
+        const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+        CHECK("hipLineTilt emitted", tilt != nullptr);
+        if (tilt) {
+            bool exact = tilt->valid.size() == 50;
+            for (size_t i = 0; i < tilt->valid.size(); ++i)
+                exact = exact && (tilt->valid[i] == ((i >= 10 && i <= 19) ? 0u : 1u));
+            CHECK("ALL TEN gated frames are 0 — no budget excuses refused geometry", exact);
+            CHECK("the same-length CONFIDENCE hole stays valid, bridged as it always was",
+                  tilt->valid.size() == 50 && tilt->valid[30] == 1u && tilt->valid[35] == 1u
+                      && tilt->valid[39] == 1u);
+            CHECK("the mask starts and ends VALID, so none of it came from the extent rule",
+                  tilt->valid.size() == 50 && tilt->valid.front() == 1u && tilt->valid.back() == 1u);
+            CHECK("a phase instant inside the GATED run emits nothing", !hasPhase(*tilt, Phase::Top));
+            CHECK("…while one inside the confidence hole still does", hasPhase(*tilt, Phase::Impact));
+        }
+
+        // pelvisSway has no geometric gate at all, so its only hole is the confidence one — inside
+        // the budget, therefore EMPTY. Nothing was gated, nothing exceeded the budget, no mask.
+        const MetricSeries *sway = findSeries(series, "pelvisSway");
+        CHECK("an ungated channel with a bridged hole carries NO mask at all",
+              sway && sway->valid.empty() && hasPhase(*sway, Phase::Impact));
+    }
+
+    // ── 6d3) channel.maxBridgeUs < 0 is the OFF-SWITCH ─────────────────────
+    //
+    // The documented way back to the pre-mask behaviour, and it has to actually work: a negative
+    // budget must mean NO MASK, not a budget nothing can satisfy. Calling the mask with −1 would
+    // fail `d <= allowance` on every sample including the measured ones, and an all-zeros mask
+    // withdraws six metrics from every reducer at once. The producer guards it; this pins the guard.
+    {
+        std::printf("=== 6d3) maxBridgeUs < 0 disables masking ===\n");
+        const double kPi = 3.14159265358979323846;
+        std::vector<PoseFrame2D> frames;
+        for (int k = 0; k < 6; ++k) frames.push_back(makeLower(k * dt, addressPose()));
+        for (int k = 0; k < 20; ++k) {
+            const double c = std::cos((80.0 * k / 19.0) * kPi / 180.0);
+            Lower p = addressPose();
+            p.lHip = QPointF(0.50 - 0.04 * c, 0.50);
+            p.rHip = QPointF(0.50 + 0.04 * c, 0.50 - 0.020 * k / 19.0);
+            frames.push_back(makeLower((6 + k) * dt, p));
+        }
+        PoseTrack2D pose; pose.frames = frames;
+        LowerBodyConfig cfg; cfg.addrWindowUs = 30000; cfg.maxBridgeUs = -1;
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,     20 * dt },
+                                     { Phase::Impact,  24 * dt } });
+        const auto series = buildLowerBodySeries(trackLowerBody(pose, W, H, true, 2 * dt, cfg),
+                                                 phases);
+        CHECK("every channel still emitted", series.size() == 6);
+        bool noMask = !series.empty();
+        for (const MetricSeries &m : series) noMask = noMask && m.valid.empty();
+        CHECK("no mask anywhere — not an all-zeros one", noMask);
+        const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+        CHECK("…and every ladder phase still samples, as it did before the mask existed",
+              tilt && tilt->phaseSamples.size() == 3);
+    }
+
+    // ── 6e) The gate that never fires changes NOTHING ──────────────────────
+    //
+    // The other half of the promise, and the one the corpus gate is judged on: a swing with no gated
+    // frame must serialise exactly as it did before MetricSeries::valid existed. EMPTY means all
+    // valid — never an all-ones array, which would be a new key in every swing.json for nothing.
+    {
+        std::printf("=== 6e) no gated frame ⇒ empty mask, unchanged series ===\n");
+        std::vector<PoseFrame2D> frames;
+        for (int k = 0; k < 6; ++k) frames.push_back(makeLower(k * dt, addressPose()));
+        for (int s = 1; s <= 6; ++s) {
+            Lower p = addressPose();
+            const double f = double(s) / 6.0;
+            p.lHip = QPointF(p.lHip.x(), p.lHip.y() - 0.004 * f);   // a tilt, no rotation
+            p.rHip = QPointF(p.rHip.x(), p.rHip.y() - 0.016 * f);
+            frames.push_back(makeLower((5 + s) * dt, p));
+        }
+        PoseTrack2D pose; pose.frames = frames;
+        LowerBodyConfig cfg; cfg.addrWindowUs = 30000;
+        const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt, cfg);
+        const auto phases = ladder({ { Phase::Address, 2 * dt },
+                                     { Phase::Top,     8 * dt },
+                                     { Phase::Impact, 11 * dt } });
+        const auto series = buildLowerBodySeries(res, phases);
+
+        CHECK("the hip line is never gated by a pure tilt",
+              res.hipTilt.t_us.size() == res.states.size());
+        bool allEmpty = !series.empty();
+        for (const MetricSeries &m : series) allEmpty = allEmpty && m.valid.empty();
+        CHECK("every series leaves `valid` EMPTY", allEmpty);
+
+        const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+        CHECK("…and the tilt still reads its three ladder phases",
+              tilt && tilt->phaseSamples.size() == 3);
+        CHECK("…with the value the geometry says (trail 12 px above over an 80 px span)",
+              tilt && near(valueAt(*tilt, 11 * dt),
+                           std::atan2(12.0, 80.0) * 57.29577951308232, 0.2));
+    }
+
+    // ── 6f) channelValidityMask, on its own ────────────────────────────────
+    //
+    // The one place the bridge-versus-measurement rule is spelled, so it is tested where it lives
+    // rather than only through a producer. 60 ms is the default budget: a one- or two-frame dropout
+    // still bridges silently (that is today's behaviour and it was honest), a real run does not.
+    {
+        std::printf("=== 6f) channelValidityMask ===\n");
+        std::vector<int64_t> grid;
+        for (int k = 0; k < 20; ++k) grid.push_back(k * dt);    // 0 .. 190 ms
+
+        // Every grid instant measured ⇒ EMPTY, not twenty ones.
+        CHECK("all valid returns an EMPTY mask",
+              channelValidityMask(grid, grid, 60000).empty());
+
+        // A 150 ms hole between 40 ms and 190 ms. Distance to the NEAREST measurement, either side:
+        // 90 ms is 50 ms away (bridged silently, as it always was), 100 and 130 ms are exactly 60 ms
+        // away (the budget is inclusive), and only 110 and 120 ms are beyond it.
+        std::vector<int64_t> holed;
+        for (int64_t t : grid)
+            if (t <= 4 * dt || t >= 19 * dt) holed.push_back(t);
+        const std::vector<uint8_t> m = channelValidityMask(grid, holed, 60000);
+        CHECK("a hole wider than the budget produces a mask", m.size() == grid.size());
+        CHECK("a sample within maxBridgeUs of a measurement is VALID", m[9] == 1u);
+        CHECK("…and exactly at the budget is still valid", m[10] == 1u && m[13] == 1u);
+        CHECK("a sample farther than maxBridgeUs from any measurement is INVALID",
+              m[11] == 0u && m[12] == 0u);
+        CHECK("a measured instant is always valid", m[4] == 1u && m[19] == 1u);
+
+        // Outside the channel's extent is invalid whatever the budget says: the value there is not a
+        // bridge between two measurements, it is a constant hold past the last one.
+        std::vector<int64_t> late(grid.begin() + 5, grid.end());
+        const std::vector<uint8_t> tail = channelValidityMask(grid, late, 10000000);
+        CHECK("before the channel starts is INVALID however generous the budget",
+              tail.size() == grid.size() && tail[0] == 0u && tail[4] == 0u && tail[5] == 1u);
+
+        CHECK("an empty channel makes every sample invalid",
+              channelValidityMask(grid, {}, 60000) == std::vector<uint8_t>(grid.size(), 0u));
+        CHECK("an empty grid has nothing to mark", channelValidityMask({}, grid, 60000).empty());
+
+        // ── GATED beats the budget, at the helper's own level ───────────────
+        //
+        // A gated instant is 0 even when it sits ON TOP of a measurement's neighbour, because the
+        // budget answers "how long may we hold a value" and a refused frame has no value to hold.
+        {
+            std::vector<int64_t> minusOne;
+            for (int64_t t : grid)
+                if (t != 5 * dt) minusOne.push_back(t);          // one frame absent, 10 ms from both
+            CHECK("a one-frame hole with nothing gated is bridged in silence",
+                  channelValidityMask(grid, minusOne, 60000).empty());
+            const std::vector<uint8_t> g = channelValidityMask(grid, minusOne, 60000, 1.5,
+                                                               { 5 * dt });
+            CHECK("…and the SAME hole, declared gated, is 0",
+                  g.size() == grid.size() && g[5] == 0u && g[4] == 1u && g[6] == 1u);
+            CHECK("an empty gated list changes nothing",
+                  channelValidityMask(grid, grid, 60000, 1.5, {}).empty());
+        }
+
+        // ── The SPARSE regime, which a fixed 60 ms gets wrong ──────────────
+        //
+        // PoseRunner samples the address region at addressStride 15 (≈100 ms at 150 fps) or
+        // coarseStride 12 (≈80 ms), so one dropped sample there is 80–100 ms from its neighbours. A
+        // fixed budget would mark it, and that is the wrong answer: across one missing sample of a
+        // STILL address, holding the previous value is a hold, not a fabrication — nothing happened
+        // in between to misrepresent. The allowance is therefore
+        // max(maxBridgeUs, 1.5 × the local spacing).
+        {
+            std::vector<int64_t> sparse;
+            for (int k = 0; k < 8; ++k) sparse.push_back(k * 100000);   // 100 ms grid, 0 .. 700 ms
+
+            std::vector<int64_t> oneMissing = sparse;
+            oneMissing.erase(oneMissing.begin() + 3);                   // 300 ms absent
+            CHECK("one dropped sample on a 100 ms grid is a HOLD, not a fabrication",
+                  channelValidityMask(sparse, oneMissing, 60000).empty());
+
+            // Two adjacent are still within one-and-a-half spacings of a measurement…
+            std::vector<int64_t> twoMissing;
+            for (int64_t t : sparse)
+                if (t != 300000 && t != 400000) twoMissing.push_back(t);
+            CHECK("…and so are two adjacent ones",
+                  channelValidityMask(sparse, twoMissing, 60000).empty());
+
+            // …but the middle of three is 200 ms from either edge, which no spacing argument
+            // excuses.
+            std::vector<int64_t> threeMissing;
+            for (int64_t t : sparse)
+                if (t != 300000 && t != 400000 && t != 500000) threeMissing.push_back(t);
+            const std::vector<uint8_t> tm = channelValidityMask(sparse, threeMissing, 60000);
+            CHECK("the middle of a three-sample hole IS marked, even on a sparse grid",
+                  tm.size() == sparse.size() && tm[4] == 0u && tm[3] == 1u && tm[5] == 1u);
+
+            // And the sparse allowance must not leak into the dense zone: on an 8 ms grid the
+            // spacing term is 12 ms and the 60 ms floor is what decides.
+            std::vector<int64_t> dense;
+            for (int k = 0; k < 40; ++k) dense.push_back(k * 8000);     // 8 ms grid, 0 .. 312 ms
+            std::vector<int64_t> denseHole;
+            for (int64_t t : dense)
+                if (t < 80000 || t > 240000) denseHole.push_back(t);    // a 160 ms gated run
+            const std::vector<uint8_t> dh = channelValidityMask(dense, denseHole, 60000);
+            CHECK("a 160 ms run in the DENSE zone is still marked (60 ms floor decides)",
+                  dh.size() == dense.size() && dh[20] == 0u && dh[9] == 1u && dh[39] == 1u);
+        }
     }
 
     // ── 7) fromOverrides ───────────────────────────────────────────────────

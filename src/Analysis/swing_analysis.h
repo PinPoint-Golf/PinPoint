@@ -281,6 +281,12 @@ struct MetricSeries {
     // when a real error budget was propagated; confidence must WIDEN this, never
     // nudge `value`.
     std::optional<double> sigma;
+    // Per-sample validity, parallel to t_us. EMPTY means every sample is valid — every
+    // series that predates this field, and every series with nothing to mark, leaves it
+    // empty and serialises byte-identically. A 0 marks a sample whose value was BRIDGED
+    // across a gated or absent run (see metric_channel.h channelValidityMask): drawn
+    // dashed, skipped by every reducer, never the site of a phase sample.
+    std::vector<uint8_t> valid;
     bool flexPositive = true;             // stored-sign polarity (flip only at the label)
 };
 

@@ -20,6 +20,7 @@
 
 #include "anatomy_vocabulary.h"
 
+#include "../Metrics/metric_descriptor.h"   // PhaseDomain — a reducer is checked against it
 #include "../Metrics/metric_reducer.h"
 
 #include <QString>
@@ -122,6 +123,20 @@ struct ReducerCheck {
     QString reason;
 };
 ReducerCheck validateReducer(const Reducer &r);
+
+// The same, plus the METRIC'S PHASE DOMAIN (metric_descriptor.h): an `at` anchor, or a
+// delta/rate/extremum window, that reaches outside the domain is refused with a reason naming it in
+// P-positions. Design §5.1 — "the reducers search only inside it".
+//
+// A SECOND FUNCTION AND NOT A NEW FIELD ON Reducer. The domain is a property of the metric, not of
+// the reduction, and a great many callers legitimately have no metric in hand — the facet picker
+// validating a half-built composed measure, every existing pack test. Those keep the one-argument
+// form, which is this one with the whole-swing default, so the answers they get are unchanged.
+//
+// The domain is passed in rather than looked up: this file has never been able to see the metric
+// catalogue and does not start now (see characteristic_pack.h, same rule). A caller that holds one
+// asks it; a caller that does not gets the whole swing, which is what almost every metric means.
+ReducerCheck validateReducer(const Reducer &r, const PhaseDomain &domain);
 
 // ── Canonical naming ────────────────────────────────────────────────────────
 // Deterministic: identical facets always produce an identical string. Identity is still the tuple,

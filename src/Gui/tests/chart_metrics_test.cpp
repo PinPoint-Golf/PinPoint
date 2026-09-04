@@ -34,6 +34,7 @@
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
+#include <cmath>
 #include <cstdio>
 
 static int g_fail = 0;
@@ -47,6 +48,12 @@ static void checkEqI(const char *label, long long got, long long want)
 {
     const bool ok = got == want;
     std::printf("  [%s] %-42s got %5lld  want %5lld\n", ok ? "PASS" : "FAIL", label, got, want);
+    if (!ok) ++g_fail;
+}
+static void checkEqD(const char *label, double got, double want)
+{
+    const bool ok = std::fabs(got - want) < 1e-6;
+    std::printf("  [%s] %-42s got %8.3f  want %8.3f\n", ok ? "PASS" : "FAIL", label, got, want);
     if (!ok) ++g_fail;
 }
 static void checkStr(const char *label, const QString &got, const char *want)
@@ -327,6 +334,229 @@ int main()
         // An uncatalogued key still returns "" — PpMetricChart._name falls back to series.label,
         // and a series the manifest has never heard of must keep the name its producer gave it.
         checkStr("uncatalogued → \"\"", cm.shortLabel(QStringLiteral("zzzNotAMetric")), "");
+    }
+
+    // ── summaryMasked: an invalid sample is not a measurement ─────────────────────
+    //
+    // The fixture is the shape of the defect this exists to stop: five samples of a slow, tidy
+    // curve with ONE absurd value in the middle, marked invalid because it was bridged across a
+    // gated run (the body line was foreshortened there and its tilt was measuring the camera).
+    // Unmasked it owns the peak, the range AND the peak rate — the three tiles the screenshot
+    // that started this design got wrong.
+    {
+        std::printf("summaryMasked — invalid samples are skipped\n");
+        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
+                              qlonglong(3000), qlonglong(4000) };
+        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
+        const QVariantList mask{ 1, 1, 0, 1, 1 };
+
+        // Baseline: what the old code did, and still does with nothing marked.
+        const QVariantMap bare = cm.summary(t, v, 0, 4000);
+        checkEqD("unmasked peak is the outlier", bare.value(QStringLiteral("peak")).toDouble(), 99.0);
+        checkEqD("unmasked rate is its slope",   bare.value(QStringLiteral("rate")).toDouble(), 9700.0);
+        checkTrue("unmasked is not partial",    !bare.value(QStringLiteral("partial")).toBool());
+
+        const QVariantMap m = cm.summaryMasked(t, v, mask, 0, 4000);
+        checkEqD("min over valid only",  m.value(QStringLiteral("min")).toDouble(),   1.0);
+        checkEqD("max over valid only",  m.value(QStringLiteral("max")).toDouble(),   4.0);
+        checkEqD("peak over valid only", m.value(QStringLiteral("peak")).toDouble(),  4.0);
+        checkEqD("range over valid only", m.value(QStringLiteral("range")).toDouble(), 3.0);
+        // The rate is taken between consecutive VALID samples, so the 2→3 step spans the bridged
+        // sample's 2 ms and reads 50/100 ms rather than the outlier's 9700. Crossing a gap makes a
+        // rate SMALLER, which is the only safe direction: a gap must not invent the steepest slope.
+        checkEqD("rate over valid only", m.value(QStringLiteral("rate")).toDouble(), 100.0);
+        checkTrue("a bridged sample in the window ⇒ partial",
+                  m.value(QStringLiteral("partial")).toBool());
+    }
+
+    // ── partial: the window's numbers do not rest on a continuous measurement ─────
+    {
+        std::printf("summaryMasked — partial\n");
+        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
+                              qlonglong(3000), qlonglong(4000) };
+        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
+        const QVariantList mask{ 1, 1, 0, 1, 1 };
+
+        // An EDGE landing on the invalid sample. The edge value is interpolated from the valid
+        // samples either side (2 at 1 ms, 3 at 3 ms ⇒ 2.5), which is the one place this reducer
+        // may cross a bridged run — and it says so rather than presenting 2.5 as a reading.
+        const QVariantMap edge = cm.summaryMasked(t, v, mask, 2000, 4000);
+        checkEqD("edge read from the valid neighbours",
+                 edge.value(QStringLiteral("start")).toDouble(), 2.5);
+        checkTrue("edge on an invalid sample ⇒ partial",
+                  edge.value(QStringLiteral("partial")).toBool());
+
+        // The case the "invalid sample inside the window" rule alone would MISS: a window that
+        // sits entirely between two samples, inside the bridged run, and so contains no sample at
+        // all. Every number in it came from across the gap.
+        const QVariantMap inside = cm.summaryMasked(t, v, mask, 1200, 1800);
+        checkTrue("window inside a bridged run ⇒ partial",
+                  inside.value(QStringLiteral("partial")).toBool());
+
+        // …and a window with valid samples on both sides of nothing marked is NOT partial, so the
+        // chip stays off on the swings that have nothing to declare.
+        const QVariantMap clean = cm.summaryMasked(t, v, mask, 3000, 4000);
+        checkTrue("a fully valid window is not partial",
+                  !clean.value(QStringLiteral("partial")).toBool());
+    }
+
+    // ── An empty mask IS "every sample valid" ─────────────────────────────────────
+    //
+    // summary() delegates to summaryMasked() with {}, so this pins the delegation as an identity:
+    // every series that predates the validity field, which is every series in every swing.json
+    // written before 2026-09-04, must summarise to exactly the numbers it did before.
+    {
+        std::printf("summaryMasked — empty mask ≡ summary()\n");
+        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
+                              qlonglong(3000), qlonglong(4000) };
+        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
+        const QVariantMap a = cm.summary(t, v, 500, 3500);
+        const QVariantMap b = cm.summaryMasked(t, v, QVariantList{}, 500, 3500);
+        checkTrue("same key set", a.keys() == b.keys());
+        bool same = true;
+        for (auto it = a.constBegin(); it != a.constEnd(); ++it)
+            if (it.value() != b.value(it.key())) same = false;
+        checkTrue("identical for every key", same);
+
+        // An all-ONES mask is the same thing said the long way — the persistence layer never
+        // writes one, but a caller that builds a mask by hand must not get a different answer.
+        const QVariantMap ones = cm.summaryMasked(t, v, QVariantList{ 1, 1, 1, 1, 1 }, 500, 3500);
+        checkEqD("all-ones peak",  ones.value(QStringLiteral("peak")).toDouble(),
+                                   a.value(QStringLiteral("peak")).toDouble());
+        checkTrue("all-ones is not partial", !ones.value(QStringLiteral("partial")).toBool());
+    }
+
+    // ── domainFor: the manifest says where a metric means something ───────────────
+    //
+    // Reads the REAL catalogue for the same reason seriesGroups' test does: the domain is authored
+    // in metric_catalogue_manifest.cpp and the chart is one of three consumers of it (the pack
+    // validator and the diagnostics engine are the others). A domain quietly dropped from a
+    // descriptor would silently un-dim two thirds of a curve, and nothing else would notice.
+    {
+        std::printf("domainFor — the metric's phase domain\n");
+        const QVariantMap hip = cm.domainFor(QStringLiteral("hipLineTilt"));
+        // Address(0) → Impact(5): past impact the pelvis has TURNED, so the tilt of the hip line
+        // in the image plane is a reading of rotation, not of the frontal-plane geometry the
+        // metric is defined as. See design §5.1's table.
+        checkEqI("hip tilt first phase", hip.value(QStringLiteral("firstPhase")).toInt(), 0);
+        checkEqI("hip tilt last phase",  hip.value(QStringLiteral("lastPhase")).toInt(),  5);
+
+        // comOverLeadFoot is the counter-case in the same table — it is READ at the finish, so it
+        // must NOT have been swept into the Address→Impact batch.
+        const QVariantMap com = cm.domainFor(QStringLiteral("comOverLeadFoot"));
+        checkEqI("com over lead foot last phase",
+                 com.value(QStringLiteral("lastPhase")).toInt(), 7);
+
+        // An uncatalogued key gets the descriptor DEFAULT — the whole swing, Address(0)→Finish(7).
+        // Not knowing a metric is not a licence to hide part of its curve.
+        const QVariantMap unknown = cm.domainFor(QStringLiteral("zzzNotAMetric"));
+        checkEqI("unknown key first phase", unknown.value(QStringLiteral("firstPhase")).toInt(), 0);
+        checkEqI("unknown key last phase",  unknown.value(QStringLiteral("lastPhase")).toInt(),  7);
+
+        // ── THE NARROWED FLAGS, PER SIDE ────────────────────────────────────────────────────
+        //
+        // This is the flag that stops the domain clamp firing on metrics it was never meant for,
+        // and the bug it prevents is invisible in a screenshot. The chart's AXIS is the PADDED
+        // swing (Segmentation swingStart/End ± boundPadUs = 250 ms), so Address is 250 ms inside
+        // the axis start and Finish 250 ms inside its end. A caller that clipped to the DEFAULT
+        // Address..Finish domain would dash a quarter-second off both ends of every whole-swing
+        // metric and move its Full-window PEAK/Δ/RATE on every swing — breaking the property this
+        // phase rests on, that nothing changes where the design does not fire. Per side, because
+        // hipLineTilt narrows only its END and its leading pre-address samples must be untouched.
+        checkTrue("headSway not narrowed",
+                  !cm.domainFor(QStringLiteral("headSway")).value(QStringLiteral("narrowed")).toBool());
+        checkTrue("headSway neither side",
+                  !cm.domainFor(QStringLiteral("headSway")).value(QStringLiteral("firstNarrowed")).toBool()
+                  && !cm.domainFor(QStringLiteral("headSway")).value(QStringLiteral("lastNarrowed")).toBool());
+        // The same for a club metric and an uncatalogued key — the whole-swing majority.
+        checkTrue("clubheadSpeed not narrowed",
+                  !cm.domainFor(QStringLiteral("clubheadSpeed")).value(QStringLiteral("narrowed")).toBool());
+        checkTrue("unknown key not narrowed",
+                  !unknown.value(QStringLiteral("narrowed")).toBool());
+
+        // hipLineTilt: narrowed, and on the LAST side only. Its domain first phase IS Address, so
+        // a whole-domain "narrowed" flag would have clipped its start as well.
+        checkTrue("hip tilt narrowed",       hip.value(QStringLiteral("narrowed")).toBool());
+        checkTrue("hip tilt last side only", hip.value(QStringLiteral("lastNarrowed")).toBool()
+                                             && !hip.value(QStringLiteral("firstNarrowed")).toBool());
+        // comOverLeadFoot is in the same family but deliberately NOT narrowed — it is read at the
+        // finish. Pinned so a future sweep of the frontal-plane batch cannot take it along.
+        checkTrue("com over lead foot not narrowed",
+                  !com.value(QStringLiteral("narrowed")).toBool());
+    }
+
+    // ── The short-mask rule: a malformed mask is no mask, not half a mask ──────────
+    //
+    // Pinned because THREE places consult validity — this class, PpChartPlot/PpSegmentBrush's JS
+    // index form, and measure_sample.cpp's buildPhaseGrid — and a truncated array is the one input
+    // on which they could each plausibly do something different. Guessing which end a mask was
+    // truncated from would invent validity nobody stated; the shared answer is to discard it.
+    {
+        std::printf("summaryMasked / measuredAt — the short-mask rule\n");
+        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
+                              qlonglong(3000), qlonglong(4000) };
+        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
+        const QVariantList shortMask{ 1, 1, 0 };          // covers 3 of 5 — malformed
+
+        const QVariantMap full  = cm.summary(t, v, 0, 4000);
+        const QVariantMap trunc = cm.summaryMasked(t, v, shortMask, 0, 4000);
+        checkEqD("short mask ⇒ no mask (peak)", trunc.value(QStringLiteral("peak")).toDouble(),
+                                                full.value(QStringLiteral("peak")).toDouble());
+        checkEqD("short mask ⇒ no mask (rate)", trunc.value(QStringLiteral("rate")).toDouble(),
+                                                full.value(QStringLiteral("rate")).toDouble());
+        checkTrue("short mask ⇒ not partial", !trunc.value(QStringLiteral("partial")).toBool());
+        // measuredAt agrees, rather than bounding its scan at qMin(sizes) and answering a
+        // different question than the reducer did about the very same series.
+        checkTrue("short mask ⇒ measuredAt says measured", cm.measuredAt(t, shortMask, 2000, 0, 0));
+        // A mask LONGER than the curve is still honoured — over-length is not truncation.
+        const QVariantList longMask{ 1, 1, 0, 1, 1, 1, 1 };
+        checkEqD("over-length mask still masks",
+                 cm.summaryMasked(t, v, longMask, 0, 4000).value(QStringLiteral("peak")).toDouble(), 4.0);
+    }
+
+    // ── bandAtNearest: no verdict rather than an invented pass ─────────────────────
+    //
+    // "nearest" over a whole swing means the Address sample is 900 ms away and still nearest, and
+    // the old code additionally defaulted an EMPTY list to "good". Between them, a series whose
+    // producer emitted no sample at impact — which is exactly what §5.1's gating arranges — had
+    // its @impact reading tinted PASS GREEN off nothing at all.
+    {
+        std::printf("bandAtNearest — a missing verdict is not a good one\n");
+        auto sample = [](qlonglong tUs, const char *band) {
+            return QVariant(QVariantMap{ { QStringLiteral("t_us"), tUs },
+                                         { QStringLiteral("value"), 0.0 },
+                                         { QStringLiteral("band"), QString::fromLatin1(band) } });
+        };
+        checkStr("empty list ⇒ no verdict", cm.bandAtNearest({}, 3000000), "");
+        // 900 ms away: nearest, and irrelevant. This is the case that tinted cards green.
+        const QVariantList far{ sample(2100000, "good") };
+        checkStr("far sample ⇒ no verdict", cm.bandAtNearest(far, 3000000), "");
+        // Within a frame of the instant asked about ⇒ the verdict stands, unchanged.
+        const QVariantList near{ sample(2995000, "warn"), sample(2100000, "good") };
+        checkStr("near sample ⇒ its band", cm.bandAtNearest(near, 3000000), "warn");
+        // Exactly on it, and an unscored producer's empty band still reads as no verdict — which
+        // is what it is: the face-on batch is UNSCORED and stamps band "".
+        const QVariantList unscored{ sample(3000000, "") };
+        checkStr("unscored sample ⇒ no verdict", cm.bandAtNearest(unscored, 3000000), "");
+    }
+
+    // ── measuredAt: one predicate for the dashes, the dots and the "—" ────────────
+    {
+        std::printf("measuredAt — was there a reading here\n");
+        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
+                              qlonglong(3000), qlonglong(4000) };
+        const QVariantList mask{ 1, 1, 0, 1, 1 };
+
+        // No mask and no domain (fromUs == toUs disables the domain test) ⇒ everything measured,
+        // which is how every pre-validity swing must still render.
+        checkTrue("no mask ⇒ measured", cm.measuredAt(t, QVariantList{}, 2000, 0, 0));
+        checkTrue("bridged sample ⇒ not measured", !cm.measuredAt(t, mask, 2000, 0, 0));
+        checkTrue("valid sample ⇒ measured",        cm.measuredAt(t, mask, 3000, 0, 0));
+        // Nearest, not exact: a crosshair between samples takes the nearer one's verdict.
+        checkTrue("nearest is the bridged one",    !cm.measuredAt(t, mask, 2100, 0, 0));
+        // Outside the domain nothing is measured, mask or no mask.
+        checkTrue("past the domain ⇒ not measured", !cm.measuredAt(t, QVariantList{}, 3000, 0, 2000));
+        checkTrue("inside the domain ⇒ measured",    cm.measuredAt(t, QVariantList{}, 1000, 0, 2000));
     }
 
     std::printf("\n%s — %d failure(s)\n", g_fail ? "FAILED" : "OK", g_fail);

@@ -157,6 +157,58 @@ int main()
         check(!validateReducer(noAnchor).valid, "At without a phase is rejected");
     }
 
+    // ── Reducer validity against the METRIC'S PHASE DOMAIN ──────────────────────
+    //
+    // The ten frontal-plane metrics are authored Address->Impact (design 5.1): past impact a
+    // lateral projection is reporting the body's ROTATION in a translation's units, which is not a
+    // noisy measurement but a reading of something that is not there. A measure authored outside
+    // that range has to be refused at the pack, because on screen it looks entirely plausible.
+    {
+        const PhaseDomain p1p7{ Phase::Address, Phase::Impact };
+
+        check(validateReducer(at(Phase::Impact), p1p7).valid, "at P7 is inside Address->Impact");
+        check(validateReducer(delta(Phase::Address, Phase::Impact), p1p7).valid,
+              "a P1->P7 change is inside it");
+        check(validateReducer(peak(Phase::Top, Phase::Impact, Phase::Address), p1p7).valid,
+              "an anchored P4->P7 peak is inside it");
+
+        const ReducerCheck outside = validateReducer(at(Phase::Finish), p1p7);
+        check(!outside.valid, "at the finish is REFUSED on an Address->Impact metric");
+        // The reason has to name the domain, or an author is told "no" and not told what to change.
+        check(outside.reason.contains(QStringLiteral("P1"))
+                  && outside.reason.contains(QStringLiteral("P7")),
+              "…and the reason names the domain in P-positions");
+        check(outside.reason.contains(QStringLiteral("finish")),
+              "…and names the phase that broke it");
+
+        check(!validateReducer(delta(Phase::Address, Phase::Finish), p1p7).valid,
+              "a change RUNNING PAST the domain is refused");
+        check(!validateReducer(peak(Phase::Top, Phase::Release), p1p7).valid,
+              "a peak window whose end is outside is refused, not clamped");
+        check(!validateReducer(peak(Phase::Top, Phase::Impact, Phase::Finish), p1p7).valid,
+              "an out-of-domain ANCHOR is refused too — the deviation is read there");
+
+        // LADDER ORDER, not enum order. Delivery is P6 with enum value 9 and MaxSpeed is 10, both
+        // ABOVE Impact's 5 — a numeric comparison would throw out two readings taken before the
+        // strike. (P8 comes out right by luck at 14; luck is not a check.) Hence phaseInDomain.
+        check(validateReducer(at(Phase::Delivery), p1p7).valid,
+              "P6 is inside Address->Impact despite its higher enum value");
+        check(validateReducer(at(Phase::MaxSpeed), p1p7).valid,
+              "max speed sits between P6 and P7, so it is inside too");
+        check(!validateReducer(at(Phase::ShaftParallelThrough), p1p7).valid,
+              "P8 is outside, despite the enum putting it nowhere near");
+
+        // A malformed reducer is reported as malformed, never as a domain violation: the author has
+        // to be sent to the half that is actually wrong.
+        const ReducerCheck bothWrong = validateReducer(delta(Phase::Finish, Phase::Finish), p1p7);
+        check(!bothWrong.valid && bothWrong.reason.contains(QStringLiteral("two different phases")),
+              "shape is checked before domain");
+
+        // The one-argument form is the whole swing, so every existing caller answers as it did.
+        check(validateReducer(at(Phase::Finish)).valid,
+              "without a domain the finish is still perfectly readable");
+    }
+
     // ── Canonical naming is deterministic and reducer-aware ─────────────────────
     {
         const Series s = ser(AnatomyRole::Spine, Quantity::Angle, AnatomyRole::Ground);

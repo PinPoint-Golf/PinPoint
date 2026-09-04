@@ -855,7 +855,119 @@ int main()
         check(cat.query(aq, nullptr).empty(), "availableOnly without ctx → empty");
     }
 
-    // 6. There is no corridor() any more.
+    // 6. Phase domains — the ladder order, and every descriptor's own consistency.
+    //
+    // A domain is only useful if "inside" is decided in LADDER order. Phase is append-only, so a
+    // numeric comparison on the enum puts P2 (12), P3 (8), P5 (13) and P6 (9) all past Impact (5)
+    // — excluding four coaching positions from an Address→Impact domain — while Finish (7) would
+    // sit inside it. Those are silently wrong answers from a check whose whole job is to catch
+    // silently wrong answers, so the ladder is pinned here first.
+    {
+        // Every value the enum carries, listed so the compiler cannot quietly drop one from the
+        // sweep the way a range-based loop over a non-contiguous enum would.
+        const Phase kEvery[] = {
+            Phase::Address,   Phase::Takeaway, Phase::Top,       Phase::Transition,
+            Phase::Downswing, Phase::Impact,   Phase::Release,   Phase::Finish,
+            Phase::MidBackswing, Phase::Delivery, Phase::MaxSpeed, Phase::FollowThrough,
+            Phase::ShaftParallelBack, Phase::ArmParallelDown, Phase::ShaftParallelThrough,
+        };
+        // THE BACKSTOP for a Phase added to the enum and not to the ladder. The switch has no
+        // `default:`, but this build does not make that warning an error, so the count is what
+        // actually holds: kPhaseCount is stated beside the ladder, kEvery[] is written out here, and
+        // an author who adds an enumerator has to touch one of the two before this passes again.
+        checkEqI(int(std::size(kEvery)), kPhaseCount,
+                 "kEvery[] lists exactly kPhaseCount phases");
+
+        QSet<int> seen;
+        bool      dense = true, placed = true;
+        for (Phase p : kEvery) {
+            const int i = phaseLadderIndex(p);
+            if (i == kPhaseNotInLadder) {
+                placed = false;
+                std::printf("      phase %d has no rung on the ladder\n", int(p));
+                continue;
+            }
+            if (seen.contains(i)) dense = false;
+            seen.insert(i);
+        }
+        check(placed, "every Phase value has a rung — none falls through to kPhaseNotInLadder");
+        check(dense, "phaseLadderIndex is injective — no two phases share a rung");
+        checkEqI(int(seen.size()), kPhaseCount, "…and the ladder is exactly kPhaseCount rungs long");
+
+        // The sentinel really does refuse, rather than reading as Address (index 0, which sits
+        // inside every authored domain). This is the half that makes an unplaced phase loud.
+        check(!phaseInDomain(PhaseDomain{}, static_cast<Phase>(99)),
+              "a Phase with no rung is inside NO domain, not silently inside the whole swing");
+
+        // The coaching ladder itself. This is the sequence every domain is read against, so if it
+        // ever stops ascending the check above is checking nothing.
+        const Phase kP1toP10[] = {
+            Phase::Address, Phase::ShaftParallelBack, Phase::MidBackswing, Phase::Top,
+            Phase::ArmParallelDown, Phase::Delivery, Phase::Impact,
+            Phase::ShaftParallelThrough, Phase::FollowThrough, Phase::Finish,
+        };
+        bool ascending = true;
+        for (std::size_t i = 1; i < std::size(kP1toP10); ++i)
+            if (phaseLadderIndex(kP1toP10[i]) <= phaseLadderIndex(kP1toP10[i - 1])) ascending = false;
+        check(ascending, "P1..P10 ascend in ladder order");
+
+        // The two readings that enum order gets backwards, called out by name because they are the
+        // ones a reviewer will want to see stated.
+        check(phaseInDomain(PhaseDomain{ Phase::Address, Phase::Impact }, Phase::Delivery),
+              "P6 is INSIDE Address->Impact (enum value 9 > Impact's 5 would exclude it)");
+        check(phaseInDomain(PhaseDomain{ Phase::Address, Phase::Impact }, Phase::ShaftParallelBack),
+              "P2 is INSIDE Address->Impact (enum value 12 would exclude it too)");
+        check(!phaseInDomain(PhaseDomain{ Phase::Address, Phase::Impact }, Phase::ShaftParallelThrough),
+              "P8 is OUTSIDE Address->Impact");
+        check(!phaseInDomain(PhaseDomain{ Phase::Address, Phase::Impact }, Phase::Finish),
+              "…and so is the finish, which enum value 7 would have let through");
+        check(phaseInDomain(PhaseDomain{}, Phase::Finish),
+              "the default domain is the whole swing and contains the finish");
+
+        // THE INVARIANT: a descriptor may not document itself at a phase it cannot be read at. That
+        // contradiction is the same class of bug the route ladder replaced — two fields in one
+        // descriptor disagreeing, with the directory quoting whichever it reached first.
+        int narrowed = 0, offenders = 0;
+        for (const MetricDescriptor *d : cat.all()) {
+            const bool whole = d->domain.first == Phase::Address && d->domain.last == Phase::Finish;
+            if (!whole) ++narrowed;
+            for (Phase p : d->phases) {
+                if (phaseInDomain(d->domain, p)) continue;
+                ++offenders;
+                std::printf("      %s documents phase %d outside its domain\n",
+                            qPrintable(d->key), int(p));
+            }
+        }
+        checkEqI(offenders, 0, "every descriptor's phases lie inside its domain");
+
+        // The frontal-plane family from design §5.1's table. Counted as well as spot-checked, so
+        // adding an eleventh (or dropping one) has to be a deliberate edit here too.
+        const char *kAddressToImpact[] = {
+            "pelvisSway", "pelvisLift", "leadKneeDrift", "plumbBobDistance", "hipLineTilt",
+            "shoulderPlaneAngle", "elbowAlignment", "spineSideBend", "secondaryAxisTilt",
+            "thoraxLateralDrift",
+        };
+        bool allNarrowed = true;
+        for (const char *k : kAddressToImpact) {
+            const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(k));
+            if (!d || d->domain.first != Phase::Address || d->domain.last != Phase::Impact) {
+                allNarrowed = false;
+                std::printf("      %s is not authored Address->Impact\n", k);
+            }
+        }
+        check(allNarrowed, "the ten frontal-plane metrics are authored Address->Impact");
+        checkEqI(narrowed, int(std::size(kAddressToImpact)),
+                 "…and they are the ONLY narrowed domains");
+
+        // comOverLeadFoot is the deliberate exception in the same table: a distance ALONG the stance
+        // line survives the turn, and it is read at the finish on purpose. If it ever narrows, the
+        // balance-at-finish reading disappears with no other symptom.
+        const MetricDescriptor *com = cat.descriptor(QStringLiteral("comOverLeadFoot"));
+        check(com && phaseInDomain(com->domain, Phase::Finish),
+              "comOverLeadFoot keeps the whole swing — it is READ at the finish");
+    }
+
+    // 7. There is no corridor() any more.
     //
     // The catalogue described metrics AND judged them until stage 9: `.normative` carried a DOF to
     // delegate to the compiled band table, or an inline corridor per phase. Both are gone. A

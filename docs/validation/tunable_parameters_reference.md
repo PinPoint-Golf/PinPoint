@@ -338,6 +338,145 @@ chosen for shape, and the producers' unit tests pin their SIGNS and refusal gate
 accuracy. Signs are what a synthetic track can pin exactly and a corpus cannot; accuracy is the
 other way round, and is outstanding for all three.
 
+### 2.16 `lowerBody.minHipSpanRatio` / `upperBody.minShoulderSpanRatio` / `upperBody.minElbowSpanPx` / `channel.*` — geometric validity gates (2026-09-04)
+
+Five keys from the first phase of
+[`metric_presentation_honesty.md`](../design/metric_presentation_honesty.md) §5.1. They add
+ABSENCE, never a value: no persisted `value[]` moves, and on a swing where none of them fires no
+`valid` array is emitted at all.
+
+⚠ "Byte-identical" is the wrong word for the swings where one DOES fire, and it was used here in an
+earlier draft. A masked instant emits no phase sample, so a confidence dropout wider than the bridge
+allowance can remove a P1 or P7 reading that used to be emitted — from any channel, including the
+four that predate this work. The corpus gate is therefore `value[]` equality plus an accounting of
+every removed sample, not whole-file parity.
+
+**`lowerBody.minHipSpanRatio` (0.40)** and **`upperBody.minShoulderSpanRatio` (0.40)**
+(`LowerBodyConfig` / `UpperBodyConfig`). The BODY LINES' foreshortening gate — the live |Δx| of a
+line over its address |Δx|, both medians over the same address reference frames. A body-line tilt is
+`atan2(dy, |dx|)`, so as the golfer turns out of the image plane the two ends collapse toward the
+same image column, `dx → 0` and the angle runs to ±90° with nothing about the posture having
+changed: a review chart on the 2026-08-18 corpus swing shows **−88° of hip line tilt** just after
+impact and **+88° of shoulder plane at the top**, and the second of those is a GRADED phase sample.
+Below the ratio the frame has no line, its sample is absent from the channel, and the resampled
+series carries a 0 in `MetricSeries::valid` there.
+
+⚠ These are NOT the existing `minStanceSpanPx` / `minShoulderSpanPx` floors, which guard a
+percentage DENOMINATOR in pixels. These guard an ANGLE whose divisor is the live horizontal
+separation, and the two fail on different frames. Nor is the shoulder ratio taken against
+`UpperBodyReference::shoulderSpanPx`, which is the EUCLIDEAN span "% shoulder width" has always
+meant: the gate needs |Δx| in the image, and a Euclidean length stays comfortably large while Δx
+goes to zero.
+
+0.40 of the address span is roughly 66° out of the image plane (`acos 0.4`), where a 2 px keypoint σ
+on a 120 px address span is about 2.4° of angle error — the same order as the residual jitter. Below
+it the error grows as 1/ratio and passes 10° by ratio 0.1.
+
+⚠ **What the corpus says about 0.40, measured in phase 0.** The hip ratio at P1 has a median of
+**1.000**, so the address denominator is clean and the lower-body gate is quiet where it matters.
+The shoulder ratio **at P4 has a median of 0.32, with 55 of 83 measured swings below 0.40** — so on
+most swings `shoulderPlaneAngle`, `spineSideBend` and `trailElbowHeight` have **no reading at the
+top at all**. That is the geometry (a golfer who has turned 90° has no shoulder line in a face-on
+image) and not a defect, but it removes a graded Top sample from the majority of the corpus, so the
+0.40 default is a **product decision pending sign-off**, not a settled tuning value. Nobody should
+read this gate as a rare event.
+
+`lowerBody.minHipSpanRatio` gates `hipLineTilt` **and** the hip half of `spineSideBend` in the
+upper-body module: one ratio for one geometric question about one line, wherever it is asked.
+
+⚠ **One ratio, two references.** Sharing the key does not make the two modules agree frame by frame.
+They are separate analysis stages with no shared result, so each resolves the hip line against its
+OWN address reference frames and its own median denominator, and on a marginal frame they can
+disagree. The upper module's reference admission test does not require the hips at all, so an address
+whose hips were unconfident leaves it with no hip denominator — and then `spineSideBend` is absent
+for the **whole swing** while `hipLineTilt` is still produced. That asymmetry is deliberate (a ratio
+with no denominator is not a measurement, and taking one from mid-swing frames would put the
+denominator inside the collapse it is meant to detect) and it is pinned by a test.
+
+`upperBody.minShoulderSpanRatio`
+gates `shoulderPlaneAngle`, the shoulder half of `spineSideBend` (which needs BOTH lines) and
+`trailElbowHeight`.
+
+**`upperBody.minElbowSpanPx` (25.0)** is the elbow line's gate, and it is an ABSOLUTE PIXEL FLOOR
+where the other two are ratios. That is a correction, not an inconsistency: a ratio needs an address
+span that represents the line at its widest, and the elbows are at their **narrowest** at address —
+the arms hang together and separate through the swing — so `|Δx| / address |Δx|` is ≈1 at address and
+≥1 everywhere after it. The ratio form was written first and was **inert**: it could never fire, and
+it read exactly 1.0 at address, which is precisely where `elbowAlignment` is read and where a 20 px
+elbow separation is pure keypoint noise. 25 px is a few keypoint σ (≈2 px each); below it the tilt
+error exceeds 10°. `UpperBodyReference` therefore carries no elbow entry at all.
+
+`trailElbowHeight` is on the shoulder-ratio list although it is a height rather than a tilt, because
+`heightAboveLine` interpolates the shoulder line's y at the elbow's x —
+`lineY = a.y + (p.x − a.x)·(b.y − a.y)/dx` — and so divides by the same vanishing span. It is the
+worse case of the two: an angle at least saturates at 90°, while a % shoulder width is unbounded.
+
+**What is gated is exactly what divides by a line's live |Δx|**, audited channel by channel. Not
+gated, with the divisor that makes each one safe: `secondaryAxisTilt` (the VERTICAL neck→pelvis
+rise), `thoraxLateralDrift` (the Euclidean ankle-line length, scaled by the address ankle |Δx|),
+`leadHandWidth` (the address lead-arm length), `leadUpperArmToChest` (the address Euclidean shoulder
+span), `leadArmToTorso` (two Euclidean vector lengths), and on the lower-body side sway, lift, knee
+drift, the plumb bob and `comOverLeadFoot` (the Euclidean stance-line length). Those are still
+distorted by the projection of a turn — that is a phase-DOMAIN question answered in the metric
+descriptor — but they are not divisions by a vanishing separation, and gating them would withhold
+measurements that were actually made.
+
+⚠ `feetAlignment` is the ONE ungated `lineTiltDeg`, and it is ungated by judgement rather than by
+construction: it divides by the ankle line's live |Δx| exactly as the hip line does, but the feet
+stay planted and the stance line does not turn out of the image plane during a swing, so the
+denominator never collapses. If a corpus swing is ever found where it does — a full-finish pivot onto
+the trail toe, say — it takes the same gate against the address ankle |Δx|, and the constant is
+already there in `lowerBody.minHipSpanRatio`'s shape.
+
+**`channel.maxBridgeUs` (60000)** and **`channel.bridgeSpacingFactor` (1.5)**
+(`metric_channel.h channelValidityMask`, read by both body configs). Where a BRIDGE stops being a
+measurement. The resample has always held at the ends and
+coasted across gaps so the curve is continuous and never NaN, which is right for a renderer and
+wrong for a reducer: PEAK, PK RATE and a phase sample taken on a bridged run are a confident reading
+of a straight line the producer drew itself. A grid sample farther than this from any real channel
+sample — or outside the channel's time extent, where the value is a constant hold rather than a
+bridge — is still filled, and marked 0 in `MetricSeries::valid`. 60 ms keeps today's behaviour where
+it was honest (a one- or two-frame confidence dropout at 150 fps still bridges silently). The mask is
+**omitted entirely when every sample is valid**, the same discipline `sigma` follows — never an
+all-ones array.
+
+⚠ **THE BUDGET APPLIES ONLY TO CONFIDENCE HOLES, NEVER TO A GATED FRAME.** These two are different
+statements and the first implementation conflated them, which the 11-swing gate caught: on
+2026-08-18 Wrist_01 swing_0001 a 10-frame *gated* run in `hipLineTilt` at 7 ms spacing came back
+flagged **valid**, because every frame of it sat within 60 ms of the last measurement — so the bridge
+(−28…−13°, where the raw was −31…−78°) was drawn and graded as a reading. On swing_0003 that emitted
+a P4 `shoulderPlaneAngle` of 25.8° taken from the bridge and changed `spineSideBend`'s P7 the same
+way. That is precisely the fabrication design §4 principle 2 forbids.
+
+- **The keypoints were unconfident** — the geometry was there and we did not see it. Holding across
+  it is a hold, and the budget decides how long a hold stays honest.
+- **The producer gated the frame** — the geometry was seen and refused. There is nothing to hold, so
+  it is 0 whatever the spacing and whatever `maxBridgeUs` says.
+
+`channelValidityMask` therefore takes the producer's list of *gated instants* alongside the channel's
+measured ones, and both producers pass one per gated channel (`gatedHipLine`; `gatedShoulderLine`,
+`gatedElbowLine`, `gatedSideBend`). A test puts a 10-frame gated run and a 10-frame confidence hole at
+the same spacing in one track and asserts they come out opposite.
+
+⚠ **A fixed budget is not enough, and that is what `bridgeSpacingFactor` is for.** The grid is not
+uniformly sampled: `PoseRunner` poses every frame only inside the dense zone, and the address region
+runs at `addressStride 15` (≈100 ms at 150 fps) or `coarseStride 12` (≈80 ms) — `pose_runner.h`. So a
+single dropped sample there is 80–100 ms from its neighbours and a flat 60 ms would mark it, which is
+the wrong answer: across one missing sample of a still, sparsely posed address, holding the previous
+value is a hold, not a fabrication. (An earlier draft of this section justified 60 ms by citing
+`sparseStride = 4` at 27 ms for the address region; that is the *dense-zone-adjacent* stride, not the
+address one, and the justification was wrong.) The allowance is therefore
+`max(maxBridgeUs, bridgeSpacingFactor × local grid spacing)`, where local spacing is the larger of the
+two neighbour gaps so it does not collapse on the sparse side of a stride change. Mid-swing the
+spacing is ≈8 ms and the 60 ms floor decides, so a genuinely gated run is still marked. At 1.5 a hole
+of one or two missing samples still holds and the middle of a hole of three or more is marked.
+
+⚠ **`channel.maxBridgeUs` negative is the documented OFF-SWITCH** — no mask at all, the pre-mask
+behaviour, for a parity run. It is not simply passed through to the mask, because a negative budget
+there would fail the distance test on every sample *including the measured ones* and hand back an
+all-zeros mask, withdrawing every gated metric from every reducer at once. Both producers guard it and
+both guards are pinned by a test.
+
 ## 3. The frozen-defaults header — the single freeze edit-point
 
 `src/Core/pp_tuned_constants.h` (`namespace pinpoint::tuned`) is the **single source of truth** for every

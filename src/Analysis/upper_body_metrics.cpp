@@ -27,6 +27,10 @@
 namespace pinpoint::analysis {
 namespace {
 
+// The empty gated-instant list, at namespace scope because a default argument cannot name a
+// local of the enclosing function (even a static one).
+const std::vector<int64_t> kNoneGated;
+
 constexpr double kRadToDeg = 57.29577951308232;
 constexpr double kEps      = 1e-9;
 
@@ -127,6 +131,13 @@ struct FrameGeom {
     bool spineValid = false, anklesValid = false, thoraxValid = false;
     bool leadArmValid = false, leadHandValid = false, trailElbowValid = false;
 
+    // The three LINES, which is a stronger statement than "both joints were confident": a line
+    // whose horizontal span has foreshortened below cfg.minShoulderSpanRatio / minHipSpanRatio of
+    // its address span has no tilt to report. Resolved against the address reference, so they are
+    // set in trackUpperBody's channel pass rather than here, and stay false when that reference
+    // never resolved.
+    bool shoulderLineValid = false, hipLineValid = false, elbowLineValid = false;
+
     QPointF leadShoulder, trailShoulder;
     QPointF leadHip, trailHip;
     QPointF leadElbow, trailElbow;
@@ -179,6 +190,8 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
     UpperBodyResult res;
     res.frameW = frameW;
     res.frameH = frameH;
+    res.maxBridgeUs = cfg.maxBridgeUs;   // the builder reads these off the result, not off a config
+    res.bridgeSpacingFactor = cfg.bridgeSpacingFactor;
     if (frameW <= 0 || frameH <= 0)
         return res;
 
@@ -224,6 +237,18 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
         return res;   // no usable upper body anywhere — leave valid == false
 
     std::vector<double> shoulderSpans, stanceSpans, armLens, leadAnkX, trailAnkX;
+    // The body lines' HORIZONTAL address spans, the foreshortening ratios' denominators. Same
+    // reference frames and same median as everything else above, so a ratio cannot inherit a scale
+    // difference from the window it was measured over. The hip list is conditional because the
+    // reference admission test does not require the hips (it asks for shoulders, ankles and the lead
+    // arm) — exactly how armLens is already collected.
+    //
+    // NB these are median(|dx_i|), the span measured per reference frame and then reduced, not
+    // |median(trailX) − median(leadX)|. Under a pixel of difference on a still address, and the
+    // per-frame form is the same quantity the live frames are compared against, measured the same
+    // way. There is no elbow entry: that line takes an absolute pixel floor, for the reason given at
+    // the gates below.
+    std::vector<double> shoulderDx, hipDx;
     for (const FrameGeom *g : ref) {
         // % shoulder width means the EUCLIDEAN shoulder separation, because that is what it already
         // means in the shipped `stanceWidth` metric (foot_metrics' shoulderWidthPxAt). % stance
@@ -237,11 +262,16 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
                               + lengthOf(g->leadElbow, g->leadHand));
         leadAnkX.push_back(g->leadAnkle.x());
         trailAnkX.push_back(g->trailAnkle.x());
+        shoulderDx.push_back(std::abs(g->trailShoulder.x() - g->leadShoulder.x()));
+        if (g->hipsValid)
+            hipDx.push_back(std::abs(g->trailHip.x() - g->leadHip.x()));
     }
 
     res.ref.shoulderSpanPx = medianOfCopy(shoulderSpans);
     res.ref.stanceSpanPx   = medianOfCopy(stanceSpans);
     res.ref.leadArmLenPx   = medianOfCopy(armLens);
+    res.ref.shoulderDxPx   = medianOfCopy(shoulderDx);
+    res.ref.hipDxPx        = medianOfCopy(hipDx);      // 0 when address hips were never confident
 
     // Which image direction the lead side is, resolved from the address geometry rather than
     // assumed — a camera can be mirrored and an operator can flip the preview.
@@ -257,7 +287,65 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
     const double toPctStance   = res.ref.stanceSpanPx > kEps ? 100.0 / res.ref.stanceSpanPx : 0.0;
     const double toPctArm      = res.ref.leadArmLenPx > kEps ? 100.0 / res.ref.leadArmLenPx : 0.0;
 
-    for (const FrameGeom &g : geom) {
+    // The body LINES' validity gates, resolved per frame against the address spans above.
+    //
+    // `lineTiltDeg` divides by the live horizontal separation, so as the golfer turns the two ends of
+    // a line foreshorten toward the same image column and the angle runs to ±90° while the posture it
+    // is supposed to describe has not changed. On the swing that prompted this work `shoulderPlane`
+    // hits +88° AT THE TOP — a GRADED phase sample, not a chart curiosity — and the hip line does the
+    // same thing just after impact. Below the ratio the frame HAS no such line and the channel is
+    // ABSENT for it: never a sentinel, and in particular never the 0.0 `lineTiltDeg` returns for a
+    // vertically stacked pair, which would read as "perfectly level".
+    //
+    // A ratio needs a denominator: a line whose ADDRESS span was never measured (0 px) cannot be
+    // gated, so it is absent for the whole swing instead — the same refusal `toPctArm > 0.0` already
+    // makes for leadHandWidth, and for the same reason (we do not know, so we do not say). For the
+    // hips that is a REAL and visible case: an address whose hips were never confident leaves
+    // spineSideBend absent for the entire swing while the lower-body module, which resolves its own
+    // reference from its own admission test, still produces hipLineTilt. One ratio, two references.
+    //
+    // WHAT IS GATED IS EXACTLY WHAT DIVIDES BY A LINE'S LIVE dx, which was audited channel by
+    // channel rather than assumed:
+    //
+    //   shoulderPlaneAngle  atan2(dy, |dx_shoulders|)                     → gated, RATIO
+    //   elbowAlignment      atan2(dy, |dx_elbows|)                        → gated, PIXEL FLOOR
+    //   spineSideBend       a DIFFERENCE of two such tilts                → gated on BOTH lines
+    //   trailElbowHeight    heightAboveLine ÷ dx_shoulders (see below)    → gated, the shoulder ratio
+    //
+    // and the rest are not, because their divisors are address CONSTANTS or Euclidean lengths that
+    // do not vanish as the body turns:
+    //
+    //   secondaryAxisTilt    ÷ the VERTICAL neck→pelvis rise (own kEps guard)
+    //   thoraxLateralDrift   ÷ the Euclidean ankle-line length, × the address ankle |dx|
+    //   leadHandWidth        ÷ the address lead-arm length
+    //   leadUpperArmToChest  ÷ the address Euclidean shoulder span (distToSegment is a length)
+    //   leadArmToTorso       ÷ two Euclidean vector lengths (angleBetweenDeg's own guard)
+    //
+    // Those channels are still distorted by the projection of a turn — that is a phase-DOMAIN
+    // question, answered one layer up in the descriptor — but they are not divisions by a vanishing
+    // separation, and gating them would withhold measurements that were actually made.
+    //
+    // ⚠ THE ELBOW LINE TAKES A PIXEL FLOOR, NOT A RATIO, and that is a correction rather than an
+    // inconsistency. A ratio needs an address span that represents the line at its WIDEST; the elbows
+    // are at their NARROWEST at address (the arms hang together and separate through the swing), so
+    // |dx| / address |dx| is ≈1 at address and ≥1 after it. The gate would never fire — and it would
+    // read exactly 1.0 at address, which is precisely where `elbowAlignment` is read and where a
+    // 20 px elbow separation is pure keypoint noise. An absolute floor is the only form that can
+    // refuse the frame the metric is actually graded on.
+    const auto ratioValid = [](double liveDx, double addrDx, double minRatio) {
+        return addrDx > kEps && (liveDx / addrDx) >= minRatio;
+    };
+    for (FrameGeom &g : geom) {
+        if (g.shouldersValid)
+            g.shoulderLineValid = ratioValid(std::abs(g.trailShoulder.x() - g.leadShoulder.x()),
+                                             res.ref.shoulderDxPx, cfg.minShoulderSpanRatio);
+        if (g.hipsValid)
+            g.hipLineValid = ratioValid(std::abs(g.trailHip.x() - g.leadHip.x()),
+                                        res.ref.hipDxPx, cfg.minHipSpanRatio);
+        if (g.elbowsValid)
+            g.elbowLineValid =
+                std::abs(g.trailElbow.x() - g.leadElbow.x()) >= cfg.minElbowSpanPx;
+
         // secondaryAxisTilt — the mid-hip→mid-shoulder line from vertical, POSITIVE AWAY FROM THE
         // TARGET. This is the one lateral channel that is trail-positive rather than lead-positive:
         // the quantity is NAMED for the lean away from the target, and flipping it to satisfy the
@@ -271,10 +359,19 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
         }
 
         // shoulderPlaneAngle / elbowAlignment — body lines against the horizontal, one convention.
-        if (g.shouldersValid)
+        // Gated on the LINE, not on the joints: both shoulders can be perfectly confident and still
+        // not describe a line the camera can measure a tilt on.
+        //
+        // The `else if (joints were confident)` arms record a REFUSED instant, which the resample must
+        // not bridge — as distinct from a frame the detector simply lost, which it may.
+        if (g.shoulderLineValid)
             res.shoulderPlane.push(g.t_us, lineTiltDeg(g.leadShoulder, g.trailShoulder));
-        if (g.elbowsValid)
+        else if (g.shouldersValid)
+            res.gatedShoulderLine.push_back(g.t_us);
+        if (g.elbowLineValid)
             res.elbowLine.push(g.t_us, lineTiltDeg(g.leadElbow, g.trailElbow));
+        else if (g.elbowsValid)
+            res.gatedElbowLine.push_back(g.t_us);
 
         // spineSideBend — the THORAX RELATIVE TO THE PELVIS, which is what side bend means. With no
         // keypoint between the shoulders and the hips, the honest reading of "thorax relative to
@@ -282,10 +379,17 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
         // difference that cancels the whole-body tilt secondaryAxisTilt already reports. Reading a
         // single neck-to-pelvis line here instead would make this metric a copy of that one.
         // POSITIVE = SIDE BEND TOWARD THE TRAIL SIDE (the trail shoulder dropping under the turn).
-        if (g.shouldersValid && g.hipsValid) {
+        //
+        // It needs BOTH lines valid, because it is a DIFFERENCE of two tilts and either one going
+        // degenerate poisons it on its own — a −88° hip line under a good shoulder line would report
+        // a side bend of nearly 90° at the moment the golfer is most square.
+        if (g.shoulderLineValid && g.hipLineValid) {
             const double hipTilt      = lineTiltDeg(g.leadHip, g.trailHip);
             const double shoulderTilt = lineTiltDeg(g.leadShoulder, g.trailShoulder);
             res.sideBend.push(g.t_us, hipTilt - shoulderTilt);
+        } else if (g.shouldersValid && g.hipsValid) {
+            // Both joint pairs confident, at least one LINE refused — a gated instant, not a dropout.
+            res.gatedSideBend.push_back(g.t_us);
         }
 
         // thoraxLateralDrift — the chest along the stance line, measured FROM THE TRAIL ANKLE, per
@@ -306,7 +410,15 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
         }
 
         // trailElbowHeight — how far the trail elbow has risen above the shoulder line.
-        if (g.shouldersValid && g.trailElbowValid) {
+        //
+        // GATED ON THE SHOULDER LINE even though it is a height, not a tilt, because heightAboveLine
+        // interpolates the line's y AT the elbow's x and therefore divides by the same dx:
+        // `lineY = a.y + (p.x − a.x)·(b.y − a.y)/dx`. As the shoulders foreshorten toward one image
+        // column that quotient runs away, and where a tilt at least saturates at 90° a % shoulder
+        // width does not — it is unbounded. Its own kEps guard below stays as the last-resort check
+        // on an exactly vertical line; this is the honest floor above it. Same mask as
+        // shoulderPlaneAngle, from the same line, for the same reason.
+        if (g.shoulderLineValid && g.trailElbowValid) {
             double hPx = 0.0;
             if (heightAboveLine(g.trailElbow, g.trailShoulder, g.leadShoulder, hPx))
                 res.trailElbowHeight.push(g.t_us, hPx * toPctShoulder);
@@ -354,20 +466,48 @@ std::vector<MetricSeries> buildUpperBodySeries(const UpperBodyResult &res,
     const QString pctSt   = QStringLiteral("% stance width");
     const QString pctArm  = QStringLiteral("% arm length");
 
+    // res.maxBridgeUs is what turns the mask ON for this producer: buildChannelSeries fills every
+    // grid sample as it always has, and marks the ones it had to bridge across a gated or absent run
+    // longer than that. Empty mask when it never had to, which is the common case and is what keeps a
+    // swing with no gated frame byte-identical. An invalid instant emits no phase sample.
+    //
     // NOT named `emit`: that is a Qt keyword macro, and a lambda called `emit` does not survive
     // the preprocessor.
+    //
+    // The last argument is THIS channel's gated instants — refused geometry, which no bridge budget
+    // may cover. A channel with no geometric gate passes none.
+    // Which instants a channel is SAMPLED at is a domain statement, and it has to agree with the
+    // catalogue's: five of these channels are authored Address->Impact (metric_presentation_honesty
+    // design §5.1 — past impact the frontal projection of a turned trunk is rotation, not the
+    // quantity), so they take the P1-P7 list and never emit a Finish sample. The default list still
+    // carries Finish for the channels whose domain is the whole swing. Before 2026-09-04 all nine
+    // sampled Finish, which put an out-of-domain reading into swing.json on every swing.
+    static const std::vector<Phase> kP1toP7Samples{ Phase::Address, Phase::Top, Phase::Impact };
+
     const auto push = [&](const MetricChannel &ch, const char *key, const char *label,
-                          const QString &unit) {
+                          const QString &unit,
+                          const std::vector<int64_t> &gated = kNoneGated,
+                          const std::vector<Phase> &sampleAt = defaultPhaseSamples()) {
         appendIfProduced(out, buildChannelSeries(res.grid, ch, QString::fromLatin1(key),
-                                                 QString::fromUtf8(label), unit, phases));
+                                                 QString::fromUtf8(label), unit, phases,
+                                                 sampleAt, res.maxBridgeUs,
+                                                 res.bridgeSpacingFactor, gated));
     };
 
-    push(res.axisTilt,         "secondaryAxisTilt",   "Secondary axis tilt",     deg);
-    push(res.sideBend,         "spineSideBend",       "Spine side bend",         deg);
-    push(res.thoraxDrift,      "thoraxLateralDrift",  "Thorax lateral drift",    pctSt);
-    push(res.shoulderPlane,    "shoulderPlaneAngle",  "Shoulder plane angle",    deg);
-    push(res.elbowLine,        "elbowAlignment",      "Elbow alignment",         deg);
-    push(res.trailElbowHeight, "trailElbowHeight",    "Trail elbow height",      pctSh);
+    push(res.axisTilt,         "secondaryAxisTilt",   "Secondary axis tilt",     deg,
+         kNoneGated, kP1toP7Samples);
+    push(res.sideBend,         "spineSideBend",       "Spine side bend",         deg,
+         res.gatedSideBend, kP1toP7Samples);
+    push(res.thoraxDrift,      "thoraxLateralDrift",  "Thorax lateral drift",    pctSt,
+         kNoneGated, kP1toP7Samples);
+    push(res.shoulderPlane,    "shoulderPlaneAngle",  "Shoulder plane angle",    deg,
+         res.gatedShoulderLine, kP1toP7Samples);
+    push(res.elbowLine,        "elbowAlignment",      "Elbow alignment",         deg,
+         res.gatedElbowLine, kP1toP7Samples);
+    // trailElbowHeight divides by the SHOULDER line's dx, so it is refused on exactly the instants
+    // the shoulder line is (see the gate block in trackUpperBody).
+    push(res.trailElbowHeight, "trailElbowHeight",    "Trail elbow height",      pctSh,
+         res.gatedShoulderLine);
     push(res.leadHandWidth,    "leadHandWidth",       "Swing width at the top",  pctArm);
     push(res.leadArmGap,       "leadUpperArmToChest", "Lead arm connection",     pctSh);
     push(res.leadArmToTorso,   "leadArmToTorso",      "Lead arm to torso angle", deg);

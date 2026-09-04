@@ -255,6 +255,117 @@ struct MetricRoute {
     bool              planned = false;
 };
 
+// ── Phase domain ────────────────────────────────────────────────────────────────────────────────
+//
+// WHERE THE METRIC'S GEOMETRY STILL MEANS SOMETHING (design §5.1 problem B). Not a data gap, not
+// noise, and not a producer failure: a face-on camera reads `atan2(Δz, Δx_projected)` where the
+// truth is `atan2(Δz, √(Δx² + Δy²))`, and turning the pelvis moves the APPARENT hip centre
+// sideways with no sway at all. So `pelvisSway` past impact is a reading of a quantity that does
+// not exist at that instant — which is worse than a gap, because it is confident and plausible.
+//
+// The default is the WHOLE SWING, so every metric that has always meant something everywhere is
+// authored exactly as it was and nothing changes for it. Only a metric whose geometry actually
+// expires narrows it, and only where the design's table says so.
+//
+// Inclusive at both ends, and compared in LADDER order (below) — never in enum order.
+struct PhaseDomain {
+    Phase first = Phase::Address;
+    Phase last  = Phase::Finish;
+};
+
+// P-position ladder order for every Phase value: Address = P1 … Finish = P10, with the five
+// detected events the P-system does not name slotted where they OCCUR IN TIME.
+//
+// A function and not the enum's own order, because the enum cannot answer this. `Phase` is
+// APPEND-ONLY (swing.json persists the raw int), so P2/P5/P8 were appended at 12/13/14 long after
+// Downswing and Release took 4 and 6. Sorted by value the enum reads
+//     P1, takeaway, P4, transition, downswing, P7, release, P10, P3, P6, max speed, P9, P2, P5, P8
+// — so a numeric comparison would put P2, P3, P5 and P6 all PAST Impact and exclude every one of
+// them from an Address→Impact domain, while P10 (Finish, value 7) would sit inside it.
+//
+// The sequence below is the one phase_segmenter.cpp assembles and then enforces monotonicity over,
+// which is also the chain stated in shot_analyzer_design.md §A.2 rule 5:
+//   Address ≤ Takeaway < MidBackswing < Transition ≤ Top < Downswing < Delivery < MaxSpeed
+//         ≤ Impact < Release < FollowThrough < Finish
+// extended with the three shaft/arm positions that landed after it was written (P2 between the
+// takeaway and P3; P5 = ArmParallelDown; P8 = ShaftParallelThrough).
+//
+// Three placements are judgements rather than readings, so they are stated:
+//
+//   * TRANSITION SITS BEFORE TOP. phase_segmenter.cpp finds it as the "pelvis axial reversal
+//     shortly before Top" — the lower body has changed direction while the club is still going
+//     back — and the design's chain says `MidBackswing < Transition ≤ Top`. Coaching language puts
+//     "the transition" at the change of direction, which reads as after the top; the measurement
+//     does not, and this is the measurement's index.
+//
+//   * MAXSPEED SITS BETWEEN P6 AND P7. The segmenter searches [Top, Impact + 50 ms] for it, so a
+//     late peak CAN land after the strike; but it is the peak of the speed envelope on the way
+//     into the ball, the design's chain places it `Delivery < MaxSpeed ≤ Impact`, and a domain
+//     ending at Impact that excluded it would refuse a reading taken a few ms before contact.
+//
+//   * DOWNSWING AND RELEASE ARE THE V1 NAMES FOR THE SAME INSTANTS as ArmParallelDown (P5) and
+//     ShaftParallelThrough (P8) — phase_segmenter.cpp says so where it emits one name of each pair
+//     and never both. A strict total order cannot give two values one index, so each legacy name
+//     follows its P-position immediately. Adjacent is the truth; which side of the tie it falls is
+//     arbitrary and nothing may depend on it.
+//
+// TOTAL AND STRICT: every Phase value has an index and no two share one (metric_catalogue_test
+// pins both, and that P1…P10 ascend).
+//
+// WHAT HAPPENS WHEN SOMEBODY ADDS A PHASE AND FORGETS THIS. The switch has no `default:` label, so a
+// compiler warns — but this build does not turn that warning into an error, so the warning alone is
+// not a guarantee and must not be described as one. The guarantee is the RETURN VALUE: an unlisted
+// phase answers `kPhaseNotInLadder`, and phaseInDomain() then reports it as inside NO domain. That
+// converts the failure from silent to loud. Falling through to 0 would have read as Address — index
+// 0, which sits inside every domain anybody has authored — so a brand-new phase would have been
+// quietly admitted everywhere, which is exactly the class of quiet wrong answer a domain exists to
+// stop. Being refused everywhere is wrong too, but it is wrong VISIBLY, at the first authored
+// measure that names the new phase.
+//
+// `kPhaseCount` is the second half of the backstop: metric_catalogue_test's own list of every Phase
+// value is asserted against it, so the ladder and the test cannot drift apart unnoticed.
+inline constexpr int kPhaseNotInLadder = -1;
+inline constexpr int kPhaseCount       = 15;   // enumerators in Phase, and rungs on the ladder
+
+inline int phaseLadderIndex(Phase p)
+{
+    switch (p) {
+    case Phase::Address:              return  0;   // P1
+    case Phase::Takeaway:             return  1;
+    case Phase::ShaftParallelBack:    return  2;   // P2
+    case Phase::MidBackswing:         return  3;   // P3
+    case Phase::Transition:           return  4;
+    case Phase::Top:                  return  5;   // P4
+    case Phase::ArmParallelDown:      return  6;   // P5
+    case Phase::Downswing:            return  7;   //     v1 spelling of P5, same instant
+    case Phase::Delivery:             return  8;   // P6
+    case Phase::MaxSpeed:             return  9;
+    case Phase::Impact:               return 10;   // P7
+    case Phase::ShaftParallelThrough: return 11;   // P8
+    case Phase::Release:              return 12;   //     v1 spelling of P8, same instant
+    case Phase::FollowThrough:        return 13;   // P9
+    case Phase::Finish:               return 14;   // P10
+    }
+    return kPhaseNotInLadder;                     // a Phase nobody placed — see the note above
+}
+
+// Inclusive at both ends, in ladder order.
+//
+// Two ways to answer NO, and both are deliberate. A domain authored backwards (last before first)
+// contains nothing rather than silently inverting, so the mistake surfaces as a metric nothing can
+// be read off instead of as a window that quietly means the opposite. And a phase with no rung —
+// or a domain bounded by one — contains nothing either, which is what makes an unplaced Phase
+// value fail loudly at the first measure that names it rather than passing as Address.
+inline bool phaseInDomain(const PhaseDomain &d, Phase p)
+{
+    const int i  = phaseLadderIndex(p);
+    const int lo = phaseLadderIndex(d.first);
+    const int hi = phaseLadderIndex(d.last);
+    if (i == kPhaseNotInLadder || lo == kPhaseNotInLadder || hi == kPhaseNotInLadder)
+        return false;
+    return i >= lo && i <= hi;
+}
+
 // A metric descriptor carries NO normative values.
 //
 // Until stage 9 of the diagnostics-norms work it did: `MetricNormative` held a DOF to delegate to
@@ -337,6 +448,14 @@ struct MetricDescriptor {
     QString    signNegative;               // "left of the target line — out-to-in for a right-hander"
 
     std::vector<Phase> phases;             // phases sampled (PointInTime) / where peak matters (TimeSeries)
+
+    // Where this metric's geometry means anything at all — see PhaseDomain above. DEFAULT IS THE
+    // WHOLE SWING, which is the honest statement for almost every metric and the reason authoring
+    // it is opt-in. Every entry of `phases` must lie inside it (metric_catalogue_test), because a
+    // metric documenting itself at a phase it cannot be read at is the same contradiction the
+    // route ladder was introduced to remove.
+    PhaseDomain        domain;
+
     bool               scored = false;     // has a band and contributes to a score
 
     // Every way this metric can be acquired, ORDERED BEST FIRST — and the last rung is the

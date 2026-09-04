@@ -266,7 +266,11 @@ std::vector<AnatomyRole> legalReferencesFor(AnatomyRole what, Quantity q)
     return out;
 }
 
-ReducerCheck validateReducer(const Reducer &r)
+// Is the reduction WELL FORMED, ignoring the metric it samples — the check that has always been
+// here, lifted so the domain pass below can run after it. Order matters: "a change needs two
+// different phases" is a truth about the reducer, and reporting a domain violation on a reducer that
+// is malformed anyway would send an author to fix the wrong half.
+static ReducerCheck checkReducerShape(const Reducer &r)
 {
     ReducerCheck c;
 
@@ -300,6 +304,61 @@ ReducerCheck validateReducer(const Reducer &r)
         return c;
     }
     c.valid = true;
+    return c;
+}
+
+ReducerCheck validateReducer(const Reducer &r)
+{
+    // No metric in hand ⇒ the whole swing, which is what a MetricDescriptor means by default.
+    return validateReducer(r, PhaseDomain{});
+}
+
+ReducerCheck validateReducer(const Reducer &r, const PhaseDomain &domain)
+{
+    ReducerCheck c = checkReducerShape(r);
+    if (!c.valid)
+        return c;
+
+    // ── Every phase the reduction actually touches must be inside the metric's domain ───────────
+    //
+    // Outside it the number is not a bad measurement, it is a reading of a quantity that does not
+    // exist at that instant (design §5.1): a face-on lateral displacement past impact is the
+    // pelvis's ROTATION wearing a translation's units, and it looks entirely plausible on screen.
+    // Refusing the authored measure is the only place that can be caught before a golfer is graded
+    // on it.
+    //
+    // LADDER ORDER, never enum order — Phase is append-only, so P6 (Delivery) is enum 9 and would
+    // read as "past Impact" on a numeric comparison. phaseInDomain() is the only correct test.
+    const auto refuse = [&](Phase p, const char *role) {
+        c.valid  = false;
+        c.reason = QStringLiteral("This metric only means something from %1 to %2, and the %3 is "
+                                 "%4. Outside that range the geometry it is read from has turned "
+                                 "out of the image, so there is nothing there to measure.")
+                       .arg(phaseLabel(domain.first), phaseLabel(domain.last),
+                            QString::fromLatin1(role), phaseLabel(p));
+        return c;
+    };
+
+    if (r.kind == ReducerKind::At)
+        return phaseInDomain(domain, *r.anchor) ? c : refuse(*r.anchor, "phase it reads at");
+
+    if (r.kind == ReducerKind::Delta || r.kind == ReducerKind::Rate) {
+        if (!phaseInDomain(domain, *r.anchor))
+            return refuse(*r.anchor, "phase it starts from");
+        if (!phaseInDomain(domain, r.window.second))
+            return refuse(r.window.second, "phase it runs to");
+        return c;
+    }
+
+    // Extremum: BOTH ends of the search window, and the anchor when there is one. A window with one
+    // end outside is not silently clamped — clamping would answer a different question under the
+    // authored measure's name, which is the failure mode this whole design is about.
+    if (!phaseInDomain(domain, r.window.first))
+        return refuse(r.window.first, "start of the window it searches");
+    if (!phaseInDomain(domain, r.window.second))
+        return refuse(r.window.second, "end of the window it searches");
+    if (r.anchor.has_value() && !phaseInDomain(domain, *r.anchor))
+        return refuse(*r.anchor, "phase its deviation is measured from");
     return c;
 }
 

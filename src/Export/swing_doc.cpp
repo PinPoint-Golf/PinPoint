@@ -148,6 +148,18 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
         // before (the optional-absence contract at the serialization layer).
         if (m.sigma)
             mo.insert(QStringLiteral("sigma"), *m.sigma);
+        // Per-sample validity, parallel to t_us (design §5.1): 0 marks a sample the grid
+        // BRIDGED across a gated or absent run, so a reader knows which part of the curve
+        // was measured and which was drawn between measurements. Same optional-absence
+        // contract as `sigma` directly above — emitted ONLY when at least one sample is
+        // actually invalid, so every metric with nothing to mark serialises byte-identically
+        // to before the field existed. The QML bridge (shot_processor.cpp toAnalysisDetail)
+        // and the reload (disk_replay_source.cpp) carry the same key on the same rule.
+        if (std::find(m.valid.begin(), m.valid.end(), uint8_t(0)) != m.valid.end()) {
+            QJsonArray vd;
+            for (const uint8_t f : m.valid) vd.append(int(f));
+            mo.insert(QStringLiteral("valid"), vd);
+        }
         metrics.append(mo);
     }
     o[QStringLiteral("metrics")] = metrics;

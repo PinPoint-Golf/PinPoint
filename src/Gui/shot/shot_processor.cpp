@@ -229,6 +229,21 @@ QVariantMap toAnalysisDetail(const pinpoint::analysis::SwingAnalysis &a)
         // Mirrored in disk_replay_source.cpp: a live shot and its reloaded self must agree.
         if (m.sigma)
             sm.insert(QStringLiteral("sigma"), *m.sigma);
+        // Per-sample validity, parallel to t_us (design §5.1): 0 marks a sample the grid
+        // BRIDGED across a gated or absent run — drawn dashed, skipped by every reducer.
+        // Written on the same discipline as `sigma` above: present ONLY when there is
+        // something to say. An all-ones array would appear on every metric of every swing
+        // and mean exactly what its absence already means, so the test is for a real 0
+        // rather than for a non-empty vector — MetricSeries::valid is empty when the
+        // producer had nothing to mark, and this keeps the boundary honest even if one
+        // day it is not. Mirrored in disk_replay_source.cpp (reload) and swing_doc.cpp
+        // (persistence): a live shot, its swing.json and its reloaded self must agree.
+        if (std::find(m.valid.begin(), m.valid.end(), uint8_t(0)) != m.valid.end()) {
+            QVariantList vd;
+            vd.reserve(int(m.valid.size()));
+            for (const uint8_t f : m.valid) vd.append(int(f));
+            sm.insert(QStringLiteral("valid"), vd);
+        }
         series.append(sm);
     }
     QVariantList phases;

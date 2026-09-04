@@ -121,6 +121,46 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
     for (const ValidationIssue &i : validateNormsAgainst(set, pack, tree).issues)
         out.push_back(i);
 
+    // ── A measure read outside its metric's phase domain ────────────────────
+    //
+    // THE CROSS-REGISTRY HALF OF THE DOMAIN RULE, and this is the only place it runs.
+    // `MetricDescriptor::domain` says where a metric's geometry means anything at all (design
+    // §5.1); `validateMeasureDomains()` knows the reducer but has never been able to see the
+    // catalogue and must not start guessing at it, so it takes a resolver and this function — which
+    // already holds both registries — is what supplies one. Without this wiring the rule exists and
+    // fires nowhere, which is indistinguishable from a rule that passes.
+    //
+    // WHERE THIS IS AND IS NOT ENFORCED, stated because the severity invites the wrong assumption.
+    // The issue is an Error, and it is the one Error this function produces — but it does NOT fail a
+    // load. Every load path validates the pack through the ONE-ARGUMENT validatePack(), which has no
+    // resolver and therefore raises this code never: `provider_leaf_p.h`'s `validate()` for each
+    // layer, and `merged_pack_provider.cpp`'s re-validation of the assembly. So an out-of-domain
+    // measure loads, and what happens is that it appears in the health list and is rendered as an
+    // Error row in the model browser's validation strip — plus `diagnostics_health_test` fails,
+    // which is what actually stops it reaching a release.
+    //
+    // The severity is still right, and is not a claim about loading. Every other code here reports
+    // something MISSING — a corridor nobody authored, a tail nobody watches — which is work
+    // outstanding and grades nothing meanwhile. This one reports a number already produced, graded
+    // and shown to a golfer while measuring a quantity that does not exist at the instant it was
+    // read. Enforcing it at load would mean handing the merged provider the metric catalogue, which
+    // it has no access to today; excluding the measure from the assembled pack there (rather than
+    // failing the load) is the shape that would want, and it is tracked, not done.
+    {
+        const auto domainFor = [&catalogue](const QString &metricKey) {
+            const MetricDescriptor *d = catalogue.descriptor(metricKey);
+            // An unknown key answers the WHOLE SWING rather than refusing: a measure naming nothing
+            // in the catalogue is already `unknownMetricKey`'s row, and inventing a narrow domain
+            // for it would accuse one omission of being two.
+            return d ? d->domain : PhaseDomain{};
+        };
+        // The pass DIRECTLY, not validatePack() sieved by code. Re-running the whole validator to
+        // keep one code both repeated ~200 checks the loading provider had already run and made the
+        // contents of this list depend on a string comparison holding.
+        for (const ValidationIssue &i : validateMeasureDomains(pack, domainFor))
+            out.push_back(i);
+    }
+
     // ── A corridor signal that cannot fire ──────────────────────────────────
     //
     // Scoped to LIVE measures. A measure with no producer is already reported by the roadmap, and

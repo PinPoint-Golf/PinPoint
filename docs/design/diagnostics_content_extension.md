@@ -95,7 +95,7 @@ Legend: **src** = skeleton / shaft / ball / LM(launch monitor) / screen. All new
 | id | label | detection | src |
 |---|---|---|---|
 | `off_balance_finish` | Cannot hold finish; COM outside lead-foot base at P10 | corridor on `m_comOverLeadFootFinish` | skeleton |
-| `weight_back_at_finish` | Weight remains on trail side at finish | corridor on `m_pelvisSwayFinish` | skeleton |
+| ~~`weight_back_at_finish`~~ | Weight remains on trail side at finish | ~~corridor on `m_pelvisSwayFinish`~~ — **detector REMOVED 2026-09-04**, condition now `confirmedBy: asserted` with no signal | skeleton |
 | `abbreviated_finish` | Follow-through cut short | corridor low on `m_thoraxRotFinish` | skeleton |
 
 ### 3.6 Ball-flight and strike outcomes (new group `ballFlight`; see §2.2, §2.5, §2.6)
@@ -200,10 +200,26 @@ All need `highMeans`, real units, and `viewNeeded`. Statuses: **live** = produce
 | `m_handSpeedP6P7` | `handSpeed` | rate/extremum p6→p7 | mph | live |
 | `m_axisTiltImpact` | `secondaryAxisTilt` | at p7 | ° | planned |
 | `m_comOverLeadFootFinish` | pelvis centre distance to lead ankle | at finish | cm | noProducer |
-| `m_pelvisSwayFinish` | `pelvisSway` | at finish | cm | planned |
+| ~~`m_pelvisSwayFinish`~~ | ~~`pelvisSway`~~ | ~~at finish~~ | — | **DELETED 2026-09-04** |
 | `m_thoraxRotFinish` | `thoraxRotation` | at finish | ° | planned |
 | `m_spineSideBendTop` | `spineSideBend` | at p4 | ° | planned (producer exists; corroborates reverse_spine) |
 | `m_leadUpperArmToChest` | lead upper arm, distance to thorax centre | extremum p1→p4 | cm (or % torso length) | noProducer — drives `disconnection` |
+
+> **Removed 2026-09-04 — `m_pelvisSwayFinish`, and the two signals that read it.**
+> `pelvisSway` carries a **phase domain of P1–P7** (`MetricDescriptor::domain`, design
+> `metric_presentation_honesty.md` §5.1): it is a lateral displacement read in the face-on image, and
+> past impact the pelvis has turned far enough that the projection measures the **rotation**, not the
+> translation the measure named. Reading it at the finish was a projection artefact graded against a
+> heuristic corridor, so the measure, its `norms.json` row and both signals on it
+> (`sig_weightBackFinish`, `sig_offBalanceFinishSway`) were deleted.
+> It was **deleted rather than reclassified**: `notCapturable` is a statement about the METRIC, and
+> `pelvisSway` is produced on every camera swing — `diagnostics_catalogue_integrity_test` refuses that
+> classification for exactly this reason.
+> `off_balance_finish` is unaffected; it keeps `sig_offBalanceFinish` on `m_comOverLeadFootFinish`, a
+> distance **along** the stance line, which survives the turn and is the honest finish reading.
+> `weight_back_at_finish` lost its only detector and is now `confirmedBy: asserted` with no signal —
+> plainly visible, not measurable from our pixels, the same authoring as `thin`. The in-domain
+> detector for the same physical fault is `sig_hangingBackPelvisDown` on `m_pelvisSwayDown`.
 
 > **⚠ The `status` column in the tables below is FROZEN AT AUTHORING TIME (2026-07) and is now
 > stale.** The face-on producer batch (2026-08-02) moved 32 measures to `live`, including

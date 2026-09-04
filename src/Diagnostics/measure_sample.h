@@ -129,6 +129,12 @@ struct SwingPhaseGrid {
 //
 // From the `analysis` object of a swing.json — `metrics[]` (key/unit/t_us[]/value[]) and `phases[]`
 // (phase/t_us/conf), the shapes swing_doc.cpp writes and wrist_analysis_adapter.cpp already reads.
+//
+// A metric may also carry `valid[]`, a 0/1 array parallel to `t_us` marking samples that were
+// BRIDGED across a gated or absent run rather than measured (design §5.1). Those enter neither a
+// phase's windowed median nor a span's extremes, and a phase whose whole window is bridged gets no
+// entry — the same path an unsampled phase already takes. The key is written only when something is
+// invalid, so a swing without it grids byte-identically to before and the schema version stands.
 SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig &cfg = {});
 
 // ── Reduction ───────────────────────────────────────────────────────────────

@@ -192,6 +192,18 @@ bool DiskReplaySource::load(const QString &swingDir, double speed, bool trimToSw
             // swing analysed before σ existed reloads without inventing a perfect measurement.
             if (m.contains(QStringLiteral("sigma")))
                 sm.insert(QStringLiteral("sigma"), m[QStringLiteral("sigma")].toDouble());
+            // Per-sample validity (design §5.1), ShotProcessor's twin again: an int list
+            // parallel to t_us where 0 marks a sample BRIDGED across a gated or absent run.
+            // ABSENT means every sample is valid — which is how every swing analysed before
+            // the field existed reloads, without inventing invalidity it cannot know about.
+            // Unlike t_us this is INDEX-parallel, not a timestamp, so it passes through
+            // verbatim: relUs() would be meaningless on it.
+            if (m.contains(QStringLiteral("valid"))) {
+                QVariantList vd;
+                for (const QJsonValue &b : m[QStringLiteral("valid")].toArray())
+                    vd.append(b.toInt());
+                sm.insert(QStringLiteral("valid"), vd);
+            }
             series.append(sm);
         }
         QVariantList phases;

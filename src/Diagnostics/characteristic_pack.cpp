@@ -382,9 +382,56 @@ const Measure *measureForMetricAtPhase(const CharacteristicPack &pack,
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
-ValidationReport validatePack(const CharacteristicPack &pack)
+std::vector<ValidationIssue> validateMeasureDomains(const CharacteristicPack &pack,
+                                                    const MetricDomainFn     &domainFor)
 {
     ValidationReport r;
+    if (!domainFor)
+        return r.issues;   // no resolver ⇒ nobody has told us where anything means something
+
+    for (const Measure &m : pack.measures) {
+        // SCOPED TO LIVE, for the reason signalNoNorm in diagnostics_health.cpp is: a measure
+        // nothing can produce cannot be graded outside its domain either, so accusing a RETIRED row
+        // of the fault it was retired for would make the retirement impossible to express. What
+        // keeps that from being a loophole is that going non-live is loud — the roadmap lists it,
+        // `gapReason` has to say why, and `normNotCapturable` refuses it a corridor.
+        if (m.status != MeasureStatus::Live || m.metricKey.isEmpty())
+            continue;
+
+        // A malformed reducer is `badReducer`'s row and validateReducer() would refuse it before it
+        // ever looked at a phase, so asking about the domain here would report one mistake twice and
+        // send the author to the wrong half of it.
+        if (!validateReducer(m.reducer).valid)
+            continue;
+
+        // Only `metricKey` is asked about, not the preferKeys ladder. A rung is the same quantity
+        // read off a better instrument, so whether every rung's DOMAIN also admits this reducer is
+        // checked where the rest of the ladder's agreement is —
+        // diagnostics_catalogue_integrity_test §5b, which holds both registries and walks every rung.
+        const ReducerCheck dc = validateReducer(m.reducer, domainFor(m.metricKey));
+        if (!dc.valid)
+            err(r, QStringLiteral("measureOutsideDomain"), m.id,
+                QStringLiteral("Measure '%1' reads '%2' outside the phases where it means "
+                               "anything. %3").arg(m.id, m.metricKey, dc.reason));
+    }
+    return r.issues;
+}
+
+ValidationReport validatePack(const CharacteristicPack &pack, const MetricDomainFn &domainFor)
+{
+    ValidationReport r;
+
+    // ── The cross-registry domain pass ──────────────────────────────────────
+    //
+    // Its own function (above) and its own code, because it is the one check here that fires or not
+    // depending on what the OTHER registry says. It cannot be a shade of `badReducer`, which is a
+    // truth about the reducer alone, and `diagnostics_health.cpp` calls the pass DIRECTLY rather
+    // than sieving this report — outside the domain a reading is not noisy, it is a reading of a
+    // quantity that does not exist at that instant (design §5.1): a face-on lateral displacement
+    // past impact is the pelvis's ROTATION wearing a translation's units, which looks entirely
+    // plausible on screen.
+    for (const ValidationIssue &i : validateMeasureDomains(pack, domainFor))
+        r.issues.push_back(i);
 
     // --- ids are unique across each kind -------------------------------------
     auto checkUnique = [&r](const QStringList &ids, const QString &what) {

@@ -87,6 +87,36 @@ double dipCurve(qint64 t)
 
 double rampCurve(qint64 t) { return double(t) / 100'000.0; }   // 1 at 100 ms, 11 at 1100 ms
 
+// The same curve plus the parallel `valid` mask of design 5.1: 0 on every sample inside
+// [fromUs, toUs] (inclusive), 1 elsewhere. A 0 marks a sample the producer BRIDGED across a gated
+// or absent run — the value is interpolation, not measurement, so no reducer may read it.
+//
+// Synthetic on purpose. The fixtures under tests/data are recorded swings and must keep saying what
+// they said; a mask nobody recorded has to be built here.
+QJsonObject metricCurveMasked(const QString &key, const QString &unit, qint64 spanUs,
+                              double (*f)(qint64), qint64 fromUs, qint64 toUs)
+{
+    QJsonObject o = metricCurve(key, unit, spanUs, f);
+    QJsonArray  valid;
+    for (qint64 x = 0; x <= spanUs; x += 1000)
+        valid.append((x >= fromUs && x <= toUs) ? 0 : 1);
+    o.insert(QStringLiteral("valid"), valid);
+    return o;
+}
+
+// Replace one metric object in an analysis by key. The fixture is shared, so every masked case below
+// is "the same swing with one channel masked" rather than a second fixture that could drift.
+QJsonObject withMetric(QJsonObject an, const QJsonObject &replacement)
+{
+    const QString key = replacement.value(QStringLiteral("key")).toString();
+    QJsonArray    ms  = an.value(QStringLiteral("metrics")).toArray();
+    for (int i = 0; i < ms.size(); ++i)
+        if (ms.at(i).toObject().value(QStringLiteral("key")).toString() == key)
+            ms.replace(i, replacement);
+    an.insert(QStringLiteral("metrics"), ms);
+    return an;
+}
+
 // P1 / P4 / P7 — the three phases the local corpus actually carries on every swing, so the fixture
 // has the shape real data has.
 //
@@ -348,6 +378,105 @@ int main()
         const SwingPhaseGrid g2 = buildPhaseGrid(an);
         near(reduceOverGrid(g2, QStringLiteral("thoraxRotation"), at(Phase::Top)).value_or(-999),
              4.0, "the windowed median WINS over a phaseSample where the curve has samples");
+    }
+
+    // ── The validity mask ───────────────────────────────────────────────────
+    //
+    // A `valid` 0 says the sample was BRIDGED across a gated or absent run, not measured (design
+    // 5.1 / metric_channel.h). The curve keeps its continuity for the renderer; the number does not
+    // get to be graded. Three things follow, and each fails silently if it is wrong: the median
+    // must skip masked samples, a span's extremes must skip them, and a phase whose whole window is
+    // masked must take the existing "no entry" path rather than reporting a bridged number.
+    std::printf("\nvalidity mask\n");
+    {
+        // (a) The MEDIAN. P4 sits at 400 ms on a 1-ms ramp reading t/100 ms, so its +-15 ms window
+        // spans 385..415 ms and medians to exactly 4.00. Mask 400..415 ms — the phase instant and
+        // everything after it — and only 385..399 survive, 15 samples medianing to 3.92. Two
+        // different numbers, so the skip cannot be a no-op that happens to agree.
+        const SwingPhaseGrid masked = buildPhaseGrid(withMetric(
+            fixtureAnalysis(),
+            metricCurveMasked(QStringLiteral("thoraxRotation"), QStringLiteral("°"),
+                              1'200'000, rampCurve, 400'000, 415'000)));
+        near(reduceOverGrid(grid,   QStringLiteral("thoraxRotation"), at(Phase::Top)).value_or(-999),
+             4.00, "unmasked, P4 medians the whole +-15 ms window");
+        near(reduceOverGrid(masked, QStringLiteral("thoraxRotation"), at(Phase::Top)).value_or(-999),
+             3.92, "masked, the bridged half of the window is not in the median");
+
+        // (b) The SPAN EXTREMES. The dip bottoms at -20 at 600 ms, strictly between P4 and P7 and
+        // invisible to both endpoints — it is the only thing the span aggregation can see. Mask
+        // 595..605 ms and the deepest SURVIVING sample is 594 ms (and 606 ms) at -18.2, so a
+        // reducer that still answered -20 would be reading a bridged sample and nothing else would
+        // show it.
+        const SwingPhaseGrid dipMasked = buildPhaseGrid(withMetric(
+            fixtureAnalysis(),
+            metricCurveMasked(QStringLiteral("pelvisSway"), QStringLiteral("mm"),
+                              1'200'000, dipCurve, 595'000, 605'000)));
+        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
+             -20.0, "unmasked, the trough bottoms at -20");
+        near(reduceOverGrid(dipMasked, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
+             -18.2, "masked, the extreme is the deepest VALID sample, not the bridged floor");
+        near(reduceOverGrid(dipMasked, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Max)).value_or(-999),
+             30.0, "…and the crest, far from the mask, is untouched");
+        near(reduceOverGrid(dipMasked, QStringLiteral("pelvisSway"), at(Phase::Top)).value_or(-999),
+             10.0, "…as are the phase medians either side of it");
+
+        // (c) A PHASE WHOSE WHOLE WINDOW IS MASKED gets NO ENTRY. Not a zero, not the nearest valid
+        // sample: "assessed and fine" and "not assessed" are different statements. P1 is at 100 ms,
+        // so masking 85..115 ms empties its window entirely, and pelvisSway carries no phaseSamples
+        // to fall back on.
+        const SwingPhaseGrid noP1 = buildPhaseGrid(withMetric(
+            fixtureAnalysis(),
+            metricCurveMasked(QStringLiteral("pelvisSway"), QStringLiteral("mm"),
+                              1'200'000, dipCurve, 85'000, 115'000)));
+        const MetricPhaseGrid *ms = noP1.metric(QStringLiteral("pelvisSway"));
+        check(ms != nullptr && ms->at(Phase::Address) == nullptr,
+              "a phase whose whole +-15 ms window is bridged has NO grid entry");
+        check(!reduceOverGrid(noP1, QStringLiteral("pelvisSway"), at(Phase::Address)).has_value(),
+              "…so reading it is unavailable, not a bridged number");
+        check(ms != nullptr && ms->values.size() == 2 && ms->spans.size() == 1,
+              "…and the grid re-spans over the two phases that remain");
+        // The channel is not written off: the phases with valid windows still answer.
+        near(reduceOverGrid(noP1, QStringLiteral("pelvisSway"), at(Phase::Impact)).value_or(-999),
+             10.0, "…while P7, whose window is clean, still reads");
+
+        // (d) ABSENT MEANS EVERY SAMPLE COUNTS. The key is written only when something is invalid
+        // (the `sigma` discipline), so a swing without it must grid EXACTLY as it always has — this
+        // is what lets kPhaseGridSchemaVersion stand. An all-ones mask is never written, but reading
+        // one has to be harmless, and comparing the serialised sidecars proves it field by field
+        // rather than value by value.
+        const SwingPhaseGrid allOnes = buildPhaseGrid(withMetric(
+            fixtureAnalysis(),
+            metricCurveMasked(QStringLiteral("pelvisSway"), QStringLiteral("mm"),
+                              1'200'000, dipCurve, -2, -1)));   // no sample in [-2,-1] => all valid
+        check(savePhaseGrid(allOnes, 1, 1) == savePhaseGrid(grid, 1, 1),
+              "an all-valid mask grids byte-identically to no mask at all");
+
+        // (e) A SHORT MASK IS NO MASK. `valid` is contractually parallel to `t_us`, so an array
+        // that does not reach the end of the curve is a malformed document rather than a partial
+        // statement — and there is no honest way to read one. Treating the missing tail as VALID
+        // invents measurements nobody vouched for; treating it as INVALID throws away readings
+        // nobody impeached; and either guess depends on assuming which end was truncated. So the
+        // whole mask is ignored and the metric grids exactly as an unmasked one, which is the
+        // answer that claims nothing. Pinned because the alternative fails silently: a mask short
+        // by one would otherwise shift every sample's validity by one position.
+        QJsonObject shortMask = metricCurveMasked(QStringLiteral("pelvisSway"),
+                                                  QStringLiteral("mm"), 1'200'000, dipCurve,
+                                                  595'000, 605'000);
+        QJsonArray  trimmed = shortMask.value(QStringLiteral("valid")).toArray();
+        trimmed.removeLast();                      // n - 1: one short of t_us
+        shortMask.insert(QStringLiteral("valid"), trimmed);
+        const SwingPhaseGrid shorted = buildPhaseGrid(withMetric(fixtureAnalysis(), shortMask));
+        check(savePhaseGrid(shorted, 1, 1) == savePhaseGrid(grid, 1, 1),
+              "a `valid` array one entry short of t_us is ignored entirely — the grid is the "
+              "unmasked one, not the masked one shifted by a sample");
+        // And it really is the UNMASKED answer, not a coincidence: the same mask at full length
+        // moves the trough, which (b) above proved.
+        near(reduceOverGrid(shorted, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
+             -20.0, "…so the trough it would have masked is still there");
     }
 
     // ── A Measure, not just a reducer ───────────────────────────────────────

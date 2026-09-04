@@ -36,12 +36,38 @@
 // metric catalogue at once. Those checks live here, as a free function over the registries, so the
 // health list is computed somewhere it can be tested rather than inside a QML façade.
 //
-// EVERYTHING HERE IS A WARNING. Nothing in this file is a load error: a library with a signal that
-// cannot fire is not broken, it is incomplete, and refusing to load it would take the app down over
-// a missing corridor. The health list is the place incompleteness is stated out loud.
+// EVERYTHING HERE IS A WARNING, WITH ONE EXCEPTION. Nothing in this file is a load error: a library
+// with a signal that cannot fire is not broken, it is incomplete, and refusing to load it would take
+// the app down over a missing corridor. The health list is the place incompleteness is stated out
+// loud.
+//
+// The exception is `measureOutsideDomain`, and the difference is what the row means rather than how
+// bad it looks. Every other code here reports something MISSING — a corridor nobody has authored, a
+// tail nobody watches — which is work outstanding and grades nothing meanwhile. That one reports a
+// number that IS produced, IS graded and IS shown to a golfer while measuring a quantity that does
+// not exist at the instant it was read (design §5.1). Incompleteness can wait; a confident wrong
+// answer cannot, so it keeps the Error severity validateMeasureDomains() gave it.
+//
+// AND IT STILL DOES NOT FAIL A LOAD. Every load path validates through the ONE-ARGUMENT
+// validatePack() — `provider_leaf_p.h`'s per-layer validate(), and the merged provider's
+// re-validation of the assembly — which has no domain resolver and so raises this code never. An
+// out-of-domain measure therefore loads; it appears here, is rendered as an Error row in the model
+// browser's validation strip, and fails `diagnostics_health_test`, which is what stops it reaching a
+// release. Nothing is taken down, and the severity is a statement about the finding, not about
+// enforcement.
 //
 // Codes, and what each one means an author should DO:
 //
+//   measureOutsideDomain   A LIVE measure's reducer reads its metric outside MetricDescriptor::domain
+//                          — an `at` anchor, or a delta/rate/extremum window, past the phases where
+//                          that metric's geometry still means anything. Change the phases the
+//                          measure names, point it at a metric valid there, or retire the measure
+//                          (a non-live status takes it out of scope, and has to say why). THE ONLY
+//                          CHECK HERE THAT NEEDS BOTH REGISTRIES TO EXIST AT ONCE, which is why
+//                          `validateMeasureDomains()` takes a MetricDomainFn and this function is
+//                          the only thing that supplies one. Agreement across a measure's preferKeys
+//                          ladder is checked in diagnostics_catalogue_integrity_test §5b instead,
+//                          beside the units — one rung, one place.
 //   signalNoNorm           A corridor signal on a live measure with no norm in any context. It
 //                          cannot fire — not "does not fire on this swing", cannot, ever. Author a
 //                          norm or accept that the characteristic is undetectable.

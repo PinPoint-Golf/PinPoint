@@ -22,7 +22,13 @@
 // chart. Emits windowChanged(startUs,endUs) as the body is dragged, an edge handle is
 // pulled, or a fresh window is swept out — the parent writes that into its chart-local
 // viewStartUs/viewEndUs (never shotReplay / SwingDataSource). Pure scale/path binding;
-// per-series ranges come from ChartMetrics.summary, phase tags from TimelineLabels.
+// per-series ranges come from ChartMetrics.summaryMasked, phase tags from TimelineLabels.
+//
+// It obeys the same validity contract as the chart it scopes (design
+// metric_presentation_honesty.md §5.1): the y-range excludes bridged samples, and bridged /
+// out-of-domain runs are drawn dashed and dimmer rather than as measurements. A sparkline is
+// small, but it is the surface a reader uses to DECIDE WHERE TO LOOK, so a single bridged
+// outlier flattening the whole trace into a spike sends them to the wrong place.
 
 pragma ComponentBehavior: Bound
 
@@ -33,7 +39,9 @@ import PinPointStudio
 Item {
     id: root
 
-    // series: [{ t_us, value, color, … }] (the decorated, currently-visible series)
+    // series: [{ t_us, value, color, valid?, validFromUs?, validToUs?, … }] (the decorated,
+    // currently-visible series). The last three are the optional validity triple PpMetricChart
+    // decorates on — see _measured below; absent ⇒ every sample is a measurement.
     property var  series: []
     property var  phases: []
     property real axisStartUs: 0
@@ -77,19 +85,89 @@ Item {
         border.width: 1; border.color: Theme.colorBorder
     }
 
-    // ── Faint per-series sparklines (each normalised to its own range) ─────────────
+    // ── Measured vs bridged — the same rule as PpChartPlot, in its index form ─────
+    //
+    // A sample counts as measured when it is inside the metric's phase domain and not marked 0 in
+    // `valid`. Short-mask rule as everywhere else (chart_metrics.h): a mask that does not cover the
+    // curve is discarded wholesale rather than applied to the part it covers.
+    function _hasDomain(s) {
+        return s.validFromUs !== undefined && s.validToUs !== undefined
+               && s.validToUs > s.validFromUs
+    }
+    function _measured(s, i) {
+        if (root._hasDomain(s) && (s.t_us[i] < s.validFromUs || s.t_us[i] > s.validToUs))
+            return false
+        if (!s.valid || s.valid.length < s.t_us.length) return true
+        return s.valid[i] !== 0
+    }
+
+    // Each series split into runs of one drawn state, flattened across all series:
+    //   [{ color, dashed, t:[…], v:[…], lo, hi }]
+    // `lo`/`hi` are the series' y-range over its MEASURED samples only, carried on every run of
+    // that series so each run normalises identically. Mirrors PpChartPlot._traceRuns, including
+    // the rule that a dashed run reaches one sample into each solid neighbour so the trace stays
+    // continuous and every segment touching an unmeasured sample is itself dashed.
+    readonly property var _sparkRuns: {
+        var out = []
+        for (var k = 0; k < (root.series ? root.series.length : 0); ++k) {
+            var s = root.series[k]
+            if (!s || !s.t_us || !s.value || s.t_us.length < 2) continue
+
+            var solid = []
+            for (var i = 0; i < s.t_us.length; ++i) solid.push(root._measured(s, i))
+
+            // ⚠ THE RANGE IS OVER MEASURED SAMPLES ONLY, and it comes from the SAME reducer the
+            // cards use rather than a fourth hand-rolled min/max — one implementation, so the
+            // strip and the chart cannot disagree about a series' extent. Scaled to include a
+            // bridged outlier the whole sparkline collapsed to a flat line with one spike, which
+            // is exactly the wrong picture: the reader is choosing a window from this shape.
+            //
+            // The window is the axis clipped to the metric's domain, per side, using the instants
+            // PpMetricChart already resolved — so out-of-domain samples do not set the scale either.
+            var winA = root._hasDomain(s) ? Math.max(root.axisStartUs, s.validFromUs)
+                                          : root.axisStartUs
+            var winB = root._hasDomain(s) ? Math.min(root.axisEndUs, s.validToUs)
+                                          : root.axisEndUs
+            var st = cm.summaryMasked(s.t_us, s.value, s.valid || [], winA, Math.max(winA, winB))
+            var lo = st.min, hi = st.max
+            if (!(hi > lo)) { lo = st.min; hi = st.min + 1 }   // flat or nothing to scale by
+
+            var i0 = 0
+            while (i0 < solid.length) {
+                var i1 = i0
+                while (i1 + 1 < solid.length && solid[i1 + 1] === solid[i0]) ++i1
+                var a = i0, b = i1
+                if (!solid[i0]) {
+                    if (a > 0) --a
+                    if (b + 1 < solid.length) ++b
+                }
+                if (b > a) {
+                    var t = [], v = []
+                    for (var j = a; j <= b; ++j) { t.push(s.t_us[j]); v.push(s.value[j]) }
+                    out.push({ color: s.color, dashed: !solid[i0], t: t, v: v, lo: lo, hi: hi })
+                }
+                i0 = i1 + 1
+            }
+        }
+        return out
+    }
+
+    // ── Faint per-series sparklines (each normalised to its own MEASURED range) ────
     Repeater {
-        model: root.series
+        model: root._sparkRuns
         delegate: Shape {
             id: spark
             required property var modelData
             anchors.fill: parent
-            opacity: 0.5
-            preferredRendererType: Shape.CurveRenderer
-            readonly property var _st: cm.summary(spark.modelData.t_us, spark.modelData.value,
-                                                  root.axisStartUs, root.axisEndUs)
+            // 0.5 is this strip's own faintness; a bridged run is dimmer again by the same 0.35
+            // factor the chart uses, so the two surfaces read as one convention.
+            opacity: spark.modelData.dashed ? 0.5 * 0.35 : 0.5
+            // Dashes come from the geometry renderer — see PpChartPlot's note; the curve renderer
+            // silently draws a DashLine solid and the distinction would vanish.
+            preferredRendererType: spark.modelData.dashed ? Shape.GeometryRenderer
+                                                          : Shape.CurveRenderer
             function ys(v) {
-                var lo = spark._st.min, hi = spark._st.max
+                var lo = spark.modelData.lo, hi = spark.modelData.hi
                 return (hi > lo) ? root._plotT + root._plotH - (v - lo) / (hi - lo) * root._plotH
                                  : root._plotT + root._plotH / 2
             }
@@ -98,9 +176,11 @@ Item {
                 strokeWidth: 1
                 fillColor:   "transparent"
                 joinStyle:   ShapePath.RoundJoin
+                strokeStyle: spark.modelData.dashed ? ShapePath.DashLine : ShapePath.SolidLine
+                dashPattern: [4, 3]
                 PathPolyline {
-                    path: (spark.modelData.t_us || []).map(function (t, i) {
-                        return Qt.point(root.xs(t), spark.ys(spark.modelData.value[i]))
+                    path: (spark.modelData.t || []).map(function (t, i) {
+                        return Qt.point(root.xs(t), spark.ys(spark.modelData.v[i]))
                     })
                 }
             }

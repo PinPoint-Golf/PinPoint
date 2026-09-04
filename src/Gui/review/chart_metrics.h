@@ -58,13 +58,92 @@ public:
     Q_INVOKABLE QVariantList segments(const QVariantList &phases, qint64 spanUs) const;
 
     // Per-metric summary over [startUs, endUs], window edges linearly interpolated:
-    //   { start, end, min, max, peak, range, delta, rate, tPeakUs }
+    //   { start, end, min, max, peak, range, delta, rate, tPeakUs, partial }
     // peak = the extremum of larger magnitude; delta = end-start; range = max-min;
     // rate = max |Δvalue/Δt| between consecutive in-window samples, in deg per 100 ms;
     // tPeakUs = the time at which peak occurs. `tUs`/`value` are the parallel arrays from
     // analysisDetail.series[i] (tUs ascending).
+    //
+    // Delegates to summaryMasked() with an EMPTY mask, which is the "every sample is valid"
+    // case — so this overload is exactly the pre-validity behaviour and `partial` is always
+    // false. Kept because most callers have no mask to pass and should not have to invent one.
     Q_INVOKABLE QVariantMap summary(const QVariantList &tUs, const QVariantList &value,
                                     qint64 startUs, qint64 endUs) const;
+
+    // The same summary, respecting the series' per-sample validity mask (swing.json
+    // `metrics[].valid`, design metric_presentation_honesty.md §5.1). `valid` is an int list
+    // parallel to `tUs` where 0 marks a sample the grid BRIDGED across a gated or absent run;
+    // EMPTY means every sample is valid, which is what every series that predates the field
+    // carries and why summary() above can simply pass {}. A mask SHORTER than the curve is
+    // discarded wholesale — see the short-mask rule on measuredAt() below, which this shares.
+    //
+    // An invalid sample is NOT a measurement, so it is skipped entirely: it cannot be the min,
+    // the max, the peak, an endpoint of the rate difference, or a window edge. The window edges
+    // interpolate between the nearest VALID samples instead, which is the one place this has to
+    // reach across a gap — and it says so rather than hiding it:
+    //
+    //   `partial` (bool) — the window's numbers do not rest on a continuous measurement. True
+    //   when the window contains an invalid sample, or when an edge had to be read from two
+    //   valid samples that are not adjacent in the series (i.e. the interpolation stepped over
+    //   invalid ones). The card renders it as a "PARTIAL" chip; it never changes a value.
+    //
+    // ⚠ The rate and peak DEFINITIONS are unchanged here on purpose — adjacent-sample slope and
+    // raw argmax, as today, now over the valid samples only. Design §5.2 replaces both with
+    // windowed-mean / least-squares forms in a later phase, in src/Analysis where the
+    // diagnostics engine shares them; doing it here as well would be two implementations of the
+    // thing that phase exists to unify.
+    Q_INVOKABLE QVariantMap summaryMasked(const QVariantList &tUs, const QVariantList &value,
+                                          const QVariantList &valid,
+                                          qint64 startUs, qint64 endUs) const;
+
+    // Where a metric's geometry MEANS something:
+    //   { firstPhase:int, lastPhase:int, firstNarrowed:bool, lastNarrowed:bool, narrowed:bool }
+    // The phases are Phase ENUM values, not ladder indices — the caller resolves them against the
+    // swing's own phases[] to get instants, because only the swing knows when its P4 happened.
+    //
+    // Straight off MetricDescriptor::domain, so the manifest is the single author of it and the
+    // chart, the pack validator and the diagnostics engine cannot disagree about where a
+    // pelvis-sway reading stops meaning translation and starts meaning rotation. A key the
+    // catalogue has never heard of gets the descriptor default — the WHOLE swing — because an
+    // unknown metric is not a licence to hide part of its curve.
+    //
+    // ⚠ THE NARROWED FLAGS ARE LOAD-BEARING, PER SIDE, and are why this returns five keys and not
+    // two. The default domain is Address..Finish, but the chart's AXIS is the PADDED swing
+    // (Segmentation swingStart/End ± boundPadUs = 250 ms), so Address sits 250 ms inside the axis
+    // start and Finish 250 ms inside its end. A caller that clipped to the default domain would
+    // therefore dash 250 ms off each end of EVERY whole-swing metric — headSway, xFactor,
+    // clubheadSpeed — and change its Full-window PEAK/Δ/RATE on every swing, which is precisely
+    // the "nothing changes where this does not fire" property phase 1 rests on. It would also
+    // collapse any legitimately pre-address window (the still-address check reads
+    // Address−300 ms → Address) to nothing.
+    //
+    // So: clip a side ONLY when the MANIFEST moved that side. `firstNarrowed` is
+    // `domain.first != Phase::Address`, `lastNarrowed` is `domain.last != Phase::Finish`, and
+    // `narrowed` is either. hipLineTilt is narrowed on the LAST side only.
+    Q_INVOKABLE QVariantMap domainFor(const QString &key) const;
+
+    // Was this series actually MEASURED at `us`? — the reference form of the predicate behind the
+    // suppressed phase dots, the suppressed crosshair marker and the "—" in the hover and legend
+    // readouts, so those cannot drift into slightly different notions of "no reading here".
+    //
+    // False when `us` lies outside [fromUs, toUs] — the metric's phase domain resolved to
+    // instants by the caller, since only the swing knows when its P7 happened — or when the
+    // NEAREST sample carries a 0 in `valid` (bridged across a gated or absent run). Nearest is
+    // exact for its caller: a phase dot sits on a sample. Pass fromUs == toUs for "no domain".
+    //
+    // ⚠ THE SHORT-MASK RULE, shared with summaryMasked() and with measure_sample.cpp's
+    // buildPhaseGrid: a `valid` list is honoured only when it covers the whole curve
+    // (size >= t_us.size()). An EMPTY one is "every sample valid" (C4); a SHORTER one is a
+    // malformed document, not a partial statement, and is discarded wholesale — guessing which
+    // end it was truncated from would invent validity nobody stated, and bounding the scan at
+    // qMin(sizes) instead would make this answer a different question than summaryMasked does
+    // about the very same series.
+    //
+    // ⚠ NOT FOR PER-FRAME BINDINGS. Every call marshals the whole series across the QML boundary,
+    // so a binding that depends on the cursor or the playhead must answer this in JS off a sample
+    // INDEX (PpChartPlot._measured / PpMetricChart._measuredAt) rather than call in here.
+    Q_INVOKABLE bool measuredAt(const QVariantList &tUs, const QVariantList &valid,
+                                qint64 us, qint64 fromUs, qint64 toUs) const;
 
     // Compact display name for a metric key (e.g. "leadWristFlexExt" → "Bow/cup"), or ""
     // when the key is uncatalogued or its descriptor names no short form — the caller then
@@ -128,8 +207,15 @@ public:
     // a free-dragged ("Custom") window with the phases bracketing its edges.
     Q_INVOKABLE int nearestPhase(const QVariantList &phases, qint64 us) const;
 
-    // Band ("good"/"attention"/"warn") of the phaseSample nearest `us` (default "good").
-    // Used to tint a summary card's @end value by the swing's state at the window edge.
+    // Band ("good"/"attention"/"warn") of the phaseSample nearest `us`, used to tint a summary
+    // card's @impact value by the swing's state there.
+    //
+    // Returns "" — NO BAND, tint neutrally — when the list is empty or the nearest sample is
+    // more than `kBandNearUs` (one generous frame) from `us`. It used to return "good" in both
+    // cases, and that is a graded verdict invented out of nothing: a series whose producer
+    // emitted no sample at impact (because the geometry was gated there, which is exactly what
+    // design §5.1 makes happen) had its @impact reading tinted GREEN off an empty list, or off
+    // the Address sample 900 ms away. The caller must treat "" as "no verdict", not as a pass.
     Q_INVOKABLE QString bandAtNearest(const QVariantList &phaseSamples, qint64 us) const;
 
     // ── Corridor-bar backing (dashboard_reductions.h) ───────────────────────────

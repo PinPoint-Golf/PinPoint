@@ -29,6 +29,7 @@
 #include <QSet>
 #include <QString>
 
+#include <functional>   // MetricDomainFn — the pack asks for a domain, it never looks one up
 #include <vector>
 
 // Pack persistence and validation.
@@ -95,6 +96,10 @@ inline constexpr int kPackSchemaVersion = 1;
 //   axisMismatch         two tails share an axis id but not a series — then they are not tails
 //   badFacets            a measure's series fails the validity table
 //   badReducer           a measure's reducer is malformed
+//   measureOutsideDomain a LIVE measure reads its metric outside the phase domain where that
+//                        metric's geometry means anything (MetricDescriptor::domain). Only
+//                        raised when the caller supplied a MetricDomainFn, because the domain
+//                        lives in the metric catalogue and this file cannot see it
 //   unwatchedTailShaped  a one-sided measure claiming a tail is "deliberately unwatched". The shape
 //                        already says which tail does not grade; the two cannot both be true
 //   unwatchedTailWatched a measure claiming a tail is unwatched that a corridor signal watches
@@ -148,7 +153,30 @@ inline constexpr int kPackSchemaVersion = 1;
 // The checks that span the pack, the norm set, the context tree and the metric catalogue at once —
 // "can this signal ever fire?" — live in `diagnostics_health.h`, because no single pack can answer
 // them.
-ValidationReport validatePack(const CharacteristicPack &pack);
+// How a caller that HOLDS the metric catalogue answers "where does this metric mean anything?".
+// Returns the metric's PhaseDomain (metric_descriptor.h); an unknown key must answer the whole swing,
+// which is the default a descriptor carries.
+//
+// ASK, NEVER LOOK UP. This file still cannot see the catalogue, for the reason stated on the
+// instrument-ladder check below — it must not start guessing at it. Supplying the resolver is
+// therefore the caller's choice, and omitting it leaves every answer exactly as it is today: the
+// domain defaults to the whole swing and no reducer can fall outside it.
+using MetricDomainFn = std::function<PhaseDomain(const QString &metricKey)>;
+
+ValidationReport validatePack(const CharacteristicPack &pack, const MetricDomainFn &domainFor = {});
+
+// The cross-registry domain pass on its own, so the two callers that want it can have it without
+// either of them paying for the other's work.
+//
+// `validatePack()` runs it as part of a full validation. `diagnostics_health.cpp` wants ONLY this —
+// every other issue validatePack() raises has already been reported by the provider that loaded the
+// pack standalone — and re-running the whole validator to sieve one code out of the result both
+// duplicated ~200 checks and made the health list's contents depend on a string comparison.
+//
+// Returns `measureOutsideDomain` errors, one per offending measure. Empty when `domainFor` is null,
+// which is what makes the check opt-in for every caller that cannot see the metric catalogue.
+std::vector<ValidationIssue> validateMeasureDomains(const CharacteristicPack &pack,
+                                                    const MetricDomainFn     &domainFor);
 
 // ── Persistence ─────────────────────────────────────────────────────────────
 //

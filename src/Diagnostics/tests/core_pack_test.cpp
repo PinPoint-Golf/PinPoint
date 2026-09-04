@@ -349,14 +349,21 @@ int main()
         check(provided > 0 && allBound, "every Provided measure names a MetricCatalogue key");
 
         // The payoff of ranking series rather than reduced measures: one producer unblocks several
-        // characteristics. pelvisSway carries sway, slide, hanging back and the finish read at four
-        // different phases — one producer, four faults, which is the payoff being demonstrated. The
-        // number is updated deliberately when a reducer is added, never loosened to a `>=`: the
+        // characteristics. pelvisSway carries sway back, slide and hanging back at three different
+        // phases — one producer, three faults, which is the payoff being demonstrated. The number is
+        // updated deliberately when a reducer is added or removed, never loosened to a `>=`: the
         // claim is that these are the reducers somebody chose, not that there are some.
+        //
+        // 4 -> 3 on 2026-09-04: `m_pelvisSwayFinish` read this series AT THE FINISH, and pelvisSway
+        // is a P1-P7 quantity — past impact the pelvis has turned, so its lateral offset in a
+        // face-on image is the rotation and not the translation the measure named. It was deleted
+        // rather than reclassified, because `notCapturable` is a statement about the METRIC and
+        // pelvisSway is produced on every camera swing. The honest finish reading is
+        // `m_comOverLeadFootFinish`, a distance ALONG the stance line, which survives the turn.
         int onPelvisSway = 0;
         for (const Measure &m : p.measures)
             if (m.metricKey == QStringLiteral("pelvisSway")) ++onPelvisSway;
-        check(onPelvisSway == 4, "four characteristics sit on one pelvis-sway series (one producer)");
+        check(onPelvisSway == 3, "three characteristics sit on one pelvis-sway series (one producer)");
     }
 
     // ── The spinal measures are roadmap items, not capture gaps ─────────────────

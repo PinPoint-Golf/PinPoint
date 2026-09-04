@@ -114,6 +114,27 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
         const QJsonArray vArr = mo.value(QStringLiteral("value")).toArray();
         const int        n    = std::min(tArr.size(), vArr.size());
 
+        // ── The validity mask ───────────────────────────────────────────────────────────────────
+        //
+        // `valid` is an int 0/1 array parallel to `t_us`, and it is PRESENT ONLY WHEN AT LEAST ONE
+        // SAMPLE IS INVALID — the same discipline `sigma` follows, so an all-valid series is never
+        // written and every swing.json that predates the field carries nothing. A 0 marks a sample
+        // whose value was BRIDGED across a gated or absent run (metric_channel.h): the curve stays
+        // continuous for the renderer, but the number there is interpolation, not measurement.
+        //
+        // So a bridged sample enters neither a phase's windowed median nor a span's extremes. That
+        // is the same rule as "a phase the segmenter never found yields nothing": reducing over a
+        // fabricated value is a confident wrong answer, and this sidecar would cache it. Design
+        // §5.1; the mask itself is MetricSeries::valid.
+        //
+        // ABSENT MEANS EVERY SAMPLE COUNTS, which is what makes this change invisible to an
+        // existing swing — hence no kPhaseGridSchemaVersion bump. A mask SHORTER than the curve is
+        // a malformed document rather than a partial statement, and is treated as no mask at all:
+        // guessing which end it was truncated from would invent validity we were never told about.
+        const QJsonArray validArr = mo.value(QStringLiteral("valid")).toArray();
+        const bool       haveMask = n > 0 && validArr.size() >= n;
+        const auto sampleValid = [&](int i) { return !haveMask || validArr.at(i).toInt() != 0; };
+
         // The metric's own labelled readings at key phases.
         //
         // NOT an optimisation — for a large class of metrics it is the ONLY data there is. Every
@@ -156,12 +177,19 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
         // own labelled reading where the curve has nothing to say. A phase with neither gets NO
         // entry — inventing a nearest-sample value is exactly the fabrication across a gap the
         // median convention exists to avoid.
+        //
+        // A phase whose whole window is masked invalid takes that SAME path, deliberately: "the
+        // curve has nothing to say here" is exactly what a fully bridged window means, so it needs
+        // no branch of its own, and the labelled phaseSamples fallback still applies to it —
+        // a producer that stamped a reading at this phase measured something the curve had lost.
         for (const PhaseAt &e : candidates) {
             std::vector<double> win;
             for (int i = 0; i < n; ++i) {
                 const int64_t t = tArr.at(i).toVariant().toLongLong();
                 if (std::llabs(t - e.tUs) > cfg.windowHalfUs)
                     continue;
+                if (!sampleValid(i))
+                    continue;      // bridged, not measured — it may not pull the median
                 win.push_back(vArr.at(i).toDouble());
             }
             if (static_cast<int>(win.size()) >= cfg.minValidSamples) {
@@ -193,6 +221,8 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
                 const int64_t t = tArr.at(k).toVariant().toLongLong();
                 if (t <= lo || t > hi)
                     continue;
+                if (!sampleValid(k))
+                    continue;      // a bridged sample cannot BE the peak; see the mask note above
                 const double v = vArr.at(k).toDouble();
                 if (!any) { sp.min = sp.max = v; any = true; }
                 else      { sp.min = std::min(sp.min, v); sp.max = std::max(sp.max, v); }

@@ -215,7 +215,11 @@ int main(int argc, char **argv)
     check(pack.conditions.size() == 157, "the shipped pack carries 157 conditions");
     // 130 -> 135 with the plumb-bob work: hipLineTilt gained an impact reading and an
     // address-to-impact delta, and plumbBobDistance arrived with three of its own.
-    check(pack.measures.size() == 135, "…and 135 measures");
+    //
+    // 135 -> 134 on 2026-09-04: `m_pelvisSwayFinish` deleted. It reduced pelvisSway at the FINISH,
+    // and pelvisSway carries a P1-P7 phase domain — past impact the pelvis has turned, so its
+    // lateral offset in a face-on image is the rotation and not the translation the measure named.
+    check(pack.measures.size() == 134, "…and 134 measures");
     check(!norms->norms().norms.empty(), "the shipped norm set loaded");
 
     QTemporaryDir tmp;
@@ -269,7 +273,13 @@ int main(int argc, char **argv)
         // signed-deviation contract makes the answer (peak - anchor) rather than |peak - anchor|.
         checkValue(src, "m_pelvisSwayBack", -28.601046538397142);
         checkValue(src, "m_pelvisSwayImpact", 17.063654641156035);
-        checkValue(src, "m_pelvisSwayFinish", 20.78817002111798);
+        // Was `m_pelvisSwayFinish`, 20.78817002111798, until 2026-09-04. That measure read
+        // pelvisSway at the FINISH, and pelvisSway is a P1-P7 quantity: past impact the pelvis has
+        // turned, so its lateral offset in a face-on image is the rotation and not the translation
+        // the measure named (MetricDescriptor::domain, design 5.1). It was deleted, and the honest
+        // finish reading is this one — a distance ALONG the stance line, which survives the turn.
+        // Single-sample +-15 ms window here, which is why it equals the producer's own phaseSample.
+        checkValue(src, "m_comOverLeadFootFinish", 47.091467601995205);
     }
 
     std::printf("\nlm_7iron: known values\n");
@@ -371,13 +381,24 @@ int main(int argc, char **argv)
     // it has an attack angle, and an attack angle of -4° is not the upward strike a top requires.
     // "Definitely not a top" is a real answer, and the conjunction reaches it from evidence no
     // single one of its terms could.
-    check(cRich.assessable == 54, "rich_7iron: 54 of 157 conditions assessable (observed)");
+    //
+    // 54 -> 53 on 2026-09-04, and the one is exactly the deleted content. `weight_back_at_finish`
+    // was detected only by `sig_weightBackFinish`, which read `m_pelvisSwayFinish` — pelvisSway at
+    // the finish, outside the P1-P7 domain where that projection means anything. The measure and
+    // both signals on it are gone, so the condition has no detector and reports Unavailable. Its
+    // sibling `off_balance_finish` is NOT in the delta: it kept `sig_offBalanceFinish` on
+    // `m_comOverLeadFootFinish`, which this fixture carries, so it is still assessable.
+    check(cRich.assessable == 53, "rich_7iron: 53 of 157 conditions assessable (observed)");
     // 38 -> 40 with the two new hipLineTilt measures. Both read a curve this fixture ALREADY
     // carries — the reduction samples the series itself at each segmented phase and does not need
     // the producer to have listed that phase — so a swing written by an older build gains them
     // with no re-analysis. The three plumb-bob measures do NOT resolve here and correctly so: the
     // fixture is a verbatim corpus copy and its metrics array has no plumbBobDistance key.
-    check(cRich.measures   == 40, "rich_7iron: 40 live measures resolved (observed)");
+    //
+    // 40 -> 39 on 2026-09-04: `m_pelvisSwayFinish` was one of the live measures this fixture
+    // resolved, and it was deleted as an out-of-domain reading. Nothing else moved — the three
+    // remaining pelvisSway measures all sit inside P1-P7.
+    check(cRich.measures   == 39, "rich_7iron: 39 live measures resolved (observed)");
     // 12 → 14 on 2026-08-09: sig_launchLow/sig_launchHigh moved onto m_lmLaunchAngle (the
     // measured key this fixture actually carries), so launch_low and launch_high became
     // assessable on an LM-only capture.

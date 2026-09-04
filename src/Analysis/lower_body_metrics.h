@@ -164,6 +164,19 @@ struct LowerBodyConfig {
     int     addrMinFrames  = tuned::lowerBody::kAddrMinFrames;   // lowerBody.addrMinFrames
     int64_t addrWindowUs   = tuned::lowerBody::kAddrWindowUs;    // lowerBody.addrWindowUs
     double  minStanceSpanPx = tuned::lowerBody::kMinStanceSpanPx; // lowerBody.minStanceSpanPx
+    // The hip LINE's foreshortening gate — |dx_hips| / address |dx_hips|. A separate
+    // failure from minStanceSpanPx, which guards the percentage denominator: this one
+    // guards an ANGLE whose divisor is the live horizontal separation, and which runs
+    // to ±90° as the turning pelvis collapses the two hips into one image column.
+    double  minHipSpanRatio = tuned::lowerBody::kMinHipSpanRatio; // lowerBody.minHipSpanRatio
+    // Where a bridge stops being a measurement (metric_channel.h channelValidityMask).
+    // Carried here rather than passed to buildLowerBodySeries so the builder's signature
+    // and every caller stay as they are; SwingLab sweeps one key for every producer.
+    // NEGATIVE = do not mask at all, the pre-mask behaviour.
+    int64_t maxBridgeUs     = tuned::channel::kMaxBridgeUs;       // channel.maxBridgeUs
+    // …and the local-spacing multiplier that keeps the sparsely posed address region from
+    // being marked for one dropped frame. See channelValidityMask.
+    double  bridgeSpacingFactor = tuned::channel::kBridgeSpacingFactor; // channel.bridgeSpacingFactor
 
     static LowerBodyConfig fromOverrides(const QVariantMap &ov)
     {
@@ -173,6 +186,9 @@ struct LowerBodyConfig {
         apply(ov, "lowerBody.addrMinFrames",   c.addrMinFrames);
         apply(ov, "lowerBody.addrWindowUs",    c.addrWindowUs);
         apply(ov, "lowerBody.minStanceSpanPx", c.minStanceSpanPx);
+        apply(ov, "lowerBody.minHipSpanRatio", c.minHipSpanRatio);
+        apply(ov, "channel.maxBridgeUs",       c.maxBridgeUs);
+        apply(ov, "channel.bridgeSpacingFactor", c.bridgeSpacingFactor);
         return c;
     }
 };
@@ -188,6 +204,22 @@ struct LowerBodyState {
     bool    hipsValid  = false;   // both hips
     bool    leadLegValid = false; // lead hip AND lead knee — what leadKneeDrift needs
     bool    anklesValid  = false; // both ankles
+    // Both hips confident AND the hip line still spans enough of the image to HAVE a
+    // tilt: |dx| / addrHipSpanPx >= cfg.minHipSpanRatio. Resolved against the address
+    // reference, so it can only be answered after that reference exists — it is set in
+    // trackLowerBody's channel pass, not in the per-frame state pass, and stays false
+    // on every frame when the reference never resolved.
+    //
+    // Published on the state for TESTS AND DIAGNOSTICS, and for nothing else today.
+    //
+    // ⚠ It is NOT how upper_body_metrics learns about the hip line, and it cannot be: the two
+    // modules are separate analysis stages with no shared result, so the upper module resolves
+    // its own hip line against its OWN address reference frames and its own denominator. Same
+    // ratio (lowerBody.minHipSpanRatio), two references — so on a marginal frame the two can
+    // disagree, and if the upper module's address hips were never confident it has no
+    // denominator at all and spineSideBend is absent for the whole swing while hipLineTilt is
+    // produced here. That is stated rather than hidden, and pinned by a test.
+    bool    hipLineValid = false;
     QPointF leadHipPx,  trailHipPx;
     QPointF leadKneePx, trailKneePx;
     QPointF leadAnklePx, trailAnklePx;
@@ -213,10 +245,28 @@ struct LowerBodyResult {
     // INCHES, and empty when the ball ruler did not resolve. Lead-positive.
     LowerBodyChannel plumbBob;
 
+    // The instants the HIP LINE was REFUSED on geometry — both hips confident, the line
+    // foreshortened below cfg.minHipSpanRatio. Ascending, one entry per such frame.
+    //
+    // ⚠ NOT the same set as "instants hipTilt lacks", and the difference is the whole point:
+    // a frame the detector dropped is a HOLD the resample may bridge, while a frame the
+    // geometry refused has no value to hold — the quantity did not exist at that instant.
+    // channelValidityMask forces those to 0 whatever the bridge budget, which is what stops a
+    // 10-frame gated run at 7 ms spacing from being flagged as measured (it was: see the note
+    // in metric_channel.h).
+    std::vector<int64_t> gatedHipLine;
+
     QPointF addrLeadHipPx, addrTrailHipPx;
     QPointF addrLeadKneePx;
     double  addrSpanPx = 0.0;    // ankle-to-ankle at address, px — the denominator
+    // |trail hip x − lead hip x| at address, px — the HIP LINE's reference span, and a
+    // median over the same reference frames as everything else here so the ratio shares
+    // its scale by construction rather than by luck. NOT the same quantity as
+    // addrSpanPx: this one is the numerator's own address value, not a unit denominator.
+    double  addrHipSpanPx = 0.0;
     double  leadSign   = 1.0;    // +1 if the lead side is image +x at address, else −1
+    int64_t maxBridgeUs = tuned::channel::kMaxBridgeUs;  // carried from the config for the builder
+    double  bridgeSpacingFactor = tuned::channel::kBridgeSpacingFactor;   // likewise
     int     frameW = 0, frameH = 0;
     bool    valid  = false;      // address reference resolved AND the span cleared its floor
 };
@@ -242,7 +292,12 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
 // comOverLeadFoot is read there and nothing sampled it before; hipLineTilt and
 // plumbBobDistance are sampled across the whole P1–P7 ladder because both are
 // read as a progression rather than at one instant. AN UNSEGMENTED PHASE EMITS
-// NO SAMPLE. UNSCORED here (the corridors live in the diagnostics norm set, not
+// NO SAMPLE, and neither does an INVALID INSTANT. A grid sample carries a 0 in
+// MetricSeries::valid when the producer GATED that frame's geometry (always — no
+// bridge budget covers a quantity that did not exist), or when the resample had to
+// bridge more than cfg.maxBridgeUs across frames the DETECTOR lost; neither is a
+// place a phase reading can be taken from.
+// UNSCORED here (the corridors live in the diagnostics norm set, not
 // in the producer). Empty when the address reference is unresolved or the stance
 // span is unusable.
 std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,

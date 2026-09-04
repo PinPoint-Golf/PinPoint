@@ -1527,20 +1527,6 @@
       "highMeans": "the body further from being stacked over the lead foot"
     },
     {
-      "id": "m_pelvisSwayFinish",
-      "kind": "provided",
-      "metricKey": "pelvisSway",
-      "reducer": {
-        "kind": "at",
-        "anchor": "finish"
-      },
-      "status": "live",
-      "label": "Pelvis lateral position, at the finish",
-      "unit": "% stance width",
-      "highMeans": "the pelvis further toward the target at the finish",
-      "viewNeeded": "faceOn"
-    },
-    {
       "id": "m_thoraxRotFinish",
       "kind": "provided",
       "metricKey": "thoraxRotation",
@@ -2697,14 +2683,6 @@
       "direction": "high"
     },
     {
-      "id": "sig_weightBackFinish",
-      "test": "outsideCorridor",
-      "measures": [
-        "m_pelvisSwayFinish"
-      ],
-      "direction": "low"
-    },
-    {
       "id": "sig_abbreviatedFinish",
       "test": "outsideCorridor",
       "measures": [
@@ -2908,14 +2886,6 @@
       "test": "outsideCorridor",
       "measures": [
         "m_pelvisSwayImpact"
-      ],
-      "direction": "high"
-    },
-    {
-      "id": "sig_offBalanceFinishSway",
-      "test": "outsideCorridor",
-      "measures": [
-        "m_pelvisSwayFinish"
       ],
       "direction": "high"
     },
@@ -5430,8 +5400,7 @@
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
-        "sig_offBalanceFinish",
-        "sig_offBalanceFinishSway"
+        "sig_offBalanceFinish"
       ],
       "state": "draft",
       "consequence": "The golfer finishes without being able to stand still in it. A finish that cannot be held is the end of a swing that was not in balance earlier — it is a symptom worth reading backwards.",
@@ -5454,10 +5423,8 @@
       "kind": "fault",
       "prominence": "common",
       "observability": "observable",
-      "confirmedBy": "measured",
-      "detectedBy": [
-        "sig_weightBackFinish"
-      ],
+      "confirmedBy": "asserted",
+      "detectedBy": [],
       "state": "draft",
       "consequence": "The pressure never reached the lead side. The strike has almost always suffered before the finish shows it, but the finish is where it becomes obvious to the eye.",
       "provenance": {
