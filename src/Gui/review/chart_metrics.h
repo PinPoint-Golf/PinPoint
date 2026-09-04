@@ -57,12 +57,22 @@ public:
     // segment vocabulary is identical. `phases` is analysisDetail.phases ([{phase,t_us,…}]).
     Q_INVOKABLE QVariantList segments(const QVariantList &phases, qint64 spanUs) const;
 
-    // Per-metric summary over [startUs, endUs], window edges linearly interpolated:
-    //   { start, end, min, max, peak, range, delta, rate, tPeakUs, partial }
-    // peak = the extremum of larger magnitude; delta = end-start; range = max-min;
-    // rate = max |Δvalue/Δt| between consecutive in-window samples, in deg per 100 ms;
-    // tPeakUs = the time at which peak occurs. `tUs`/`value` are the parallel arrays from
+    // Per-metric summary over [startUs, endUs]:
+    //   { start, end, min, max, peak, range, delta, rate, tPeakUs, partial,
+    //     peakSigma, rateSigma, rateOk, tRateUs }
+    // start/end = the ±15 ms windowed MEDIAN at each edge; min/max = the extremum of the 40 ms
+    // centred-window MEAN inside the window; peak = whichever of those has the larger magnitude,
+    // at tPeakUs, ± peakSigma; range = max-min; delta = end-start; rate = the steepest
+    // least-squares slope over any ≥50 ms window, SIGNED, per 100 ms, at tRateUs, ± rateSigma,
+    // and only when `rateOk` (see below). `tUs`/`value` are the parallel arrays from
     // analysisDetail.series[i] (tUs ascending).
+    //
+    // ⚠ EVERY ONE OF THOSE REDUCTIONS IS src/Analysis/series_reduce.h's, NOT THIS CLASS'S — the
+    // diagnostics engine's buildPhaseGrid calls the same four functions with the same tuned
+    // windows, which is what makes design §7 item 5 ("the chart and the engine agree to display
+    // precision on every authored measure") a property of the code rather than a hope. The only
+    // arithmetic left here is the interpolated window edge that stands in when reduceAt has no
+    // valid sample within ±15 ms to take a median of, and that case sets `partial`.
     //
     // Delegates to summaryMasked() with an EMPTY mask, which is the "every sample is valid"
     // case — so this overload is exactly the pre-validity behaviour and `partial` is always
@@ -77,21 +87,41 @@ public:
     // carries and why summary() above can simply pass {}. A mask SHORTER than the curve is
     // discarded wholesale — see the short-mask rule on measuredAt() below, which this shares.
     //
-    // An invalid sample is NOT a measurement, so it is skipped entirely: it cannot be the min,
-    // the max, the peak, an endpoint of the rate difference, or a window edge. The window edges
-    // interpolate between the nearest VALID samples instead, which is the one place this has to
-    // reach across a gap — and it says so rather than hiding it:
+    // An invalid sample is NOT a measurement, so it enters no reduction: it is not in an edge's
+    // median window, not in an extremum's 40 ms mean, not in a rate window's fit. The one place
+    // this has to reach across a gap is a window edge with no valid sample within ±15 ms of it,
+    // and it says so rather than hiding it:
     //
     //   `partial` (bool) — the window's numbers do not rest on a continuous measurement. True
-    //   when the window contains an invalid sample, or when an edge had to be read from two
-    //   valid samples that are not adjacent in the series (i.e. the interpolation stepped over
-    //   invalid ones). The card renders it as a "PARTIAL" chip; it never changes a value.
+    //   when the window contains an invalid sample, or when an edge fell back to interpolating
+    //   between the nearest valid samples because there was none within ±15 ms of it (which is
+    //   also the case that catches a window sitting ENTIRELY inside a bridged run, where there is
+    //   no sample to scan at all). The card renders it as a "PARTIAL" chip; it never changes a
+    //   value.
     //
-    // ⚠ The rate and peak DEFINITIONS are unchanged here on purpose — adjacent-sample slope and
-    // raw argmax, as today, now over the valid samples only. Design §5.2 replaces both with
-    // windowed-mean / least-squares forms in a later phase, in src/Analysis where the
-    // diagnostics engine shares them; doing it here as well would be two implementations of the
-    // thing that phase exists to unify.
+    // ⚠ THE RATE AND PEAK DEFINITIONS CHANGED IN PHASE 2 (design §5.2), and they changed the
+    // numbers on every card, on every swing, whether or not anything is masked:
+    //
+    //   peak/min/max — was the raw argmax over the in-window samples plus the two interpolated
+    //   edges; is now the extremum of the 40 ms centred-window MEAN of the valid samples. A
+    //   one-sample outlier can no longer be the peak, because a peak now has to have been there
+    //   for 40 ms: one 99 among 4s at 8 ms sampling reports about 23, not 99.
+    //
+    //   rate — was max |Δvalue/Δt| between consecutive samples, which on a still address is
+    //   frame noise divided by 8 ms (39 and 291 units per 100 ms on the corpus, design §7 item 2);
+    //   is now the steepest least-squares slope over a window of at least 50 ms carrying at least
+    //   3 valid samples. It is SIGNED (a slope has a direction, and no consumer could recover one
+    //   this class had thrown away), and it can be ABSENT:
+    //
+    //   `rateOk` (bool) — false when no window in [startUs, endUs] qualifies (a window shorter
+    //   than 50 ms, or fewer than 3 valid samples in it, e.g. a two-sample series). `rate`,
+    //   `rateSigma` and `tRateUs` are then 0 and MUST NOT be displayed: the card prints "—" and
+    //   hides the per-100 ms unit with it. A fabricated 0 would read as a still, well-behaved
+    //   curve, which is the exact class of confident absurdity this design exists to remove.
+    //
+    // `peakSigma` / `rateSigma` are the σ of the winning window (the sample sd of its samples
+    // about their mean; the standard error of the fitted slope), for the "± σ" the summary card
+    // carries beside those two tiles — design §5.3.
     Q_INVOKABLE QVariantMap summaryMasked(const QVariantList &tUs, const QVariantList &value,
                                           const QVariantList &valid,
                                           qint64 startUs, qint64 endUs) const;

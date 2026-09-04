@@ -437,6 +437,38 @@ inline constexpr std::int64_t kMaxBridgeUs        = 60000;   // channel.maxBridg
 inline constexpr double       kBridgeSpacingFactor = 1.5;    // channel.bridgeSpacingFactor
 } // namespace channel
 
+// --- Robust series reducers (src/Analysis/series_reduce.h) ---------------------
+// The windows the CHART SUMMARY and the DIAGNOSTICS PHASE GRID both reduce with, so the card and
+// the corridors cannot disagree about the same word. Design
+// docs/design/metric_presentation_honesty.md §5.2; the At window is sampler::kWindowHalfUs above,
+// which measure_sample.cpp has always used and which the chart now adopts.
+//
+// Both are stated in TIME because the grid is not uniformly sampled (≈8 ms inside the dense pose
+// zone, 27 ms outside it, 80–100 ms at the address end — pose_runner.h): a window counted in
+// SAMPLES would be 40 ms mid-swing and half a second at address.
+//
+// kExtremumWindowUs (40 ms) is the support a PEAK has to have. The extremum is taken over the
+// centred-window MEAN, so a one-sample outlier cannot be the peak — it has to be there for 40 ms.
+// 40 ms is ≈5 samples in the dense zone and ≈2 outside it: long enough that the jitter (0.5° median,
+// 3.1° at the 95th percentile on the 2026-08-18 corpus swing) averages down by √5, and short enough
+// that a real excursion is not flattened — the pelvis and thorax quantities this protects move over
+// 100–300 ms, and impact itself is located to ±5 ms by other means, not by this.
+//
+// kRateWindowUs (50 ms) is the minimum TIME BASE a rate may be fitted over, and it is the whole fix
+// for the PK RATE numbers in design §2: an adjacent-frame difference at 8 ms spacing turns half a
+// degree of jitter into 6°/100 ms and the 95th-percentile 3° into 37°/100 ms. A least-squares slope
+// over 50 ms divides the noise by roughly √n and the time base by 6. Reported per 100 ms as it
+// always has been.
+//
+// kMinRateSamples (3) is the floor that stops a "slope" being a line through two points, which has
+// no residual and therefore no standard error to be honest with. A window with fewer — a sparsely
+// posed address — yields NO rate rather than a confident one.
+namespace reduce {
+inline constexpr std::int64_t kExtremumWindowUs = 40000;   // reduce.extremumWindowUs — centred, ±20 ms
+inline constexpr std::int64_t kRateWindowUs     = 50000;   // reduce.rateWindowUs — minimum fit span
+inline constexpr int          kMinRateSamples   = 3;       // reduce.minRateSamples
+} // namespace reduce
+
 // --- Lower-body frontal-plane metrics (src/Analysis/lower_body_metrics.h) -----
 // leadKneeDrift / hipLineTilt / pelvisSway / pelvisLift, from the COCO BODY hips,
 // knees and ankles (11–16). Consumed by LowerBodyConfig::fromOverrides via

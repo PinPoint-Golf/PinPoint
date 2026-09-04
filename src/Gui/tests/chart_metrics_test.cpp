@@ -94,6 +94,105 @@ static QString groupOf(const QVariantList &groups, const char *key)
     return {};
 }
 
+// ── Fixtures for the reducer suite (Phase 2, design §5.2) ─────────────────────────────────────
+//
+// ⚠ REAL SAMPLING, AND IT IS NOT COSMETIC. The Phase 2 reducers are defined in TIME — a 40 ms
+// centred extremum window, a 50 ms minimum rate window — so the fixtures these assertions grew
+// from, five samples 1 ms apart, describe a curve 4 ms long: shorter than every window in the
+// design, with every reduction degenerate (one extremum window covering the whole series, no rate
+// window qualifying at all). They are rescaled here to the pipeline's own cadence, 8 ms per
+// sample, which is the ~120 fps the corpus was shot at and the spacing design §5.2's window sizes
+// were chosen against ("≈5 samples dense, ≈2 sparse").
+static constexpr qlonglong kDtUs = 8000;
+
+// t_us for `n` samples at `dtUs`, ascending from 0.
+static QVariantList tAt(int n, qlonglong dtUs = kDtUs)
+{
+    QVariantList t;
+    for (int i = 0; i < n; ++i) t.append(qlonglong(i) * dtUs);
+    return t;
+}
+static QVariantList flatV(int n, double v)
+{
+    QVariantList out;
+    for (int i = 0; i < n; ++i) out.append(v);
+    return out;
+}
+// v0 + i*step — a clean ramp, whose slope and endpoints the reducers must reproduce exactly.
+static QVariantList rampV(int n, double v0, double step)
+{
+    QVariantList out;
+    for (int i = 0; i < n; ++i) out.append(v0 + step * i);
+    return out;
+}
+static QVariantList onesMask(int n, int zeroFrom = -1, int zeroTo = -1)
+{
+    QVariantList out;
+    for (int i = 0; i < n; ++i)
+        out.append((zeroFrom >= 0 && i >= zeroFrom && i <= zeroTo) ? 0 : 1);
+    return out;
+}
+
+// A "still" series: fixed-seed pseudo-noise of the given sd, uniform on ±sd·√3 (a uniform's sd is
+// its half-range / √3). An address hold is exactly this — nothing is moving, so every wobble in it
+// belongs to the pipeline — and design §7 item 2 is measured on such a window.
+//
+// FIXED SEED, deliberately: a test whose noise changes per run cannot be debugged, and a tolerance
+// wide enough to cover an unseeded generator has stopped testing anything.
+static QVariantList noiseV(int n, double sd)
+{
+    QVariantList out;
+    unsigned long long x = 0x2545F4914F6CDD1Dull;          // any constant; this one is arbitrary
+    for (int i = 0; i < n; ++i) {
+        x = x * 6364136223846793005ull + 1442695040888963407ull;
+        const double u = double((x >> 33) & 0x7FFFFFFFull) / double(0x7FFFFFFFull);   // [0,1]
+        out.append(sd * std::sqrt(3.0) * (2.0 * u - 1.0));
+    }
+    return out;
+}
+
+static double meanOf(const QVariantList &v)
+{
+    double s = 0.0;
+    for (const QVariant &x : v) s += x.toDouble();
+    return v.isEmpty() ? 0.0 : s / v.size();
+}
+static double sdOf(const QVariantList &v)
+{
+    if (v.size() < 2) return 0.0;
+    const double m = meanOf(v);
+    double s = 0.0;
+    for (const QVariant &x : v) { const double d = x.toDouble() - m; s += d * d; }
+    return std::sqrt(s / (v.size() - 1));
+}
+
+// ── The OLD reducers, kept HERE and nowhere else ──────────────────────────────────────────────
+//
+// Several assertions below are of the form "the new number is far below the old one", and that is
+// the only form in which the point of Phase 2 can be pinned: a literal would rot the moment a
+// fixture changed, and would say nothing about which definition produced it. So the two
+// definitions chart_metrics.cpp deleted live on as test scaffolding — max adjacent |Δv/Δt| per
+// 100 ms, and the raw argmax of |v| — and the suite asserts the ratio between them and the
+// windowed forms that replaced them.
+static double oldRate(const QVariantList &t, const QVariantList &v)
+{
+    double r = 0.0;
+    for (int i = 1; i < t.size() && i < v.size(); ++i) {
+        const double dt = double(t.at(i).toLongLong() - t.at(i - 1).toLongLong()) / 1.0e5;
+        if (dt <= 0.0) continue;
+        const double d = std::fabs(v.at(i).toDouble() - v.at(i - 1).toDouble()) / dt;
+        if (d > r) r = d;
+    }
+    return r;
+}
+static double oldPeak(const QVariantList &v)
+{
+    double p = 0.0;
+    for (const QVariant &x : v)
+        if (std::fabs(x.toDouble()) > std::fabs(p)) p = x.toDouble();
+    return p;
+}
+
 int main()
 {
     ChartMetrics cm;
@@ -336,93 +435,340 @@ int main()
         checkStr("uncatalogued → \"\"", cm.shortLabel(QStringLiteral("zzzNotAMetric")), "");
     }
 
-    // ── summaryMasked: an invalid sample is not a measurement ─────────────────────
+    // ── The spike fixture, under the Phase 2 reducers ──────────────────────────────
     //
-    // The fixture is the shape of the defect this exists to stop: five samples of a slow, tidy
-    // curve with ONE absurd value in the middle, marked invalid because it was bridged across a
-    // gated run (the body line was foreshortened there and its tilt was measuring the camera).
-    // Unmasked it owns the peak, the range AND the peak rate — the three tiles the screenshot
-    // that started this design got wrong.
+    // The fixture is the shape of the defect this design exists to stop: a still, tidy curve of
+    // ~4s with ONE absurd value in the middle, of the kind a foreshortened body line produces.
+    // In Phase 1 the only thing that could stop it owning PEAK, RANGE and PK RATE was marking
+    // that sample invalid. Phase 2's job is that it can no longer own them EVEN WHEN NOBODY MARKS
+    // ANYTHING, because the reducers are windowed — which is what makes the honesty a property of
+    // the maths rather than of the gate happening to fire.
     {
-        std::printf("summaryMasked — invalid samples are skipped\n");
-        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
-                              qlonglong(3000), qlonglong(4000) };
-        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
-        const QVariantList mask{ 1, 1, 0, 1, 1 };
+        std::printf("summaryMasked — the spike, unmasked (Phase 2 reducers)\n");
+        const int  n      = 25;                        // 25 × 8 ms = 192 ms of curve
+        const int  iSpike = 12;                        // t = 96 ms, clear of both edges
+        const QVariantList t = tAt(n);
+        QVariantList v = flatV(n, 4.0);
+        v[iSpike] = 99.0;
+        const qlonglong tEnd = qlonglong(n - 1) * kDtUs;
 
-        // Baseline: what the old code did, and still does with nothing marked.
-        const QVariantMap bare = cm.summary(t, v, 0, 4000);
-        checkEqD("unmasked peak is the outlier", bare.value(QStringLiteral("peak")).toDouble(), 99.0);
-        checkEqD("unmasked rate is its slope",   bare.value(QStringLiteral("rate")).toDouble(), 9700.0);
-        checkTrue("unmasked is not partial",    !bare.value(QStringLiteral("partial")).toBool());
+        const QVariantMap bare = cm.summary(t, v, 0, tEnd);
 
-        const QVariantMap m = cm.summaryMasked(t, v, mask, 0, 4000);
-        checkEqD("min over valid only",  m.value(QStringLiteral("min")).toDouble(),   1.0);
-        checkEqD("max over valid only",  m.value(QStringLiteral("max")).toDouble(),   4.0);
-        checkEqD("peak over valid only", m.value(QStringLiteral("peak")).toDouble(),  4.0);
-        checkEqD("range over valid only", m.value(QStringLiteral("range")).toDouble(), 3.0);
-        // The rate is taken between consecutive VALID samples, so the 2→3 step spans the bridged
-        // sample's 2 ms and reads 50/100 ms rather than the outlier's 9700. Crossing a gap makes a
-        // rate SMALLER, which is the only safe direction: a gap must not invent the steepest slope.
-        checkEqD("rate over valid only", m.value(QStringLiteral("rate")).toDouble(), 100.0);
+        // ⚠ REPLACES "unmasked peak is the outlier" (which asserted peak == 99.0 exactly).
+        // WHICH DEFINITION CHANGED: peak is the extremum of the 40 ms CENTRED-WINDOW MEAN, not
+        // the raw argmax — a value has to hold for 40 ms to be a peak (design §5.2).
+        // THE ARITHMETIC: at 8 ms sampling a ±20 ms window holds 5 samples, and every window that
+        // contains the spike contains four baseline samples with it, so the best any of them can
+        // mean is (4·4 + 99)/5 = 23.0. The bound is baseline + (99 − baseline)/5 = 4 + 95/5 = 23;
+        // the tolerance is for a reducer whose window boundary is inclusive at one end, which can
+        // only add baseline samples and read LOWER.
+        const double peakBound = 4.0 + 95.0 / 5.0;
+        checkTrue("unmasked peak is under the 40 ms bound",
+                  bare.value(QStringLiteral("peak")).toDouble() <= peakBound + 1e-6);
+        // …and it is still well above the baseline. The excursion is REAL and must not be erased,
+        // only refused the right to be a 99: design §7 item 3 in miniature.
+        checkTrue("…and still shows the excursion",
+                  bare.value(QStringLiteral("peak")).toDouble() > 4.0 + 1e-6);
+        checkEqD("the argmax it replaced, for scale", oldPeak(v), 99.0);
+        // range follows peak: it was 95 (99 − 4) and cannot be more than 19 now.
+        checkTrue("range is the windowed one too",
+                  bare.value(QStringLiteral("range")).toDouble() <= peakBound - 4.0 + 1e-6);
+
+        // ⚠ REPLACES "unmasked rate is its slope" (which asserted rate == 9700.0 — 97 units
+        // across one 1 ms frame of the old fixture).
+        // WHICH DEFINITION CHANGED: rate is the steepest LEAST-SQUARES slope over a window of at
+        // least 50 ms holding at least 3 valid samples, so no single sample interval can set it.
+        // THE ARITHMETIC: at 8 ms the qualifying window is 8 samples (the 7 inside 50 ms, extended
+        // to the first sample at or past 50 ms so the span reaches it — 56 ms). For a flat
+        // baseline plus one 95-unit outlier at offset x_j the fitted slope is
+        // 95·(x_j − x̄)/Σ(x − x̄)², largest when the spike sits at an END of the window:
+        // 95·28/2688 per ms = 0.99 per ms = 99 per 100 ms. A 7-sample window would give
+        // 95·24/1792 = 127. Either is under 200, and 10–12× below what the same shape used to
+        // report through the adjacent-frame form (95/0.08 = 1187 per 100 ms at this spacing).
+        const double rate = bare.value(QStringLiteral("rate")).toDouble();
+        checkTrue("unmasked rate is a fitted slope, not a frame difference",
+                  std::fabs(rate) < 200.0);
+        // ⚠ ON |rate|, NOT rate, and that is not laziness: the slope is SIGNED now, and the window
+        // with the spike at its START (the curve falling away from it) fits exactly as steeply as
+        // the one with it at the END. Which of the two ties wins is not something C8 promises, so
+        // a signed assertion here would be pinning an implementation detail.
+        checkTrue("…and the spike is still visible in it", std::fabs(rate) > 20.0);
+        checkTrue("…many times below the adjacent-frame definition",
+                  std::fabs(rate) < oldRate(t, v) / 5.0);
+        checkTrue("a rate WAS fitted here", bare.value(QStringLiteral("rateOk")).toBool());
+        checkTrue("unmasked is not partial", !bare.value(QStringLiteral("partial")).toBool());
+    }
+
+    // ── The same spike, MASKED, is not a measurement at all ───────────────────────
+    {
+        std::printf("summaryMasked — the spike masked ≡ the clean curve\n");
+        const int n = 25, iSpike = 12;
+        const QVariantList t = tAt(n);
+        QVariantList v = flatV(n, 4.0);
+        v[iSpike] = 99.0;
+        const qlonglong tEnd = qlonglong(n - 1) * kDtUs;
+
+        const QVariantMap m     = cm.summaryMasked(t, v, onesMask(n, iSpike, iSpike), 0, tEnd);
+        const QVariantMap clean = cm.summary(t, flatV(n, 4.0), 0, tEnd);
+
+        // Every VALUE the two report is identical. A flat curve's windowed mean, windowed median
+        // and least-squares slope do not care whether a sample equal to the baseline was present
+        // or dropped — so this is the strongest available statement of "an invalid sample is not
+        // a measurement": not down-weighted, ABSENT.
+        //
+        // tPeakUs / tRateUs are deliberately not compared: on a flat curve every window ties, so
+        // which instant wins is an implementation detail. `partial` must DIFFER, and does below.
+        for (const char *k : { "start", "end", "min", "max", "peak", "range", "delta",
+                               "rate", "peakSigma", "rateSigma" })
+            checkEqD(k, m.value(QLatin1String(k)).toDouble(),
+                        clean.value(QLatin1String(k)).toDouble());
+
+        // ⚠ REPLACES "peak over valid only == 4.0" and "rate over valid only == 100.0". The peak
+        // is unchanged in VALUE but not in definition (it is now the 4.0 baseline as a windowed
+        // mean, not as an argmax); the rate assertion was 100 per 100 ms because the old form
+        // took the step ACROSS the bridged sample and divided by its 2 ms. A ≥50 ms fit over a
+        // flat baseline is exactly 0 — there is nothing there to have a slope.
+        checkEqD("masked peak is the baseline", m.value(QStringLiteral("peak")).toDouble(), 4.0);
+        checkEqD("masked rate is flat",        m.value(QStringLiteral("rate")).toDouble(),  0.0);
+        checkTrue("…and it was FITTED, not withheld", m.value(QStringLiteral("rateOk")).toBool());
         checkTrue("a bridged sample in the window ⇒ partial",
                   m.value(QStringLiteral("partial")).toBool());
+        checkTrue("…while the clean curve declares nothing",
+                  !clean.value(QStringLiteral("partial")).toBool());
+    }
+
+    // ── A still series: whatever the rate reads over it IS the noise floor ────────
+    //
+    // Design §7 item 2's window, in synthetic form: the golfer has not moved, so nothing in this
+    // curve is a measurement of the athlete. The corpus baseline read 39 (% stance width) and 291
+    // (°) per 100 ms over such a window with the adjacent-frame definition.
+    {
+        std::printf("summaryMasked — a still (noisy) series\n");
+        const int    n  = 51;                          // 51 × 8 ms = 400 ms of holding still
+        const double sd = 1.0;
+        const QVariantList t = tAt(n);
+        const QVariantList v = noiseV(n, sd);
+        const QVariantMap  s = cm.summary(t, v, 0, qlonglong(n - 1) * kDtUs);
+
+        const double mean   = meanOf(v);
+        const double realSd = sdOf(v);
+        const double peak   = s.value(QStringLiteral("peak")).toDouble();
+        const double rate   = s.value(QStringLiteral("rate")).toDouble();
+
+        // PEAK WITHIN ONE σ OF THE MEAN — design §7 item 3. A 5-sample window mean has standard
+        // error σ/√5 = 0.45σ, and the largest of the ~45 overlapping ones (about ten of them
+        // independent) sits near 1.6 of those, ≈0.7σ. The raw argmax of the same samples is
+        // ~2.5σ out, and that is the number the tile used to print.
+        checkTrue("peak is within 1σ of the mean", std::fabs(peak - mean) < realSd);
+        checkTrue("…and inside the argmax it replaced",
+                  std::fabs(peak - mean) < std::fabs(oldPeak(v) - mean));
+
+        // THE RATE BOUND, AND WHY IT IS NOT 2. σ_slope = σ/√Σ(x−x̄)²; over the 8 samples of a
+        // 56 ms window at 8 ms spacing Σ(x−x̄)² = 2688 ms², so the FIT'S OWN standard error is
+        // σ·1.93 per 100 ms — 1.93 at σ = 1. The largest of ~40 overlapping windows (≈14 of them
+        // independent) therefore lands near 2 of those, ≈4 per 100 ms. "Under 2 per 100 ms"
+        // (design §7 item 2) is consequently NOT a property of the reducer at σ = 1: it is a
+        // property of a series whose residual σ is ≲ 0.5, which is what Phase 1's gating and
+        // Phase 4's longer smoother window are for. What the reducer does own, and what is
+        // asserted here, is that the steepest slope in a still series is inside its own fitted
+        // uncertainty and an order of magnitude below the adjacent-frame form.
+        const double rateSigma = s.value(QStringLiteral("rateSigma")).toDouble();
+        checkTrue("|rate| < 8 per 100 ms on σ=1 pseudo-noise", std::fabs(rate) < 8.0);
+        checkTrue("…and not distinguishable from 0 at any usable threshold",
+                  std::fabs(rate) < 6.0 * rateSigma);
+        checkTrue("…and ≥5× below the adjacent-frame definition",
+                  std::fabs(rate) < oldRate(t, v) / 5.0);
+        checkTrue("rateSigma is non-zero on a noisy fit", rateSigma > 0.0);
+        // The σ of the winning extremum window is reported too, and on noise it is of the order
+        // of the series' own σ. This is the number design §5.3 puts a "±" in front of on PEAK,
+        // and the reason a reader can tell that a 0.7σ excursion is not a finding.
+        const double peakSigma = s.value(QStringLiteral("peakSigma")).toDouble();
+        checkTrue("peakSigma is of the order of σ",
+                  peakSigma > 0.2 * realSd && peakSigma < 3.0 * realSd);
+    }
+
+    // ── A clean ramp: the windowed forms must reproduce it EXACTLY ────────────────
+    //
+    // The counter-case to every assertion above, and the one that proves the reducers are not
+    // smoothers: on a straight line a symmetric window's mean IS the value at its centre and a
+    // least-squares fit IS the line, so the new definitions and the old raw ones agree to the
+    // last digit. A windowed reducer that shrank a real excursion would fail here.
+    {
+        std::printf("summaryMasked — a clean ramp\n");
+        const int n = 51;                              // 400 ms
+        const QVariantList t = tAt(n);
+        const QVariantList v = rampV(n, 10.0, 2.0);    // 2 per 8 ms = 25 per 100 ms
+        // The window sits ON two samples and 100 ms inside both ends of the series, so every
+        // window a reducer opens is symmetric and interior. An edge closer than 15 ms to the first
+        // sample would take its median from a one-sided window and read high — a real property of
+        // the reducer, but not the one this case pins.
+        const qlonglong a = 13 * kDtUs;                // 104 ms, value 36
+        const qlonglong b = 37 * kDtUs;                // 296 ms, value 84
+        const QVariantMap s = cm.summary(t, v, a, b);
+
+        checkEqD("start = the ramp at the edge", s.value(QStringLiteral("start")).toDouble(), 36.0);
+        checkEqD("end   = the ramp at the edge", s.value(QStringLiteral("end")).toDouble(),   84.0);
+        checkEqD("delta = the ramp's rise",      s.value(QStringLiteral("delta")).toDouble(), 48.0);
+        checkEqD("min = the ramp at the start",  s.value(QStringLiteral("min")).toDouble(),   36.0);
+        checkEqD("max = the ramp at the end",    s.value(QStringLiteral("max")).toDouble(),   84.0);
+        checkEqD("peak = the larger magnitude",  s.value(QStringLiteral("peak")).toDouble(),  84.0);
+        checkEqD("range",                        s.value(QStringLiteral("range")).toDouble(), 48.0);
+        checkEqI("tPeakUs = the winning sample",
+                 s.value(QStringLiteral("tPeakUs")).toLongLong(), b);
+        // ⚠ REPLACES the old adjacent-difference rate expectation on a monotone fixture. On an
+        // exact line every window fits perfectly, so the slope is the ramp's own and its standard
+        // error is 0 — the least-squares form's own sanity check.
+        checkEqD("rate = the ramp's slope per 100 ms",
+                 s.value(QStringLiteral("rate")).toDouble(), 25.0);
+        checkEqD("rateSigma = 0 on an exact fit",
+                 s.value(QStringLiteral("rateSigma")).toDouble(), 0.0);
+        checkTrue("rateOk",      s.value(QStringLiteral("rateOk")).toBool());
+        checkTrue("not partial", !s.value(QStringLiteral("partial")).toBool());
+        checkTrue("tRateUs lies inside the window",
+                  s.value(QStringLiteral("tRateUs")).toLongLong() >= a
+                  && s.value(QStringLiteral("tRateUs")).toLongLong() <= b);
+        // peakSigma on a ramp is not noise at all — it is the SLOPE across the winning window:
+        // 5 samples 2 apart ⇒ deviations ±4, ±2, 0 ⇒ √10 = 3.162 (n−1) or √8 = 2.828 (n).
+        // Bounded rather than pinned because that denominator is C8's choice, not this test's.
+        const double ps = s.value(QStringLiteral("peakSigma")).toDouble();
+        checkTrue("peakSigma is the in-window spread", ps > 2.7 && ps < 3.3);
+    }
+
+    // ── Sparse sampling, and a series too short to have a rate at all ─────────────
+    {
+        std::printf("summaryMasked — sparse 27 ms sampling\n");
+        // 27 ms is the sparse end of the corpus (a ~37 fps clip). The rate window is 50 ms, which
+        // at this spacing holds THREE samples spanning 54 ms — exactly C8's minimum, and the
+        // reason the window extends to the first sample at or past 50 ms instead of stopping
+        // short of it: stopping short, a sparse series would have no rate anywhere.
+        const int n = 21;
+        const QVariantList t = tAt(n, 27000);
+        const QVariantList v = rampV(n, 0.0, 2.7);     // 2.7 per 27 ms = 10 per 100 ms
+        const QVariantMap  s = cm.summary(t, v, 2 * 27000, 18 * 27000);
+        checkTrue("rateOk on sparse sampling", s.value(QStringLiteral("rateOk")).toBool());
+        checkEqD("rate on a 27 ms ramp", s.value(QStringLiteral("rate")).toDouble(), 10.0);
+        checkEqD("start", s.value(QStringLiteral("start")).toDouble(), 5.4);
+        checkEqD("end",   s.value(QStringLiteral("end")).toDouble(),  48.6);
+        // At 27 ms a ±20 ms extremum window holds ONE sample — itself — so the windowed mean is
+        // the sample and its σ is 0. The "always ≥ 1, itself" clause is what keeps a sparse
+        // series' extremes from vanishing.
+        checkEqD("min = the window's first sample", s.value(QStringLiteral("min")).toDouble(),  5.4);
+        checkEqD("max = the window's last sample",  s.value(QStringLiteral("max")).toDouble(), 48.6);
+        checkEqD("peakSigma = 0 on a one-sample window",
+                 s.value(QStringLiteral("peakSigma")).toDouble(), 0.0);
+
+        std::printf("summaryMasked — a series with no rate to report\n");
+        // TWO samples: no window can hold three, so there is no slope to fit.
+        // ⚠ THE ANSWER IS ABSENCE, NOT ZERO — rateOk false, and the card prints "—" with its
+        // "/100ms" token hidden. A bare 0 would read as a still, well-behaved curve, which is the
+        // confident absurdity this design exists to remove. The old definition answered this case
+        // with (2 − 1)/8 ms = 12.5 per 100 ms, a rate off one frame difference.
+        const QVariantList t2{ qlonglong(0), qlonglong(kDtUs) };
+        const QVariantList v2{ 1.0, 2.0 };
+        const QVariantMap  two = cm.summary(t2, v2, 0, kDtUs);
+        checkTrue("rateOk is false", !two.value(QStringLiteral("rateOk")).toBool());
+        checkEqD("rate is 0",      two.value(QStringLiteral("rate")).toDouble(),      0.0);
+        checkEqD("rateSigma is 0", two.value(QStringLiteral("rateSigma")).toDouble(), 0.0);
+        checkEqI("tRateUs is 0",   two.value(QStringLiteral("tRateUs")).toLongLong(), 0);
+        // The rest of the card still works: two samples 8 ms apart fall in one 40 ms window, so
+        // both extremes are that window's mean and Δ between two identical medians is 0. Asserted
+        // as a self-consistency rather than as literals, because the median of an EVEN count is
+        // C8's convention to choose.
+        checkEqD("min == max inside one window",
+                 two.value(QStringLiteral("min")).toDouble(),
+                 two.value(QStringLiteral("max")).toDouble());
+        checkEqD("delta between two equal medians is 0",
+                 two.value(QStringLiteral("delta")).toDouble(), 0.0);
+        checkTrue("peak lies between the two samples",
+                  two.value(QStringLiteral("peak")).toDouble() >= 1.0
+                  && two.value(QStringLiteral("peak")).toDouble() <= 2.0);
     }
 
     // ── partial: the window's numbers do not rest on a continuous measurement ─────
     {
-        std::printf("summaryMasked — partial\n");
-        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
-                              qlonglong(3000), qlonglong(4000) };
-        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
-        const QVariantList mask{ 1, 1, 0, 1, 1 };
+        std::printf("summaryMasked — partial, and the fallback edge\n");
+        // A 64 ms bridged run (8 samples at 8 ms) in the middle of a ramp, WIDER than the ±15 ms
+        // median window on purpose: that is the case Phase 2 introduces. With no valid sample
+        // near the edge there is no median to take, so the summary falls back to interpolating
+        // between the nearest measurements — and says so, every time, rather than presenting the
+        // interpolation as a reading.
+        const int n = 25;
+        const QVariantList t    = tAt(n);
+        const QVariantList v    = rampV(n, 0.0, 1.0);   // value == index, so an edge is legible
+        const QVariantList mask = onesMask(n, 8, 15);   // t = 64 ms … 120 ms bridged
 
-        // An EDGE landing on the invalid sample. The edge value is interpolated from the valid
-        // samples either side (2 at 1 ms, 3 at 3 ms ⇒ 2.5), which is the one place this reducer
-        // may cross a bridged run — and it says so rather than presenting 2.5 as a reading.
-        const QVariantMap edge = cm.summaryMasked(t, v, mask, 2000, 4000);
-        checkEqD("edge read from the valid neighbours",
-                 edge.value(QStringLiteral("start")).toDouble(), 2.5);
-        checkTrue("edge on an invalid sample ⇒ partial",
+        const QVariantMap edge = cm.summaryMasked(t, v, mask, 12 * kDtUs, 24 * kDtUs);
+        // The edge at 96 ms: nearest valid samples are (56 ms, 7) and (128 ms, 16), so
+        // 7 + 9·(40/72) = 12.0. The SAME number the pre-Phase-2 code produced there, deliberately:
+        // when there is nothing within ±15 ms, the value between the nearest measurements is
+        // still the honest one. What changed is that it is no longer reported as measured.
+        checkEqD("fallback edge = interpolated from the nearest valid samples",
+                 edge.value(QStringLiteral("start")).toDouble(), 12.0);
+        checkTrue("an edge with no valid sample within ±15 ms ⇒ partial",
                   edge.value(QStringLiteral("partial")).toBool());
 
-        // The case the "invalid sample inside the window" rule alone would MISS: a window that
-        // sits entirely between two samples, inside the bridged run, and so contains no sample at
-        // all. Every number in it came from across the gap.
-        const QVariantMap inside = cm.summaryMasked(t, v, mask, 1200, 1800);
+        // ⚠ REPLACES the old "window inside a bridged run ⇒ partial" case, which was caught by
+        // the interpolation's bracket test (whether the two samples it read were adjacent in the
+        // original series). That test is gone: the FALLBACK ITSELF is now the signal, and it
+        // catches strictly more — a window wholly inside the run has no valid sample within
+        // ±15 ms of either edge.
+        const QVariantMap inside = cm.summaryMasked(t, v, mask, 10 * kDtUs, 13 * kDtUs);
         checkTrue("window inside a bridged run ⇒ partial",
                   inside.value(QStringLiteral("partial")).toBool());
+        // …and it still reports extremes, from the two fallback edges (10 and 13 on this ramp)
+        // rather than from nothing. A 0 printed there would be a reading invented out of a gap.
+        checkTrue("…extremes come from the edges, not from nothing",
+                  inside.value(QStringLiteral("min")).toDouble() >= 7.0
+                  && inside.value(QStringLiteral("max")).toDouble() <= 16.0);
 
-        // …and a window with valid samples on both sides of nothing marked is NOT partial, so the
-        // chip stays off on the swings that have nothing to declare.
-        const QVariantMap clean = cm.summaryMasked(t, v, mask, 3000, 4000);
+        // A window entirely in the valid tail declares nothing, so the chip stays off on the
+        // swings that have nothing to declare — and the ramp's slope comes through it intact
+        // (1 per 8 ms = 12.5 per 100 ms).
+        const QVariantMap clean = cm.summaryMasked(t, v, mask, 17 * kDtUs, 24 * kDtUs);
         checkTrue("a fully valid window is not partial",
                   !clean.value(QStringLiteral("partial")).toBool());
+        checkEqD("…and it fits the ramp's slope",
+                 clean.value(QStringLiteral("rate")).toDouble(), 12.5);
     }
 
     // ── An empty mask IS "every sample valid" ─────────────────────────────────────
     //
     // summary() delegates to summaryMasked() with {}, so this pins the delegation as an identity:
-    // every series that predates the validity field, which is every series in every swing.json
-    // written before 2026-09-04, must summarise to exactly the numbers it did before.
+    // every series that predates the validity field — which is every series in every swing.json
+    // written before 2026-09-04 — must summarise through exactly the same code path.
     {
         std::printf("summaryMasked — empty mask ≡ summary()\n");
-        const QVariantList t{ qlonglong(0), qlonglong(1000), qlonglong(2000),
-                              qlonglong(3000), qlonglong(4000) };
-        const QVariantList v{ 1.0, 2.0, 99.0, 3.0, 4.0 };
-        const QVariantMap a = cm.summary(t, v, 500, 3500);
-        const QVariantMap b = cm.summaryMasked(t, v, QVariantList{}, 500, 3500);
+        const int n = 25;
+        const QVariantList t = tAt(n);
+        QVariantList v = flatV(n, 4.0);
+        v[12] = 99.0;
+        const QVariantMap a = cm.summary(t, v, 5 * kDtUs, 20 * kDtUs);
+        const QVariantMap b = cm.summaryMasked(t, v, QVariantList{}, 5 * kDtUs, 20 * kDtUs);
         checkTrue("same key set", a.keys() == b.keys());
         bool same = true;
         for (auto it = a.constBegin(); it != a.constEnd(); ++it)
             if (it.value() != b.value(it.key())) same = false;
         checkTrue("identical for every key", same);
 
+        // The four keys Phase 2 adds are PRESENT, not optional. A QML binding that reads
+        // `st.rateOk` against a map without it gets `undefined` — falsy — and the PK RATE tile
+        // would print "—" on every card of every swing, which is exactly as wrong as printing a
+        // fabricated number.
+        for (const char *k : { "peakSigma", "rateSigma", "rateOk", "tRateUs" })
+            checkTrue(k, a.contains(QLatin1String(k)));
+        // …and nothing that was there before was lost on the way: three QML files and one probe
+        // read these by name.
+        for (const char *k : { "start", "end", "min", "max", "peak", "range", "delta", "rate",
+                               "tPeakUs", "partial" })
+            checkTrue(k, a.contains(QLatin1String(k)));
+
         // An all-ONES mask is the same thing said the long way — the persistence layer never
         // writes one, but a caller that builds a mask by hand must not get a different answer.
-        const QVariantMap ones = cm.summaryMasked(t, v, QVariantList{ 1, 1, 1, 1, 1 }, 500, 3500);
-        checkEqD("all-ones peak",  ones.value(QStringLiteral("peak")).toDouble(),
-                                   a.value(QStringLiteral("peak")).toDouble());
+        const QVariantMap ones = cm.summaryMasked(t, v, onesMask(n), 5 * kDtUs, 20 * kDtUs);
+        checkEqD("all-ones peak", ones.value(QStringLiteral("peak")).toDouble(),
+                                  a.value(QStringLiteral("peak")).toDouble());
+        checkEqD("all-ones rate", ones.value(QStringLiteral("rate")).toDouble(),
+                                  a.value(QStringLiteral("rate")).toDouble());
         checkTrue("all-ones is not partial", !ones.value(QStringLiteral("partial")).toBool());
     }
 

@@ -63,7 +63,7 @@ Nothing ships from this phase; it produces the numbers the definition of done is
 
 ---
 
-## Phase 1 — Validity: geometric gates and phase domains `[~]`
+## Phase 1 — Validity: geometric gates and phase domains `[x]`
 
 Changes no persisted `value`. Adds absence. The screenshot's −88°, +35 % and the 88° top
 sample all disappear here.
@@ -141,7 +141,7 @@ sample all disappear here.
 
 ---
 
-## Phase 2 — Robust reducers, one implementation `[ ]`
+## Phase 2 — Robust reducers, one implementation `[~]`
 
 Changes what is *derived*; `value[]` untouched.
 
@@ -321,3 +321,18 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   0.6 ms BEFORE the P7 sample (phase samples sit on the nearest frame): `_domainWindow` now
   snaps to the series' sample grid. Not exercised offscreen: the padded replay axis (no video
   decode), so the still-address window and dashed rendering want one windowed look.
+
+- **2026-09-04 (Phase 2 WIP checkpoint — session limit)** — Committed UNBUILT and UNTESTED because
+  the session limit arrived mid-phase. On disk: W1's header-only `src/Analysis/series_reduce.h`
+  (reduceAt / reduceDelta / reduceExtremum / reduceRate, `SeriesView`, `viewOf`, `ReduceConfig`
+  with an extra `minAtSamples`), `series_reduce_test.cpp` registered in
+  `src/Analysis/tests/CMakeLists.txt`, `tuned::reduce` constants; W2's engine adoption (DONE per
+  its report: reduceAt for phase values, reduceExtremum for spans over (lo, hi],
+  `kPhaseGridSchemaVersion` 3, 80 test assertions, span constants re-derived, e.g. dip min −20 →
+  −16.93); W3's chart adoption (report NOT received — chart_metrics.{h,cpp}, chart_metrics_test,
+  PpChartSummary.qml, the probe may be mid-edit). Contract: scratchpad `phase2_contracts.md`,
+  reproduced in the memory note. **Next session, in order:** build `build/tests` targets
+  series_reduce_test, measure_sample_test, chart_metrics_test, diagnostics_catalogue_integrity_test,
+  live_measure_source_test, model_browser_test; fix whatever W1/W3 left unfinished; ctest; two
+  adversarial reviews (Analysis reducers; chart+engine adoption); gate 2.5 = probe STILL ADDRESS
+  rate on the 08-18 subset (target < 2 units/100 ms) + card-vs-engine agreement test; commit.

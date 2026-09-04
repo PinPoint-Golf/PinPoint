@@ -29,6 +29,12 @@
 // a bridged sample is excluded from every reduction, a window the domain clamp emptied prints "—"
 // in the three window-scoped tiles, @impact prints "—" where it was not measured at impact, and a
 // window with any unmeasured part in it wears a PARTIAL chip.
+//
+// Since Phase 2 (§5.2) PEAK is a 40 ms windowed-mean extremum and PK RATE a ≥50 ms least-squares
+// slope, both from src/Analysis/series_reduce.h — the same reducers the diagnostics engine grades
+// with, so a card and a corridor cannot disagree about the same window. PK RATE therefore also has
+// an ABSENT state (`rateOk` false: no window long enough, or too few valid samples in it), and it
+// prints "—" with its unit hidden rather than a fitted-from-nothing 0.
 
 pragma ComponentBehavior: Bound
 
@@ -167,6 +173,19 @@ ColumnLayout {
                 // so (invalid samples inside the window, or an edge read from across them), or the
                 // window was emptied above and there is nothing behind any of them.
                 readonly property bool   partial: card.st.partial === true || card.collapsed
+                // ── IS THERE A PEAK RATE AT ALL? ────────────────────────────────────────────
+                // Phase 2 (design §5.2) makes PK RATE the steepest least-squares slope over a
+                // window of at least 50 ms holding at least 3 valid samples, and a window that
+                // short — or that sparsely measured — simply has no slope to fit. summaryMasked
+                // says so with `rateOk` and returns 0, and a 0 in this tile would read as the one
+                // thing it must not: a still, well-behaved curve. So the tile prints "—" and the
+                // "/100ms" unit token goes with it, because a unit beside an em dash still claims
+                // a quantity was measured in it.
+                //
+                // `=== true` on purpose: an older analysisDetail summarised by a build without the
+                // key gives `undefined`, and `!card.st.rateOk` would then print a rate that was
+                // never fitted.
+                readonly property bool   rateOk: card.st.rateOk === true && !card.collapsed
 
                 // Value at the impact landmark — a fixed anatomical reference, so it reads the
                 // whole series (not the view window); the more useful thing to compare against
@@ -363,14 +382,25 @@ ColumnLayout {
                                 // The VALUE elides as well, and needs to: once the unit token
                                 // below has collapsed to its ellipsis there is nothing left to give
                                 // way, and an un-elided number then drew straight over it.
+                                // ⚠ THE MAGNITUDE, of a value that is now SIGNED. summaryMasked's
+                                // `rate` carries the direction of the steepest change since Phase
+                                // 2 (a least-squares slope has one, and throwing it away in C++
+                                // would leave no consumer able to recover it), but this tile has
+                                // always answered "how fast, at its fastest" — the same question
+                                // the corpus baseline table and design §7 item 2's "under 2 units
+                                // per 100 ms" are written against — and its neighbours PEAK and
+                                // Δ SEGMENT already carry sign where the sign IS the reading.
+                                // Printing "-291" here would silently redefine the tile mid-phase.
+                                // The signed value stays available in the map (the plumb-bob probe
+                                // prints it), and tRateUs says where it was.
                                 Text { id: rateVal
                                        Layout.alignment: Qt.AlignBaseline
                                        Layout.fillWidth: true
                                        elide: Text.ElideRight
-                                       text: card.collapsed ? "—" : Math.round(card.st.rate)
+                                       text: card.rateOk ? Math.round(Math.abs(card.st.rate)) : "—"
                                        font.family: Theme.fontData
                                        font.pixelSize: Theme.fontSzData
-                                       color: card.collapsed ? Theme.colorText3 : Theme.colorText }
+                                       color: card.rateOk ? Theme.colorText : Theme.colorText3 }
                                 // The ONE value whose unit differs from the card's — a rate, not a
                                 // reading — so it says so, and is the only one that may. It is also
                                 // the half that gives way when the cell is too narrow: the NUMBER is
@@ -378,7 +408,11 @@ ColumnLayout {
                                 // eliding the digits.
                                 Text { Layout.fillWidth: true; elide: Text.ElideRight
                                        Layout.alignment: Qt.AlignBaseline
-                                       visible: !card.collapsed
+                                       // Hidden with the value, not just when the window
+                                       // collapsed: "— °/100ms" reads as a measurement in units
+                                       // per 100 ms that happens to be missing, when the truth is
+                                       // that no rate over 100 ms was fitted at all.
+                                       visible: card.rateOk
                                        text: root._unit(card.modelData.unit) + qsTr("/100ms")
                                        font.family: Theme.fontData
                                        font.pixelSize: Theme.fontSzMicro; color: Theme.colorText3 }

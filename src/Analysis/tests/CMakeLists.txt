@@ -286,6 +286,17 @@ pp_add_test(lower_body_metrics_test SOURCES lower_body_metrics_test.cpp
 pp_add_test(upper_body_metrics_test SOURCES upper_body_metrics_test.cpp
             ${ANALYSIS}/upper_body_metrics.cpp ${SRC}/Diagnostics/anatomy_vocabulary.cpp)
 
+# Shared robust reducers (series_reduce.h — HEADER-ONLY, so there is no .cpp to add
+# here or to any consumer target). At / Delta / Extremum / Rate, the one arithmetic
+# the review-chart summary card and the diagnostics phase grid both reduce with.
+# Synthetic series only. The case that carries the design is a lone 99 in a ramp of
+# 0..8: the windowed-mean PEAK comes back 23 against the raw argmax's 99, and the
+# 50 ms least-squares RATE comes back 100 per 100 ms against the adjacent-frame
+# difference's 1188 — every claim is asserted beside that control, computed inline
+# from the same samples, because "the number got smaller" only means something next
+# to what the arithmetic it replaces returned.
+pp_add_test(series_reduce_test SOURCES series_reduce_test.cpp)
+
 # Axial body rotation (body_rotation.{h,cpp}): the per-segment tier choice (a bound
 # Pelvis/Thorax stream beats the camera, independently for each), the cosine
 # inversion the camera tier is built on, and the MAGNITUDE convention — positive at

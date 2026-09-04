@@ -477,6 +477,87 @@ there would fail the distance test on every sample *including the measured ones*
 all-zeros mask, withdrawing every gated metric from every reducer at once. Both producers guard it and
 both guards are pinned by a test.
 
+### 2.17 `reduce.*` — the shared robust reducers (2026-09-04)
+
+Three keys from the second phase of
+[`metric_presentation_honesty.md`](../design/metric_presentation_honesty.md) §5.2, frozen in
+`pinpoint::tuned::reduce` and consumed through `ReduceConfig` in
+[`src/Analysis/series_reduce.h`](../../src/Analysis/series_reduce.h). They change nothing that is
+persisted: `value[]` is untouched, no producer reads them. What they change is what is *derived* from
+a curve — the review chart's summary card (`ChartMetrics::summary`) and the diagnostics phase grid
+(`measure_sample.cpp buildPhaseGrid`), which from this phase on share one arithmetic instead of
+carrying two.
+
+⚠ **NOT INJECTABLE YET.** There is no `fromOverrides` for these in this phase: both consumers
+default-construct a `ReduceConfig` from the constants. The dotted keys below are the names the sweep
+will use when the plumbing lands, and they are registered here now so that the freeze edit-point and
+the key names are decided in one place rather than invented twice. Sweeping them today means editing
+the header (§3).
+
+**`reduce.extremumWindowUs` (40000)** — the support a PEAK has to have. `reduceExtremum` returns the
+extremum not of the samples but of the **centred-window mean**: for every valid sample, the mean of
+the valid samples within ±20 ms of it. A one-sample outlier therefore cannot *be* the peak, because a
+peak has to be there for 40 ms. This is the direct fix for the raw-argmax behaviour design §2
+measured — a summary card reporting a sway PEAK of 34 % on a curve that settles at 12 %, and a
+`PhaseGridSpan.min/max` built from the same raw samples, so the diagnostics `Extremum` reducer
+inherited the identical bias.
+
+40 ms is ≈5 samples inside the dense pose zone (8 ms spacing) and ≈2 outside it (27 ms), so the
+jitter averages down by about √5 where it is worst. It is short next to what it must not flatten:
+the pelvis and thorax quantities this protects move over 100–300 ms. The dilution is arithmetic and
+worth stating, because it bounds how wrong a spike can still make the answer — a single sample of
+value *A* among *k* window samples otherwise bounded by *M* cannot push the mean above
+`M + A/k`. On the test's ramp (0..8) with one 99 at 8 ms spacing that is `7.92 + 99/5 = 27.72`, and
+the reducer returns **23.16** where the raw argmax returned **99**.
+
+⚠ **The centred window is NOT clamped to the reduction's own [from, to].** A window-edge sample's
+mean still draws on samples up to 20 ms outside the window, deliberately: the 40 ms is that
+reading's own support, and truncating it at the edge would make one instant reduce differently
+depending on where the caller cut its window. The visible consequence is that an Extremum taken up
+to a phase domain's edge borrows up to 20 ms from outside the domain. If that is ever shown to
+matter it is clamped in `reduceExtremum` and nowhere else.
+
+**`reduce.rateWindowUs` (50000)** and **`reduce.minRateSamples` (3)** — the minimum **time base** a
+rate may be fitted over, and the minimum evidence in it. `reduceRate` returns the largest-magnitude
+**least-squares slope** over sliding windows `[t_i, t_i + 50 ms]`, per 100 ms as the card has always
+reported it. The window is *extended* to the first valid sample at or beyond `t_i + 50 ms` when one
+exists inside the reduction window, because outside the dense zone the spacing is 27 ms and a
+literal 50 ms window holds two samples spanning 27 — fitting that would report a 50 ms rate taken
+over half the time base. A window with fewer than `minRateSamples` valid samples, or a span still
+short of `rateWindowUs`, is **skipped**; when none qualifies the answer is *no rate* (`rateOk: false`
+on the card, `ok = false` in the reducer), never a fabricated number. That is what a sparsely posed
+address — 80–100 ms strides — now returns.
+
+What this replaces is the largest **adjacent-frame** |Δv/Δt| scaled to 100 ms, and the arithmetic of
+why that had to go is design §2's whole table: at 8 ms spacing, half a degree of jitter reads as
+6°/100 ms and the 95th-percentile 3° reads as 37°/100 ms, which is where the screenshot's 291°/100 ms
+of hip-line tilt came from. On a still series with 0.2 units of noise the fitted slope comes back at
+**1.1 per 100 ms** against the adjacent-frame **9.9**; the phase's definition of done (PK RATE under
+2 units per 100 ms over a still address window) is a statement about this reducer on that noise.
+
+⚠ **A LEAST-SQUARES SLOPE IS NOT A ROBUST ESTIMATOR, and no value of these two keys makes it one.**
+The 50 ms base removes the "noise ÷ 8 ms" failure completely, but a single large outlier still moves
+the fit: an outlier of magnitude *A* in a window of *n* samples spanning *T* seconds displaces the
+slope by roughly `6A/(nT)`. The test's 99-unit spike on an 8-unit ramp reads **≈ 100 per 100 ms**
+against the ramp's true 1.0 — 11.9× better than the adjacent-frame **1188**, and still not the
+truth. Widening the window does not fix it (the displacement falls only as 1/nT while a real
+excursion is flattened); what makes the *presentation* honest is that the fit's own standard error
+comes back the same order as the slope — ≈ 57 against ≈ 100 — which is the `± σ` design §5.3 puts
+beside PK RATE. **If a spike-proof rate is ever required, the answer is a robust regression
+(Theil–Sen over the window's pairwise slopes) or a residual gate, and it is a design decision, not a
+tuning of these keys.** Nobody should read `reduce.rateWindowUs` as a spike filter.
+
+`reduce.minRateSamples` is floored at 2 in code whatever it is set to: a slope needs two points. At 3
+it also guarantees a residual degree of freedom, which is what gives the standard error above
+something to be honest with — a two-point "fit" has none, and `sigma` comes back 0 for it, which
+would read as certainty.
+
+The At reducer takes no new key: it is `sampler.windowHalfUs` (±15 ms) and
+`sampler.minValidSamples`, the convention `measure_sample.cpp` has used since it was written. §2.4's
+entry covers them. The chart adopting that median in place of a linear interpolation at one instant
+is the other half of "the card and the engine cannot disagree", and it is a behaviour change on the
+chart only.
+
 ## 3. The frozen-defaults header — the single freeze edit-point
 
 `src/Core/pp_tuned_constants.h` (`namespace pinpoint::tuned`) is the **single source of truth** for every

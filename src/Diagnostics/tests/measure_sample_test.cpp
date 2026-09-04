@@ -16,18 +16,28 @@
 //      reading.
 //   4. The sidecar round-trips exactly AND refuses a stale guard. A cache that answered from a
 //      superseded swing.json would be wrong in a way nothing on screen could reveal.
+//   5. A span extreme is the extreme of the WINDOWED MEAN, so one wild sample cannot be a peak
+//      (schema 3, design §5.2) — and the engine's answer is the SAME NUMBER series_reduce.h gives
+//      the review chart, checked here by calling reduceExtremum directly on the same fixture. The
+//      corridor is authored by looking at the chart, so if those two ever drifted the band would be
+//      drawn around a number the engine never grades against, and both surfaces would look fine.
 //
 //   cmake --build build/analyzer-tests --target measure_sample_test
 //   ctest --test-dir build/analyzer-tests -R measure_sample --output-on-failure
 
 #include "../measure_sample.h"
 
+#include "../../Analysis/series_reduce.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <vector>
 
 using namespace pinpoint::analysis;
 
@@ -87,6 +97,55 @@ double dipCurve(qint64 t)
 
 double rampCurve(qint64 t) { return double(t) / 100'000.0; }   // 1 at 100 ms, 11 at 1100 ms
 
+// ── The dip fixture's P4→P7 span extremes under the WINDOWED-MEAN rule (schema 3) ────────────────
+//
+// Derived, not observed, because a number copied out of a failing run pins nothing. The window is
+// tuned::reduce::kExtremumWindowUs = 40 ms centred, so ±20 ms, and the curve is sampled every 1 ms:
+// 41 samples per window.
+//
+// The trough is a symmetric tent apexing at −20 at 600 ms with slope 0.3 per ms, so the mean is
+// lowest with the window centred exactly on the apex: the 20 samples either side run −14.0 … −19.7
+// in 0.3 steps, giving 2·(20·−14 − 0.3·190) + (−20) = −694 over 41 samples.
+//   BEFORE (raw-sample extreme): −20.0 exactly, the apex itself.
+constexpr double kDipSpanMin = -694.0 / 41.0;    // −16.926829…
+// The crest is the same shape apexing at +30 at 800 ms with slope 0.2 per ms:
+// 2·(20·26 + 0.2·190) + 30 = 1146 over 41.
+//   BEFORE: +30.0 exactly.
+constexpr double kDipSpanMax = 1146.0 / 41.0;    //  27.951220…
+// With 595…605 ms masked the apex is gone and the deepest window is the one centred on the nearest
+// surviving sample (594 ms, symmetrically 606 ms): 30 valid samples summing to −472.2.
+//   BEFORE: −18.2, the deepest surviving SAMPLE.
+constexpr double kDipSpanMinMasked = -472.2 / 30.0;   // −15.74
+
+// A borrowed view of one metric object's curve, so a test can call the SHARED reducer on exactly the
+// samples buildPhaseGrid fed it. The vectors must outlive the view, hence the out-parameters.
+SeriesView viewOfMetric(const QJsonObject &metric, std::vector<int64_t> &t,
+                        std::vector<double> &v)
+{
+    const QJsonArray tArr = metric.value(QStringLiteral("t_us")).toArray();
+    const QJsonArray vArr = metric.value(QStringLiteral("value")).toArray();
+    const int        n    = std::min(tArr.size(), vArr.size());
+    t.clear();
+    v.clear();
+    for (int i = 0; i < n; ++i) {
+        t.push_back(tArr.at(i).toVariant().toLongLong());
+        v.push_back(vArr.at(i).toDouble());
+    }
+    SeriesView s;
+    s.t = t.data();
+    s.v = v.data();
+    s.n = t.size();
+    return s;
+}
+
+QJsonObject metricNamed(const QJsonObject &analysis, const QString &key)
+{
+    for (const QJsonValue &mv : analysis.value(QStringLiteral("metrics")).toArray())
+        if (mv.toObject().value(QStringLiteral("key")).toString() == key)
+            return mv.toObject();
+    return {};
+}
+
 // The same curve plus the parallel `valid` mask of design 5.1: 0 on every sample inside
 // [fromUs, toUs] (inclusive), 1 elsewhere. A 0 marks a sample the producer BRIDGED across a gated
 // or absent run — the value is interpolation, not measurement, so no reducer may read it.
@@ -101,6 +160,26 @@ QJsonObject metricCurveMasked(const QString &key, const QString &unit, qint64 sp
     for (qint64 x = 0; x <= spanUs; x += 1000)
         valid.append((x >= fromUs && x <= toUs) ? 0 : 1);
     o.insert(QStringLiteral("valid"), valid);
+    return o;
+}
+
+// A flat curve at 4.0 sampled every 8 ms (the pose grid's DENSE spacing) with exactly ONE sample
+// replaced by 99 — the Phase 1 spike, the shape the design was written about. 696 ms is chosen
+// because it is on the 8 ms grid, sits strictly inside the P4→P7 span, and is more than a phase
+// window away from every phase instant, so the spike can only ever reach the SPANS. If it also
+// moved a phase median the test would be proving two things and pinning neither.
+QJsonObject metricSpike(const QString &key, const QString &unit)
+{
+    QJsonArray t, v;
+    for (qint64 x = 0; x <= 1'200'000; x += 8'000) {
+        t.append(qint64(x));
+        v.append(x == 696'000 ? 99.0 : 4.0);
+    }
+    QJsonObject o;
+    o.insert(QStringLiteral("key"),   key);
+    o.insert(QStringLiteral("unit"),  unit);
+    o.insert(QStringLiteral("t_us"),  t);
+    o.insert(QStringLiteral("value"), v);
     return o;
 }
 
@@ -286,16 +365,21 @@ int main()
     std::printf("\nextremum\n");
     // The trough bottoms at -20 and the crest tops at +30, both strictly between P4 (400 ms) and
     // P7 (1100 ms). Every phase reads 10, so ONLY the span aggregation can see either.
+    //
+    // The REPORTED extreme is the windowed mean at the apex, not the apex sample (schema 3): -16.93
+    // rather than -20, and +27.95 rather than +30, both derived above. A tent 100 ms wide loses
+    // about 3 of its 30 to a 40 ms window, which is the honest cost of the rule — a real excursion
+    // is still nearly all there, while a one-sample spike (below) loses four fifths of itself.
     near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
                         extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
-         -20.0, "extremum finds a trough NO endpoint sees");
+         kDipSpanMin, "extremum finds a trough NO endpoint sees");
     near(reduceOverGrid(grid, QStringLiteral("pelvisSway"), at(Phase::Top)).value_or(-999), 10.0,
          "…and P4 really does read 10, so the trough was not free");
     near(reduceOverGrid(grid, QStringLiteral("pelvisSway"), at(Phase::Impact)).value_or(-999), 10.0,
          "…nor does P7 give it away");
     near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
                         extremum(Phase::Top, Phase::Impact, ExtremumSense::Max)).value_or(-999),
-         30.0, "the max over the same window is the crest, equally invisible to the endpoints");
+         kDipSpanMax, "the max over the same window is the crest, equally invisible to the endpoints");
     near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
                         extremum(Phase::Address, Phase::Top, ExtremumSense::Min)).value_or(-999),
          10.0, "a window that ENDS before the dip does not see it");
@@ -306,14 +390,102 @@ int main()
     near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
                         extremum(Phase::Top, Phase::Impact, ExtremumSense::Min, Phase::Address))
              .value_or(-999),
-         -30.0, "anchored extremum is the SIGNED deviation (-20 - 10), not |.|");
+         kDipSpanMin - 10.0, "anchored extremum is the SIGNED deviation (trough - 10), not |.|");
     near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
                         extremum(Phase::Top, Phase::Impact, ExtremumSense::Max, Phase::Address))
              .value_or(-999),
-         20.0, "…and the Max tail of the same anchored window");
+         kDipSpanMax - 10.0, "…and the Max tail of the same anchored window");
     check(!reduceOverGrid(grid, QStringLiteral("pelvisSway"),
                           extremum(Phase::Top, Phase::Finish, ExtremumSense::Min)).has_value(),
           "extremum over a window whose end was never segmented is unavailable");
+
+    // ── ONE WILD SAMPLE IS NOT A PEAK ───────────────────────────────────────
+    //
+    // The case the whole of design §5.2 exists for. Before this, a span's extreme was the extreme
+    // RAW SAMPLE, so a single frame of pose noise became the cached peak, got graded against a
+    // corridor, and printed on the card as the golfer's number. Nothing about a max says how long
+    // its value was held, so nothing could tell that reading from a real excursion.
+    //
+    // Arithmetic, so this pins a rule and not a run: the curve is flat at 4.0 every 8 ms with one
+    // sample at 99. A ±20 ms window on an 8 ms grid holds offsets 0, ±8, ±16 — FIVE samples — so the
+    // best any window can do with one spike in it is (4·4 + 99) / 5 = 4 + 95/5 = 23. It is attained:
+    // every centre within 16 ms of the spike sees exactly 5 samples, one of them 99.
+    std::printf("\nthe spike: a peak has to be there for 40 ms\n");
+    {
+        QJsonObject an      = fixtureAnalysis();
+        QJsonArray  metrics = an.value(QStringLiteral("metrics")).toArray();
+        metrics.append(metricSpike(QStringLiteral("spiked"), QStringLiteral("%")));
+        an.insert(QStringLiteral("metrics"), metrics);
+        const SwingPhaseGrid   g = buildPhaseGrid(an);
+        const MetricPhaseGrid *m = g.metric(QStringLiteral("spiked"));
+
+        check(m != nullptr && m->values.size() == 3 && m->spans.size() == 2,
+              "the spiked metric grids over the same three phases");
+        if (m) {
+            near(m->values[0].value, 4.0, "the spike is far from every phase window: P1 reads 4");
+            near(m->values[2].value, 4.0, "…and so does P7");
+            // spans[1] is P4->P7, the span the spike sits inside.
+            near(m->spans[1].max, 23.0, "the span max is the windowed-mean bound, 4 + 95/5");
+            check(m->spans[1].max < 30.0,
+                  "…which is WELL below the 99 the raw-sample rule would have cached");
+            near(m->spans[1].min, 4.0, "…and the min is the flat curve, untouched by the spike");
+            near(m->spans[0].max, 4.0, "the span the spike is NOT in stays flat");
+        }
+        near(reduceOverGrid(g, QStringLiteral("spiked"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Max)).value_or(-999),
+             23.0, "…and that is the number a Measure reduces to, not 99");
+    }
+
+    // ── CARD-VS-ENGINE AGREEMENT, BY CONSTRUCTION ───────────────────────────
+    //
+    // Design §7 item 5: for every authored extremum measure the chart summary over the same window
+    // must report the same number. The chart calls reduceExtremum on the series; the engine calls it
+    // on the same series and caches the answer in a span. So call it BOTH ways here on one fixture
+    // and require equality — the useful failure is not a wrong value, it is the two paths drifting
+    // apart later while each stays plausible on its own.
+    //
+    // The engine additionally admits the two endpoint MEDIANS into its search (a peak sitting
+    // exactly on a phase is still the peak), so equality is exact precisely when the span extreme
+    // dominates them. That is the case for any genuine excursion, and it is the case here: the dip
+    // reaches -16.93 and the crest +27.95 either side of endpoints that both read 10.
+    std::printf("\nagreement with the shared reducer\n");
+    {
+        const QJsonObject an = fixtureAnalysis();
+        std::vector<int64_t> ts;
+        std::vector<double>  vs;
+        const SeriesView     view = viewOfMetric(metricNamed(an, QStringLiteral("pelvisSway")),
+                                                 ts, vs);
+        ReduceConfig rc;                       // the engine's defaults, unmodified
+        const int64_t p4 = 400'000, p7 = 1'100'000;
+
+        // (from, to] — the same half-open span the grid stores, spelled the same way.
+        const Reduced mn = reduceExtremum(view, p4 + 1, p7, /*wantMax=*/false, rc);
+        const Reduced mx = reduceExtremum(view, p4 + 1, p7, /*wantMax=*/true,  rc);
+        check(mn.ok && mx.ok, "the shared reducer answers over the span directly");
+
+        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
+             mn.value, "engine Min == reduceExtremum(min) on the same samples");
+        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Max)).value_or(-999),
+             mx.value, "engine Max == reduceExtremum(max) on the same samples");
+
+        // The ANCHORED (signed-deviation) form too, since that is what the shipped pack authors.
+        const Reduced anchor = reduceAt(view, 100'000, rc);
+        check(anchor.ok, "…and the anchor's own median comes from reduceAt");
+        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Min, Phase::Address))
+                 .value_or(-999),
+             mn.value - anchor.value, "anchored Min == reduceExtremum(min) - reduceAt(anchor)");
+        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Max, Phase::Address))
+                 .value_or(-999),
+             mx.value - anchor.value, "anchored Max == reduceExtremum(max) - reduceAt(anchor)");
+
+        // And the phase values are the shared reducer's too, not a second median convention.
+        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"), at(Phase::Top)).value_or(-999),
+             reduceAt(view, p4, rc).value, "engine At == reduceAt at the same instant");
+    }
 
     // ── phaseSamples: the only data a whole class of metric has ─────────────
     //
@@ -404,22 +576,24 @@ int main()
 
         // (b) The SPAN EXTREMES. The dip bottoms at -20 at 600 ms, strictly between P4 and P7 and
         // invisible to both endpoints — it is the only thing the span aggregation can see. Mask
-        // 595..605 ms and the deepest SURVIVING sample is 594 ms (and 606 ms) at -18.2, so a
-        // reducer that still answered -20 would be reading a bridged sample and nothing else would
-        // show it.
+        // 595..605 ms and both the apex and its whole neighbourhood are gone: the deepest window is
+        // the one centred on the nearest surviving sample, 594 ms (or 606 ms, symmetrically), and it
+        // averages -15.74 over the 30 samples that remain inside it. A reducer that still answered
+        // the unmasked -16.93 would be reading bridged samples and nothing else would show it.
         const SwingPhaseGrid dipMasked = buildPhaseGrid(withMetric(
             fixtureAnalysis(),
             metricCurveMasked(QStringLiteral("pelvisSway"), QStringLiteral("mm"),
                               1'200'000, dipCurve, 595'000, 605'000)));
         near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
                             extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
-             -20.0, "unmasked, the trough bottoms at -20");
+             kDipSpanMin, "unmasked, the trough reads the windowed mean at its apex");
         near(reduceOverGrid(dipMasked, QStringLiteral("pelvisSway"),
                             extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
-             -18.2, "masked, the extreme is the deepest VALID sample, not the bridged floor");
+             kDipSpanMinMasked,
+             "masked, the extreme is the deepest VALID window, not one holding bridged samples");
         near(reduceOverGrid(dipMasked, QStringLiteral("pelvisSway"),
                             extremum(Phase::Top, Phase::Impact, ExtremumSense::Max)).value_or(-999),
-             30.0, "…and the crest, far from the mask, is untouched");
+             kDipSpanMax, "…and the crest, far from the mask, is untouched");
         near(reduceOverGrid(dipMasked, QStringLiteral("pelvisSway"), at(Phase::Top)).value_or(-999),
              10.0, "…as are the phase medians either side of it");
 
@@ -443,10 +617,13 @@ int main()
              10.0, "…while P7, whose window is clean, still reads");
 
         // (d) ABSENT MEANS EVERY SAMPLE COUNTS. The key is written only when something is invalid
-        // (the `sigma` discipline), so a swing without it must grid EXACTLY as it always has — this
-        // is what lets kPhaseGridSchemaVersion stand. An all-ones mask is never written, but reading
-        // one has to be harmless, and comparing the serialised sidecars proves it field by field
-        // rather than value by value.
+        // (the `sigma` discipline), so reading a swing that carries no mask must give EXACTLY the
+        // grid an all-ones mask gives: that equivalence is what makes the mask additive, and it is
+        // the reason a `valid` array appearing in a swing.json does not by itself change a number.
+        // (It is no longer a claim about the previous RELEASE — schema 3 moved every span. The
+        // `values` are untouched, and those are what the mask can reach.) An all-ones mask is never
+        // written, but reading one has to be harmless, and comparing the serialised sidecars proves
+        // it field by field rather than value by value.
         const SwingPhaseGrid allOnes = buildPhaseGrid(withMetric(
             fixtureAnalysis(),
             metricCurveMasked(QStringLiteral("pelvisSway"), QStringLiteral("mm"),
@@ -476,7 +653,7 @@ int main()
         // moves the trough, which (b) above proved.
         near(reduceOverGrid(shorted, QStringLiteral("pelvisSway"),
                             extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
-             -20.0, "…so the trough it would have masked is still there");
+             kDipSpanMin, "…so the trough it would have masked is still there");
     }
 
     // ── A Measure, not just a reducer ───────────────────────────────────────
@@ -542,7 +719,7 @@ int main()
         check(back.metrics.size() == src.metrics.size(), "metric count round-trips");
         near(reduceOverGrid(back, QStringLiteral("pelvisSway"),
                             extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
-             -20.0, "the trough survives the round-trip — spans are persisted, not recomputed");
+             kDipSpanMin, "the trough survives the round-trip — spans are persisted, not recomputed");
 
         bool stale = true;
         const SwingPhaseGrid s1 = loadPhaseGrid(doc, size + 1, mtime, &stale);
@@ -556,6 +733,20 @@ int main()
         stale = true;
         const SwingPhaseGrid s3 = loadPhaseGrid(future, size, mtime, &stale);
         check(!stale && s3.isEmpty(), "a NEWER schema is rebuilt, never partially read");
+
+        // THE SCHEMA BUMP IS THE ONLY THING THAT RETIRES A v2 SIDECAR, and that is why it is
+        // asserted rather than left to a code review. Schema 3 changed every span (the windowed-mean
+        // extreme), but it rewrote no swing.json — so a v2 sidecar's size+mtime guard still MATCHES,
+        // and without the bump every cached grid in the library would keep serving raw-sample peaks
+        // to the corridor editor with nothing anywhere saying so.
+        check(kPhaseGridSchemaVersion == 3,
+              "the sidecar schema is 3: spans are windowed-mean extremes (design 5.2)");
+        QJsonObject v2 = doc;
+        v2.insert(QStringLiteral("schema"), 2);
+        stale = true;
+        const SwingPhaseGrid s4 = loadPhaseGrid(v2, size, mtime, &stale);
+        check(!stale && s4.isEmpty(),
+              "…and a v2 sidecar is discarded even though its size+mtime guard still matches");
     }
 
     // ── The instrument ladder: Measure::preferKeys ──────────────────────────────

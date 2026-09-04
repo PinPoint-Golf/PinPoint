@@ -18,6 +18,7 @@
 
 #include "chart_metrics.h"
 
+#include "../../Analysis/series_reduce.h"   // C8 — reduceAt / reduceExtremum / reduceRate
 #include "../Analysis/dashboard_reductions.h"   // barDomain
 #include "timeline_labels.h"                    // the one phase-tag vocabulary (hasPositionTag)
 
@@ -27,69 +28,113 @@
 #include <QtMath>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
 namespace {
 
-// The VALID samples of a series, lifted out of the QVariantLists once, with their original
-// indices kept. Every reducer below reads this rather than the raw arrays, which is what makes
-// "an invalid sample is not a measurement" true by construction instead of by five separate
-// `if` statements that could each be forgotten.
-//
-// `src` is what the adjacency test needs: two entries whose original indices differ by more
-// than one have invalid samples BETWEEN them, so an interpolation across that bracket reached
-// over something unmeasured and the summary has to admit it (`partial`).
-struct ValidSamples {
-    std::vector<qint64> t;
-    std::vector<double> v;
-    std::vector<int>    src;       // index into the caller's arrays
-    int size() const { return int(t.size()); }
-};
+namespace pa = pinpoint::analysis;
 
-// Collect them. `valid` is the C4 mask (swing.json `metrics[].valid`): EMPTY means every
-// sample is valid — the state of every series written before the field existed, so the empty
-// case must cost nothing and behave identically to the old code. A mask entry of 0 marks a
-// sample the grid bridged across a gated or absent run.
-//
 // ⚠ THE SHORT-MASK RULE, and it is deliberately the same one measure_sample.cpp's buildPhaseGrid
 // applies: a mask is honoured only when it covers the whole curve (`size >= n`); a SHORTER one is
 // a malformed document rather than a partial statement and is treated as NO MASK AT ALL. Guessing
 // which end it was truncated from would invent validity nobody told us about, and having the chart
 // and the diagnostics grid disagree about a malformed file is worse than either answer. Everything
-// that consults validity in this file — collectValid and measuredAt — goes through haveMask().
+// that consults validity in this file — lift() and measuredAt() — goes through haveMask().
+//
+// C8 asks the CALLER to apply this rule (SeriesView takes a `valid` pointer that may be null), for
+// the same reason: the shared reducers must not have to carry a second opinion about a malformed
+// document.
 bool haveMask(int n, const QVariantList &valid)
 {
     return n > 0 && valid.size() >= n;
 }
 
-ValidSamples collectValid(const QVariantList &tUs, const QVariantList &value,
-                          const QVariantList &valid)
+// The VALID samples of a series with their ORIGINAL indices kept — the shape the one remaining
+// piece of arithmetic in this file needs (interpValid, the fallback window edge).
+struct ValidSamples {
+    std::vector<int64_t> t;
+    std::vector<double>  v;
+    int size() const { return int(t.size()); }
+};
+
+// The series lifted out of the QVariantLists ONCE, in the two shapes its two readers want:
+//
+//  • `t` / `v` / `valid` — the WHOLE curve, unfiltered, which is what a C8 SeriesView borrows.
+//    The shared reducers apply the valid rule themselves and they have to: a centred-window mean
+//    and a least-squares slope both need to know a sample was DROPPED rather than have the gap
+//    quietly closed up by pre-filtering. Closing it up is precisely what the old
+//    adjacent-difference rate did, and why a 2 ms bridge could read as 100 units per 100 ms.
+//  • `good` — the valid samples alone, for interpValid below.
+//
+// ⚠ int64_t, not qint64, and here they are not interchangeable: SeriesView borrows a
+// `const int64_t *`, and while the two are the same type on macOS and Windows they are `long` vs
+// `long long` on Linux, where handing over a vector<qint64>'s data() would not compile at all.
+struct Lifted {
+    std::vector<int64_t> t;
+    std::vector<double>  v;
+    std::vector<uint8_t> valid;      // empty unless a mask is honoured — see haveMask()
+    ValidSamples         good;
+    bool                 masked = false;
+};
+
+// Collect them, in one pass over the QVariantLists (they are the expensive part: every entry is a
+// QVariant conversion, and this is called per card per window change).
+//
+// `valid` is the C4 mask (swing.json `metrics[].valid`): EMPTY means every sample is valid — the
+// state of every series written before the field existed, so the empty case must cost nothing and
+// behave identically to the unmasked path. A mask entry of 0 marks a sample the grid bridged
+// across a gated or absent run.
+Lifted lift(const QVariantList &tUs, const QVariantList &value, const QVariantList &valid)
 {
-    ValidSamples s;
+    Lifted s;
     const int n = qMin(tUs.size(), value.size());
-    const bool masked = haveMask(n, valid);
-    s.t.reserve(size_t(n)); s.v.reserve(size_t(n)); s.src.reserve(size_t(n));
+    s.masked = haveMask(n, valid);
+    s.t.reserve(size_t(n)); s.v.reserve(size_t(n));
+    if (s.masked) s.valid.reserve(size_t(n));
+    s.good.t.reserve(size_t(n)); s.good.v.reserve(size_t(n));
     for (int i = 0; i < n; ++i) {
-        if (masked && valid.at(i).toInt() == 0) continue;
-        s.t.push_back(tUs.at(i).toLongLong());
-        s.v.push_back(value.at(i).toDouble());
-        s.src.push_back(i);
+        const int64_t t = int64_t(tUs.at(i).toLongLong());
+        const double  v = value.at(i).toDouble();
+        const bool    ok = !s.masked || valid.at(i).toInt() != 0;
+        s.t.push_back(t);
+        s.v.push_back(v);
+        if (s.masked) s.valid.push_back(ok ? uint8_t(1) : uint8_t(0));
+        if (ok) { s.good.t.push_back(t); s.good.v.push_back(v); }
     }
     return s;
 }
 
-// Linear interpolation at `pos` over the ascending valid samples. Clamps to the end values
-// outside the range. (Distinct from TimelineLabels::valueAtNearest, which snaps to the nearest
-// sample — window edges want a true interpolated value.)
-//
-// `bracketSkipped` reports whether the two samples it read from are non-adjacent in the
-// ORIGINAL series, i.e. whether this edge value came from across a bridged run. A clamped edge
-// (outside the valid extent) never sets it: the invalid samples it was clamped past are inside
-// the window and set `partial` on the window-scan rule instead.
-double interpValid(const ValidSamples &s, qint64 pos, bool *bracketSkipped = nullptr)
+// A borrowed C8 view of the whole curve. Named `chartView` rather than reusing C8's own viewOf()
+// because that one takes a MetricSeries and the chart never has one — it has the QML bridge's
+// parallel QVariantLists.
+pa::SeriesView chartView(const Lifted &s)
 {
-    if (bracketSkipped) *bracketSkipped = false;
+    pa::SeriesView view;
+    view.t     = s.t.empty() ? nullptr : s.t.data();
+    view.v     = s.v.empty() ? nullptr : s.v.data();
+    view.valid = (s.masked && !s.valid.empty()) ? s.valid.data() : nullptr;
+    view.n     = s.t.size();
+    return view;
+}
+
+// Linear interpolation at `pos` over the ascending VALID samples, clamped to the end values
+// outside their range.
+//
+// ⚠ THE ONLY REDUCTION ARITHMETIC LEFT IN THIS FILE, and it survives for exactly one job: the
+// window edge that reduceAt cannot answer, because no valid sample lies within ±15 ms of it (the
+// edge sits inside a bridged run wider than the median window, or outside the data entirely).
+// Something has to be printed there, and the value between the nearest measurements is the
+// honest something — but a caller that reaches this has already lost its claim to a measured
+// edge, so summaryMasked sets `partial` whenever it does.
+//
+// That is also why the old `bracketSkipped` out-parameter is gone: it existed to ask whether the
+// two samples read from were non-adjacent in the original series, i.e. whether this edge had
+// crossed a bridged run. Every call now IS such a case by construction, so the answer is always
+// yes and the question no longer earns its complexity.
+double interpValid(const ValidSamples &s, qint64 pos)
+{
     const int n = s.size();
     if (n == 0) return 0.0;
     if (pos <= s.t.front()) return s.v.front();
@@ -101,18 +146,10 @@ double interpValid(const ValidSamples &s, qint64 pos, bool *bracketSkipped = nul
         if (s.t[size_t(mid)] < pos) lo = mid + 1;
         else                        hi = mid;
     }
-    // ⚠ `pos < t[lo]` matters: the search leaves t[lo-1] < pos <= t[lo], and when pos lands
-    // EXACTLY on a valid sample the value is that sample's, whatever is on the other side of it.
-    // Without this a window edge sitting on the first good sample after a bridged run reported
-    // itself interpolated, and every such card wore a PARTIAL chip it had not earned.
-    if (bracketSkipped)
-        *bracketSkipped = pos < s.t[size_t(lo)]
-                          && (s.src[size_t(lo)] - s.src[size_t(lo - 1)]) > 1;
-
-    const qint64 tHi = s.t[size_t(lo)];
-    const qint64 tLo = s.t[size_t(lo - 1)];
-    const double vLo = s.v[size_t(lo - 1)];
-    const double vHi = s.v[size_t(lo)];
+    const int64_t tHi = s.t[size_t(lo)];
+    const int64_t tLo = s.t[size_t(lo - 1)];
+    const double  vLo = s.v[size_t(lo - 1)];
+    const double  vHi = s.v[size_t(lo)];
     if (tHi == tLo) return vLo;
     const double f = double(pos - tLo) / double(tHi - tLo);
     return vLo + (vHi - vLo) * f;
@@ -177,77 +214,127 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
                                         qint64 startUs, qint64 endUs) const
 {
     QVariantMap r;
-    const int n = qMin(tUs.size(), value.size());
 
     if (startUs > endUs) std::swap(startUs, endUs);
 
-    const ValidSamples s = collectValid(tUs, value, valid);
+    const Lifted s = lift(tUs, value, valid);
+    const pa::SeriesView view = chartView(s);
 
-    // Window edges, linearly interpolated — between the nearest VALID samples, which is the
-    // only place this reducer is allowed to cross a bridged run at all, and it reports it.
-    bool skipStart = false, skipEnd = false;
-    const double start = interpValid(s, startUs, &skipStart);
-    const double end   = interpValid(s, endUs,   &skipEnd);
+    // The three windows arrive as ReduceConfig's OWN defaults (tuned::sampler::kWindowHalfUs,
+    // tuned::reduce::kExtremumWindowUs, tuned::reduce::kRateWindowUs), so ±15 ms, 40 ms and 50 ms
+    // are authored in exactly one place. The card literally cannot be reading a different 40 ms
+    // than buildPhaseGrid is, which is the property design §5.2 exists to buy and §7 item 5 is
+    // measured on.
+    const pa::ReduceConfig cfg{};
 
-    // Extremes over the interpolated edges plus every VALID sample strictly inside the window.
-    double mn = qMin(start, end), mx = qMax(start, end);
-    qint64 tMin = (start <= end) ? startUs : endUs;
-    qint64 tMax = (start >= end) ? startUs : endUs;
+    // ── Window edges — the ±15 ms windowed MEDIAN, the reducer the diagnostics grid already uses ─
+    //
+    // Design §5.2: a median of the valid samples AROUND the instant, not a linear interpolation
+    // between the two straddling it. One bad frame on the edge used to set the endpoint a reader
+    // compares PEAK against, and Δ SEGMENT with it.
+    //
+    // FALLBACK, and it is reported rather than hidden: reduceAt is not ok when there is no valid
+    // sample within ±15 ms of the edge — the edge sits inside a bridged run wider than the median
+    // window, or off the end of the data. interpValid still gives the honest number (the value
+    // between the nearest measurements, clamped at the ends), but nothing was measured near there,
+    // so the window is `partial`.
+    bool fellBack = false;
+    const auto edgeAt = [&](qint64 us) {
+        const pa::Reduced a = pa::reduceAt(view, us, cfg);
+        if (a.ok) return a.value;
+        fellBack = true;
+        return interpValid(s.good, us);
+    };
+    const double start = edgeAt(startUs);
+    const double end   = edgeAt(endUs);
 
-    double rate = 0.0;                  // max |Δvalue/Δt|, deg per 100 ms
-    bool   havePrev = false;
-    double prevV = 0.0;
-    qint64 prevT = 0;
+    // ── min / max — the extremum of the CENTRED-WINDOW MEAN, no longer a raw argmax ────────────
+    //
+    // ⚠ THIS IS A DEFINITION CHANGE and it is the point of the phase: a one-sample outlier can no
+    // longer be the peak, because under the 40 ms window a peak has to have been there for 40 ms.
+    // A 99 among 4s at 8 ms sampling reports (4·4 + 99)/5 ≈ 23, not 99. It also means the
+    // interpolated window EDGES no longer take part in min/max the way they did when this scanned
+    // the raw samples and seeded itself from them: an extremum is now a statement about
+    // measurements inside the window, and an edge is a statement about an instant.
+    const pa::Reduced loR = pa::reduceExtremum(view, startUs, endUs, false, cfg);
+    const pa::Reduced hiR = pa::reduceExtremum(view, startUs, endUs, true,  cfg);
 
-    for (int i = 0; i < s.size(); ++i) {
-        const qint64 t = s.t[size_t(i)];
-        if (t < startUs || t > endUs) continue;
-        const double v = s.v[size_t(i)];
-        if (v < mn) { mn = v; tMin = t; }
-        if (v > mx) { mx = v; tMax = t; }
-        // "Consecutive" now means consecutive VALID samples, so a slope is never taken with a
-        // bridged value at either end. Where that spans a gap the Δt is the real elapsed time,
-        // which makes the rate SMALLER — the safe direction: a gap must not be able to invent
-        // the steepest slope in the window.
-        if (havePrev && t != prevT) {
-            const double dv = qAbs(v - prevV) / (double(t - prevT) / 1.0e5);
-            if (dv > rate) rate = dv;
-        }
-        prevV = v; prevT = t; havePrev = true;
+    double mn = 0.0, mx = 0.0, sigMn = 0.0, sigMx = 0.0;
+    qint64 tMin = startUs, tMax = startUs;
+    if (loR.ok && hiR.ok) {
+        mn = loR.value; tMin = loR.atUs; sigMn = loR.sigma;
+        mx = hiR.value; tMax = hiR.atUs; sigMx = hiR.sigma;
+    } else {
+        // No valid sample lies inside the window at all — a window narrower than the sample
+        // spacing, or one wholly inside a bridged run. The edges are then the only readings there
+        // are, which is what this did with them before C8 as well. It is not by itself a `partial`
+        // case: a window narrower than the spacing on a fully valid series is a reader's choice,
+        // not a gap in the measurement.
+        mn = qMin(start, end); mx = qMax(start, end);
+        tMin = (start <= end) ? startUs : endUs;
+        tMax = (start >= end) ? startUs : endUs;
     }
+
+    // ── rate — the steepest least-squares slope over a ≥50 ms window, and it may not exist ─────
+    //
+    // ⚠ THE SECOND DEFINITION CHANGE. This was max |Δvalue/Δt| between consecutive samples, i.e.
+    // frame noise divided by the frame interval: on a still address it read 39 and 291 units per
+    // 100 ms on the corpus (design §7 item 2). A fit over ≥50 ms with ≥3 valid samples cannot be
+    // driven by one frame.
+    //
+    // SIGNED now, because a least-squares slope has a direction and throwing it away here would
+    // leave no consumer able to recover it. `rateOk` is the honest half: a window with fewer than
+    // three valid samples or a span under 50 ms produces NO rate, and this reports 0 with
+    // rateOk false rather than a fabricated number — the card prints "—". A reader must gate on
+    // rateOk before touching `rate`, `rateSigma` or `tRateUs`.
+    const pa::Reduced rateR = pa::reduceRate(view, startUs, endUs, cfg);
 
     // ── partial: this window's numbers do not rest on a continuous measurement ──────────────
     //
-    // Rule 1 — an invalid sample lies inside the window. Whatever the reducers returned, part of
-    // the span they cover was never measured, so a reader comparing this card against a
-    // neighbour is comparing different amounts of evidence.
+    // Rule 1 — an edge fell back to interpolation (above): no valid sample within ±15 ms of it, so
+    // that endpoint, Δ and possibly min/max came from across unmeasured ground. This is the case
+    // rule 2 misses, including the window that sits ENTIRELY inside a bridged run and so contains
+    // no sample to scan at all.
     //
-    // Rule 2 — an edge value was interpolated across invalid samples (see interpValid). This is
-    // the case rule 1 misses: a window that sits entirely INSIDE a bridged run contains no valid
-    // sample to scan, and every number in it came from the two measurements bracketing it.
-    bool partial = skipStart || skipEnd;
-    if (!partial && haveMask(n, valid)) {
-        for (int i = 0; i < n; ++i) {
-            if (valid.at(i).toInt() != 0) continue;
-            const qint64 t = tUs.at(i).toLongLong();
-            if (t >= startUs && t <= endUs) { partial = true; break; }
+    // Rule 2 — an invalid sample lies inside the window. Whatever the reducers returned, part of
+    // the span they cover was never measured, so a reader comparing this card against a neighbour
+    // is comparing different amounts of evidence.
+    bool partial = fellBack;
+    if (!partial && s.masked) {
+        for (size_t i = 0; i < s.valid.size(); ++i) {
+            if (s.valid[i] != 0) continue;
+            if (s.t[i] >= startUs && s.t[i] <= endUs) { partial = true; break; }
         }
     }
 
-    const bool maxWins = qAbs(mx) >= qAbs(mn);
-    const double peak  = maxWins ? mx : mn;
-    const qint64 tPeak = maxWins ? tMax : tMin;
+    // peak = the extremum of larger MAGNITUDE (today's rule, unchanged) — and its σ travels with
+    // it, so PEAK can carry "± σ" (design §5.3) without a second reduction that could disagree
+    // about which extremum won.
+    const bool   maxWins   = qAbs(mx) >= qAbs(mn);
+    const double peak      = maxWins ? mx : mn;
+    const qint64 tPeak     = maxWins ? tMax : tMin;
+    const double peakSigma = maxWins ? sigMx : sigMn;
 
-    r.insert(QStringLiteral("start"),   start);
-    r.insert(QStringLiteral("end"),     end);
-    r.insert(QStringLiteral("min"),     mn);
-    r.insert(QStringLiteral("max"),     mx);
-    r.insert(QStringLiteral("peak"),    peak);
-    r.insert(QStringLiteral("range"),   mx - mn);
-    r.insert(QStringLiteral("delta"),   end - start);
-    r.insert(QStringLiteral("rate"),    rate);
-    r.insert(QStringLiteral("tPeakUs"), tPeak);
-    r.insert(QStringLiteral("partial"), partial);
+    r.insert(QStringLiteral("start"),     start);
+    r.insert(QStringLiteral("end"),       end);
+    r.insert(QStringLiteral("min"),       mn);
+    r.insert(QStringLiteral("max"),       mx);
+    r.insert(QStringLiteral("peak"),      peak);
+    r.insert(QStringLiteral("range"),     mx - mn);
+    r.insert(QStringLiteral("delta"),     end - start);
+    r.insert(QStringLiteral("rate"),      rateR.ok ? rateR.value : 0.0);
+    r.insert(QStringLiteral("tPeakUs"),   tPeak);
+    r.insert(QStringLiteral("partial"),   partial);
+    // NEW IN PHASE 2. peakSigma / rateSigma are the σ the card prints beside the two tiles a
+    // reader's trust is decided on; rateOk gates the rate tile; tRateUs is the centre of the
+    // winning slope window, so a caller can mark WHERE the steepest change was, exactly as
+    // tPeakUs does for the peak. Both times are 0 when their reduction had nothing to report —
+    // 0 is a legitimate instant in this (window-relative) timebase, so rateOk, not tRateUs, is
+    // the thing to test.
+    r.insert(QStringLiteral("peakSigma"), peakSigma);
+    r.insert(QStringLiteral("rateSigma"), rateR.ok ? rateR.sigma : 0.0);
+    r.insert(QStringLiteral("rateOk"),    rateR.ok);
+    r.insert(QStringLiteral("tRateUs"),   rateR.ok ? qint64(rateR.atUs) : qint64(0));
     return r;
 }
 

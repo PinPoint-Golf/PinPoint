@@ -67,6 +67,17 @@ enum class ExtremumSense { Max, Min };
 //             the most trail-ward sway relative to address (sense = Min), not the largest excursion
 //             in either direction.
 //
+// RATE IS AN AVERAGE, AND THAT IS NOT THE CHART'S PK RATE. This one is Delta divided by elapsed
+// time between two phase instants — two windowed medians and a subtraction — so it is already robust
+// by construction and design §5.2 left it alone. The review chart's PK RATE is a different quantity:
+// the largest-magnitude least-squares slope over any sliding window in the span (series_reduce.h's
+// reduceRate), i.e. the FASTEST the curve moved, not how far it got in the time it had. Both are
+// legitimate and they answer different questions — "the pelvis averaged 30 %/s from P4 to P7" is a
+// tempo statement, "it peaked at 90 %/s" is a sequencing one — so a measure authored against this
+// kind must not be read as agreeing with the tile above the chart. Worth spelling out because the
+// two used to be confusable in the wrong direction: before §5.2 the chart's rate was an
+// adjacent-frame difference, which on a noisy curve reported the frame noise divided by 8 ms.
+//
 // Extremum is deliberately first-class rather than deferred: several real characteristics are peaks
 // wearing an endpoint's clothes. Early extension is the *maximum* pelvis-toward-ball displacement
 // across the downswing, not its value at impact — sampling At(Impact) misses a golfer who moves and

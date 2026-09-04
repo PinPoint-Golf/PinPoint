@@ -4,7 +4,10 @@
 //     .../PinPointStudio.app/Contents/MacOS/PinPointStudio \
 //     --probe-qml /abs/path/plumb_bob_chart.qml
 //
-// Verifies Phase 1 of docs/design/metric_presentation_honesty.md WITHOUT screenshots.
+// Verifies Phases 1 and 2 of docs/design/metric_presentation_honesty.md WITHOUT screenshots:
+// Phase 1's validity mask / phase domains / suppressed samples, and Phase 2's shared
+// reducers — the σ on the window a card actually reduces, and the STILL ADDRESS window that
+// design §7 item 2 ("under 2 units per 100 ms on a golfer who has not moved") is judged on.
 // Every line is prefixed "PBPROBE" so the run can be grepped out of the app log.
 //
 // ── WHAT IT DOES, AND WHY IN THAT ORDER ──────────────────────────────────────────────────
@@ -252,6 +255,15 @@ Item {
                 + probe.ms(chart._axisEnd) + "]   impactUs = " + probe.ms(probe.impactUs))
     }
 
+    // The instant of one phase in the ladder this run collected, or 0 when the swing has none.
+    // Same lookup as phaseUsIn() below, against probe.phases rather than a detail document, so a
+    // report function does not have to know which of the two detail sources was used.
+    function phaseUs(phase) {
+        var ps = probe.phases || []
+        for (var i = 0; i < ps.length; ++i) if (ps[i].phase === phase) return ps[i].t_us
+        return 0
+    }
+
     function phaseUsIn(d, phase) {
         try {
             var ps = d.phases || []
@@ -423,21 +435,65 @@ Item {
             try { return cm.summaryMasked(t, v, mask, Math.round(a), Math.round(b)) }
             catch (e) { probe.miss("cm.summaryMasked (" + e + ")"); return null }
         }
-        function line(tag, s, a, b) {
+        // `rate` is SIGNED since Phase 2 and may be ABSENT — printed raw here, sign and all,
+        // because the whole job of this probe is to show what the reducers said before the card
+        // decides how to display it (the card prints the magnitude, and "—" when rateOk is false).
+        function rateStr(s) {
+            return s.rateOk === false ? "ABSENT (no ≥50ms window with ≥3 valid samples)"
+                                      : probe.num(s.rate) + "@" + probe.ms(s.tRateUs)
+        }
+        function line(tag, s, a, b, withSigma) {
             if (!s) return
             probe.w(tag + " [" + probe.ms(a) + ".." + probe.ms(b) + "]"
                     + "  peak=" + probe.num(s.peak) + "@" + probe.ms(s.tPeakUs)
-                    + "  rate=" + probe.num(s.rate)
+                    + "  rate=" + rateStr(s)
                     + "  delta=" + probe.num(s.delta)
                     + "  min/max=" + probe.num(s.min) + "/" + probe.num(s.max)
                     + "  start/end=" + probe.num(s.start) + "/" + probe.num(s.end)
-                    + "  partial=" + s.partial)
+                    + "  partial=" + s.partial
+                    + (withSigma ? "  peakSigma=" + probe.num(s.peakSigma)
+                                   + "  rateSigma=" + probe.num(s.rateSigma) : ""))
         }
-        line("summary FULL       ", sm(ws, we), ws, we)
+        line("summary FULL       ", sm(ws, we), ws, we, false)
         // The clamp the cards actually apply (PpMetricChart._domWinStart/_domWinEnd).
+        //
+        // ⚠ THE σ GO ON THIS ROW, not on FULL: this is the window a CARD reduces, so peakSigma and
+        // rateSigma here are the two numbers design §5.3 puts a "±" in front of on the panel, and
+        // §7 item 3 ("every PEAK tile is a value on the drawn curve within σ") is judged against
+        // exactly these. Reading them off the unclamped window would be judging a tile nobody sees.
         var cs = Math.max(ws, p.validFromUs !== undefined ? p.validFromUs : ws)
         var ce = Math.max(cs, Math.min(we, p.validToUs !== undefined ? p.validToUs : we))
-        line("summary CLAMPED    ", sm(cs, ce), cs, ce)
+        line("summary CLAMPED    ", sm(cs, ce), cs, ce, true)
+
+        // ── STILL ADDRESS — the window design §7 item 2 is measured on ────────────────────
+        //
+        // Address − 300 ms → Address. The golfer has not started the swing yet, so a peak rate
+        // over it is measuring the pipeline, not the athlete: whatever it reads IS the noise
+        // floor. Phase 0's baseline read 39 (% stance width) and 291 (°) per 100 ms here with the
+        // adjacent-frame definition; the gate is under 2 with the ≥50 ms least-squares one, and
+        // this line is how a single swing is checked without re-running the corpus.
+        //
+        // "ABSENT" is a legitimate answer, not a failure: a series whose first sample is at
+        // Address has nothing to fit in the 300 ms before it, and saying so beats a fitted 0.
+        var au = probe.phaseUs(0)
+        if (!(au > 0)) {
+            probe.w("summary STILL ADDR  = unavailable — no " + probe.ptag(0)
+                    + " instant in the phase ladder")
+        } else {
+            var sa = sm(au - 300000, au)
+            line("summary STILL ADDR ", sa, au - 300000, au, true)
+            if (sa) {
+                var pk = (sa.rateOk === false) ? "n/a" : Math.abs(sa.rate)
+                probe.w("   §7 item 2 gate     = " + (pk === "n/a" ? "no rate fitted"
+                        : (probe.num(pk) + " per 100ms — " + (pk < 2.0 ? "PASS (<2)" : "FAIL (≥2)")))
+                        + "   (samples in window: " + (function () {
+                            var c = 0
+                            for (var q = 0; q < t.length; ++q)
+                                if (t[q] >= au - 300000 && t[q] <= au) c++
+                            return c
+                        })() + ")")
+            }
+        }
         probe.w("clamp emptied win?  = " + (function () {
             try { return chart._domWinEmpty(p, ws, we) } catch (e) { return "?" }
         })() + "   facet @end text = '" + (function () {

@@ -19,6 +19,7 @@
 #pragma once
 
 #include "measure_vocabulary.h"    // Measure
+#include "../Core/pp_tuned_constants.h"
 #include "../Metrics/metric_reducer.h"
 
 #include <QByteArray>
@@ -63,6 +64,12 @@
 // and a norm seated from the corridor editor must be reading the same number off the same swing, or
 // the two surfaces disagree about what the golfer did.
 //
+// The arithmetic itself is not written here any more: both the phase values and the span extremes
+// come from `src/Analysis/series_reduce.h`, the one implementation the REVIEW CHART also reduces
+// through (design §5.2). That is not tidiness — a corridor is authored by looking at the chart, so a
+// card and an engine that reduced the same curve with two hand-rolled loops would eventually
+// disagree about the number the corridor was drawn around, and nothing on screen would say so.
+//
 // Where the curve has nothing in the window, the metric's own `phaseSamples` reading is used
 // instead. That fallback is not a nicety: an entire CLASS of metric ships with an empty curve and
 // nothing but phaseSamples — every setup metric in a real swing.json (stanceWidth, ballPosition,
@@ -78,11 +85,22 @@ namespace pinpoint::analysis {
 // 2: `club` now resolves through swingDocClub() (review.club, else capture.club.name, else the
 //    stub). A v1 sidecar cached the review-or-stub answer and its size+mtime guard still matches,
 //    since the fix rewrote no swing.json — the version bump is what retires it.
-inline constexpr int kPhaseGridSchemaVersion = 2;
+// 3: `spans` min/max are the extremes of the CENTRED-WINDOW MEAN (±extremumWindowUs/2) instead of
+//    the extremes of the raw samples (design §5.2). Every Extremum measure's value therefore moves,
+//    typically toward the mean by about one σ, and a v2 sidecar's size+mtime guard still matches the
+//    unchanged swing.json — so as with v1, the version bump is the ONLY thing that retires the
+//    stale numbers. `values` are untouched: the same ±15 ms median, now computed by reduceAt().
+inline constexpr int kPhaseGridSchemaVersion = 3;
 
 struct PhaseGridConfig {
-    int64_t windowHalfUs    = 15000;   // ±15 ms about the phase instant (tuned::sampler)
+    // ±15 ms about the phase instant, the WristAngleSampler convention.
+    int64_t windowHalfUs    = tuned::sampler::kWindowHalfUs;
     int     minValidSamples = 1;       // fewer in the window => this phase has no value
+
+    // The centred window a span's extreme is the MEAN over. A one-sample outlier cannot be a peak
+    // because a peak has to be there for the whole window; 40 ms is ≈5 samples where the pose grid
+    // is dense and ≈2 where it is sparse (design §5.2, tuned::reduce).
+    int64_t extremumWindowUs = tuned::reduce::kExtremumWindowUs;
 };
 
 // One metric's value at one segmented phase.
@@ -95,6 +113,12 @@ struct PhaseGridValue {
 // The extremes of the continuous curve BETWEEN two adjacent segmented phases. Half-open at the
 // start and closed at the end ((from, to]) so aggregating consecutive spans counts no sample twice;
 // the endpoint values themselves come from the windowed medians, not from here.
+//
+// "Extreme" means the extreme of the CENTRED-WINDOW MEAN, not of the raw samples (schema 3): the
+// candidates are the valid samples inside the span, but each one is scored by the mean of its own
+// ±extremumWindowUs/2 neighbourhood — which reaches OUTSIDE the span at the edges, deliberately,
+// because a sample's neighbourhood is a property of the curve and not of the phase boundary. So a
+// single wild sample can no longer be a peak, and a peak that is genuinely there for 40 ms still is.
 struct PhaseGridSpan {
     Phase  from = Phase::Address;
     Phase  to   = Phase::Address;
@@ -134,7 +158,9 @@ struct SwingPhaseGrid {
 // BRIDGED across a gated or absent run rather than measured (design §5.1). Those enter neither a
 // phase's windowed median nor a span's extremes, and a phase whose whole window is bridged gets no
 // entry — the same path an unsampled phase already takes. The key is written only when something is
-// invalid, so a swing without it grids byte-identically to before and the schema version stands.
+// invalid, so a swing without it grids identically to a swing carrying an all-ones mask — which is
+// what makes the mask additive. (It no longer means "identical to the previous release": schema 3
+// moved every span. `values` are still identical either way, and that is what the mask tests pin.)
 SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig &cfg = {});
 
 // ── Reduction ───────────────────────────────────────────────────────────────

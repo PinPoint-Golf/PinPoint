@@ -2600,6 +2600,7 @@ target_sources(PinPointStudio PRIVATE
     src/Analysis/foot_metrics.cpp
     src/Analysis/lower_body_metrics.cpp
     src/Analysis/metric_channel.h
+    src/Analysis/series_reduce.h
     src/Analysis/upper_body_metrics.h
     src/Analysis/upper_body_metrics.cpp
     src/Analysis/body_rotation.h

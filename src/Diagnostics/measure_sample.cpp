@@ -18,6 +18,7 @@
 
 #include "measure_sample.h"
 
+#include "../Analysis/series_reduce.h"
 #include "../Core/club_vocabulary.h"
 
 #include <QDateTime>
@@ -30,28 +31,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace pinpoint::analysis {
-
-namespace {
-
-// Median of a non-empty vector, O(n) and order-independent. Lifted rather than shared with
-// WristAngleSampler's detail::medianOf because that header carries the whole wrist assessment
-// vocabulary (PpJointDof, handedness, gimbal proxies) and this module needs none of it — the
-// convention is what matters, and it is four lines.
-double medianOf(std::vector<double> v)
-{
-    const std::size_t n   = v.size();
-    const std::size_t mid = n / 2;
-    std::nth_element(v.begin(), v.begin() + mid, v.end());
-    const double hi = v[mid];
-    if (n % 2 == 1)
-        return hi;
-    std::nth_element(v.begin(), v.begin() + (mid - 1), v.end());
-    return 0.5 * (v[mid - 1] + hi);
-}
-
-} // namespace
 
 // ── Lookups ─────────────────────────────────────────────────────────────────
 
@@ -127,13 +109,50 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
         // fabricated value is a confident wrong answer, and this sidecar would cache it. Design
         // §5.1; the mask itself is MetricSeries::valid.
         //
-        // ABSENT MEANS EVERY SAMPLE COUNTS, which is what makes this change invisible to an
-        // existing swing — hence no kPhaseGridSchemaVersion bump. A mask SHORTER than the curve is
-        // a malformed document rather than a partial statement, and is treated as no mask at all:
-        // guessing which end it was truncated from would invent validity we were never told about.
+        // ABSENT MEANS EVERY SAMPLE COUNTS, so a swing that carries no mask grids exactly as one
+        // carrying an all-ones mask does — that equivalence is what makes the field additive, and it
+        // is what the mask tests compare. A mask SHORTER than the curve is a malformed document
+        // rather than a partial statement, and is treated as no mask at all: guessing which end it
+        // was truncated from would invent validity we were never told about.
         const QJsonArray validArr = mo.value(QStringLiteral("valid")).toArray();
         const bool       haveMask = n > 0 && validArr.size() >= n;
-        const auto sampleValid = [&](int i) { return !haveMask || validArr.at(i).toInt() != 0; };
+
+        // ── One pass out of JSON, then arithmetic on plain arrays ────────────────────────────────
+        //
+        // QJsonArray::at() + toVariant() per sample per phase per span was the old shape, and with
+        // the windowed-mean extremum it would be a nested walk over a boxed container. Convert once
+        // and hand the reducers a borrowed view: series_reduce.h is std-only precisely so that this
+        // module and the review chart can share it without either dragging the other's types along.
+        //
+        // The SHORT-MASK RULE is applied HERE and nowhere below — a `valid` array that does not
+        // reach the end of `t_us` becomes a null mask, which is what `haveMask` already decided. The
+        // reducers never see a partial mask, so they cannot have an opinion about one.
+        std::vector<int64_t> tv;
+        std::vector<double>  vv;
+        std::vector<uint8_t> validv;
+        tv.reserve(std::size_t(n));
+        vv.reserve(std::size_t(n));
+        if (haveMask)
+            validv.reserve(std::size_t(n));
+        for (int i = 0; i < n; ++i) {
+            tv.push_back(tArr.at(i).toVariant().toLongLong());
+            vv.push_back(vArr.at(i).toDouble());
+            if (haveMask)
+                validv.push_back(validArr.at(i).toInt() != 0 ? uint8_t(1) : uint8_t(0));
+        }
+
+        SeriesView view;
+        view.t     = tv.empty() ? nullptr : tv.data();
+        view.v     = vv.empty() ? nullptr : vv.data();
+        view.valid = validv.empty() ? nullptr : validv.data();
+        view.n     = tv.size();
+
+        // The grid's own knobs win over the reducer defaults — same numbers today, but the two must
+        // not be able to drift apart silently if either is ever swept.
+        ReduceConfig rc;
+        rc.atHalfWindowUs   = cfg.windowHalfUs;
+        rc.minAtSamples     = cfg.minValidSamples;
+        rc.extremumWindowUs = cfg.extremumWindowUs;
 
         // The metric's own labelled readings at key phases.
         //
@@ -182,18 +201,17 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
         // curve has nothing to say here" is exactly what a fully bridged window means, so it needs
         // no branch of its own, and the labelled phaseSamples fallback still applies to it —
         // a producer that stamped a reading at this phase measured something the curve had lost.
+        //
+        // reduceAt is the SAME arithmetic the local median was: valid samples with |t − tUs| ≤
+        // windowHalfUs (inclusive at the bound), median as the mean of the two middles when the
+        // count is even. Both halves of that are load-bearing and both are pinned by the endpoint
+        // -truncation fixture in the test, which reads 11.925 only if the bound includes its 16th
+        // sample AND the even case averages rather than taking the lower middle. `minValidSamples`
+        // rides along as ReduceConfig::minAtSamples, which exists for exactly this delegation.
         for (const PhaseAt &e : candidates) {
-            std::vector<double> win;
-            for (int i = 0; i < n; ++i) {
-                const int64_t t = tArr.at(i).toVariant().toLongLong();
-                if (std::llabs(t - e.tUs) > cfg.windowHalfUs)
-                    continue;
-                if (!sampleValid(i))
-                    continue;      // bridged, not measured — it may not pull the median
-                win.push_back(vArr.at(i).toDouble());
-            }
-            if (static_cast<int>(win.size()) >= cfg.minValidSamples) {
-                mg.values.push_back(PhaseGridValue{ e.phase, e.tUs, medianOf(std::move(win)) });
+            const Reduced r = reduceAt(view, e.tUs, rc);
+            if (r.ok) {
+                mg.values.push_back(PhaseGridValue{ e.phase, e.tUs, r.value });
                 continue;
             }
             const auto it = std::find_if(labelled.begin(), labelled.end(),
@@ -216,21 +234,28 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
             sp.from = mg.values[i - 1].phase;
             sp.to   = mg.values[i].phase;
 
-            bool any = false;
-            for (int k = 0; k < n; ++k) {
-                const int64_t t = tArr.at(k).toVariant().toLongLong();
-                if (t <= lo || t > hi)
-                    continue;
-                if (!sampleValid(k))
-                    continue;      // a bridged sample cannot BE the peak; see the mask note above
-                const double v = vArr.at(k).toDouble();
-                if (!any) { sp.min = sp.max = v; any = true; }
-                else      { sp.min = std::min(sp.min, v); sp.max = std::max(sp.max, v); }
+            // (lo, hi] — half-open at the start, so `lo + 1` is the first admissible candidate
+            // instant. reduceExtremum's bounds are inclusive, and µs are integers, so t ≥ lo + 1 is
+            // exactly t > lo with no epsilon anywhere.
+            //
+            // The extreme is now the extreme of the CENTRED-WINDOW MEAN, not of the raw samples
+            // (design §5.2): the candidates are still only the valid samples strictly inside the
+            // span, but each is scored over its own ±extremumWindowUs/2 neighbourhood. So the
+            // single wild sample that used to BE the peak — and be cached here, and be graded
+            // against a corridor — has to hold its value for the width of the window to win.
+            //
+            // A bridged sample is neither a candidate nor a member of anyone's window, which is the
+            // same rule the median follows and for the same reason (see the mask note above).
+            const Reduced mn = reduceExtremum(view, lo + 1, hi, /*wantMax=*/false, rc);
+            const Reduced mx = reduceExtremum(view, lo + 1, hi, /*wantMax=*/true,  rc);
+            if (mn.ok && mx.ok) {
+                sp.min = mn.value;
+                sp.max = mx.value;
             }
             // No samples strictly inside: fall back to the two endpoint medians, so an Extremum
             // over a sparse window still answers with the best the curve supports rather than
             // reporting the whole measure unavailable.
-            if (!any) {
+            else {
                 sp.min = std::min(mg.values[i - 1].value, mg.values[i].value);
                 sp.max = std::max(mg.values[i - 1].value, mg.values[i].value);
             }
