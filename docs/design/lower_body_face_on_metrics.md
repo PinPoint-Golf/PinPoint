@@ -2,6 +2,7 @@
 
 **Audience**: developers and content authors working on the lower-body half of the diagnostics model
 **Code**: `src/Analysis/lower_body_metrics.{h,cpp}`, `LowerBodyMetricsStage` (`wrist_analyzer.cpp`), `LowerBodyMetricProvider`
+**Updated**: 2026-09-04 — `plumbBobDistance` (§6a) and the P1–P7 ladder
 **Content**: `src/Resources/diagnostics/core.json`, `norms.json`, `references.json`
 **Status**: producer live; content shipped; the DETECTION ENGINE that would turn it into findings is still dormant (`diagnostics_developer_guide.md` §8)
 **Written**: 2026-08-02
@@ -211,6 +212,7 @@ angle. Everything left planned needs depth, or a model the pixels do not contain
 | `hipLineTilt` | frontal (x, y) | **produced** |
 | `pelvisSway` | frontal (x) | **produced** |
 | `pelvisLift` | frontal (y) | **produced** |
+| `plumbBobDistance` | frontal (x) | **produced** — §6a |
 | `pelvisThrust` | **depth (z)** | stays planned — toward and away from the camera is the one direction this view cannot see |
 | `leadKneeFlexion` / `trailKneeFlexion` | **sagittal** | stays planned — knee bend is nearly perpendicular to the image plane and the projection foreshortens it almost to nothing |
 | `comOverLeadFoot` | needs a body-segment mass model | stays planned |
@@ -281,6 +283,66 @@ Two consequences worth knowing:
 - **`minStanceSpanPx` (40 px) guards the denominator.** Below it, a few pixels of keypoint noise
   divided by a few pixels of stance would emit hundreds of percent. The floor is the difference
   between "we could not measure this" and a confident absurdity.
+
+### 6a. `plumbBobDistance` is the one exception, and why
+
+**Added 2026-09-04.** One channel here is stated in **inches**, and it is worth saying why the rule
+above does not cover it rather than leaving the next reader to think it was overlooked.
+
+The metric is the plumb-bob reading a coach takes at address: where the centre of the hips sits
+relative to the centre of the stance, projected along the stance line. It is the **signed twin of
+`comOverLeadFoot`** about the stance centre rather than the lead ankle, and it shares that channel's
+construction exactly — the component along the live ankle line, so a tilted stance line or slightly
+uneven ground does not leak into the number. Its sign needs no `leadSign` term: the unit vector runs
+trail ankle → lead ankle, so the dot product is lead-positive by construction.
+
+The unit argument in §6 has two halves, and only one of them applies here.
+
+- *"A ruler needs a detected ball, and a metric present in cm on some swings and absent on others is
+  worse than one that is always present."* — This half **does** apply, and the answer is the one
+  `leadHeelLift` already gives: the metric is **absent** when the ruler does not resolve, never
+  rescaled into a fallback unit. Unit invariance is preserved; availability is what varies, and
+  availability is a thing the catalogue already models.
+- *"A norm in millimetres is a norm on the golfer's height."* — This half **does not**. It is the
+  argument that carried §6, and it is an argument about `stanceWidth`: a 190 cm player and a 160 cm
+  player take genuinely different stances and neither is wrong. The plumb bob is not that kind of
+  quantity. **The figures it is read against are absolute and do not scale with the golfer** — an
+  inch or two ahead of centre with a wedge, half that with a mid-iron, about an inch *behind* with a
+  driver. Those are the numbers a coach says out loud, and re-expressing them as a percentage of
+  stance would convert a quantity everybody already agrees on into one nobody can check.
+
+Two limits, both stated in the descriptor rather than only here:
+
+- **The ruler is calibrated at the ground plane and the hips are about a metre above it.** A camera
+  not at hip height carries a small scale bias. This is an estimate to a fraction of an inch, not a
+  measurement.
+- **Pelvic rotation moves the apparent hip centre sideways with no actual shift.** Address and
+  impact are the trustworthy ends of the ladder; the readings between them overstate the travel.
+  The catalogue grades it `stereoGain() == Refines` automatically for exactly this reason — a
+  `Projected` floor rung read past Address — so no authoring was needed to say it, only prose.
+
+### The P1–P7 ladder, and the fabrication it exposed
+
+`plumbBobDistance` and `hipLineTilt` are both read as a **progression** rather than at one instant,
+so both sample the whole P1–P7 ladder rather than the module's usual Address/Top/Impact. The other
+four channels keep the three-phase list deliberately, so their serialized `phaseSamples` stay
+byte-identical and no corpus gate had to be re-run to prove the change was additive.
+
+Extending the list surfaced a defect that had been latent since the module was written.
+`phaseTime(phases, p, grid.front())` returned the **first frame** when the segmenter never found a
+phase, so an unsegmented phase emitted a sample taken at frame 0 wearing that phase's label. It was
+invisible while every producer asked only for Address/Top/Impact — a successful segmentation always
+has those three — and it is a fabricated reading the moment P2/P3/P5/P6 are asked for, because those
+come off the P-position bridge and are genuinely missing on plenty of swings. Worse, it would not
+have stayed cosmetic: `measure_sample.cpp` falls back to the *labelled* sample where the curve has
+nothing, so a frame-0 value labelled P6 would have been graded against a P6 corridor.
+
+**An absent phase now emits no sample**, in the shared `buildChannelSeries()` (`metric_channel.h`,
+via the new `phaseTimeOpt()`) and in this module's local `pushSeries`. The `fallback` form survives
+for the other use — picking a reference instant, where coasting to an end is intended and no phase
+label is attached to the result. `upper_body_metrics_test` §9 had been asserting the fabricated
+Finish sample and now asserts both halves: present when the ladder carries the phase, absent when it
+does not.
 
 ### The sign is resolved, not assumed
 

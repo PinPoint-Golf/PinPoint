@@ -45,6 +45,16 @@ identity here, production there, and a descriptor that never names a producer.
 Design invariants (do not break):
 - **Identity is decoupled from production.** A descriptor never names a producer. A provider declares
   which descriptor keys it can satisfy.
+- **A metric has ONE `group`; a PRESET is how a reading spans groups.** The chart's preset combo is
+  derived from `.group` (`ChartMetrics::seriesGroups`), so a group is also the unit a reader plots
+  together — and a metric cannot be in two groups without being taken out of one. That is the right
+  constraint for the directory, where a metric filed twice reads as two metrics, and the wrong one
+  for a coaching read that deliberately spans groups. `MetricDescriptor::presets` is the additive
+  answer: a list of named presets a metric ALSO appears in, offered after the groups and before
+  "Other", and only when at least **two** of a preset's members are plottable on the swing in hand
+  (one curve is a legend chip, not a preset). `"Plumb Bob"` is the first — `plumbBobDistance` read
+  with `hipLineTilt` and `pelvisSway`, none of which leaves `Pelvis & lateral`. Reach for a preset
+  only when the read genuinely crosses groups; a preset that duplicates a group is clutter.
 - **A metric declares a ROUTE LADDER, and it is the only statement of what the metric needs.**
   `MetricDescriptor::routes` is `std::vector<MetricRoute>`, **ordered best first**, and its **last
   rung is the cheapest** — both ends are read, so both orderings are load-bearing. Each rung carries
@@ -362,6 +372,7 @@ a magnitude — a carry, a spin rate, a duration.
 | `pelvisThrust` | cm | planned | the pelvis moved toward the ball | moved away from the ball |
 | `pelvisLift` | % stance width | live | the pelvis rose | the pelvis dropped |
 | `hipLineTilt` | ° | live | the TRAIL hip sits above the lead hip | the lead hip sits above the trail hip |
+| `plumbBobDistance` | in | live | the hips sit AHEAD of the stance centre, toward the lead side | the hips sit behind centre, toward the trail side |
 | `thoraxLateralDrift` | % stance width | live | the chest moved toward the LEAD side | moved away from the lead side |
 
 #### Feet & stance
@@ -940,11 +951,18 @@ the set a reader plots together, and ten members made it unreadable.
 Centre TRANSLATIONS. `hipLineTilt` is named for an angle but belongs here: it is a pelvis reading in
 the same frontal plane as sway and lift, and it is read alongside them.
 
+`plumbBobDistance` is the one member in a real-world unit, and the exception is argued in
+[`../design/lower_body_face_on_metrics.md`](../design/lower_body_face_on_metrics.md) §6a: the module
+is body-relative because a norm in millimetres is usually a norm on the golfer's height, and the
+plumb bob is the case where it is not — the figures it is graded against are absolute inches that do
+not scale with the player, and they differ **by club**, including in sign.
+
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
 | `pelvisSway` | live | FaceCam + ground | `buildLowerBodySeries` lateral translation ✓ | camCal, ground | `lower_body_metrics_test` · (mocap owed) |
 | `pelvisLift` | live | FaceCam + ground | vertical translation ✓ | camCal, ground | `lower_body_metrics_test` · (mocap owed) |
 | `hipLineTilt` | live | FaceCam | hip-line angle vs horizontal ✓ | camCal | `lower_body_metrics_test` · (corpus) |
+| `plumbBobDistance` | live | FaceCam + Ball | hip centre − ankle-line centre, projected on the stance line, through the ball-diameter ruler ✓ | **px→in**. **ABSENT when the ruler does not resolve**, never re-expressed in another unit | `lower_body_metrics_test` · corpus distribution owed (the four club corridors are heuristics) |
 | `thoraxLateralDrift` | live | FaceCam + ground | `buildUpperBodySeries` thorax lateral translation ✓ | camCal, ground | `upper_body_metrics_test` · (corpus) |
 | `pelvisThrust` | planned | FaceCam + **DTL** (optical axis) | toward-ball translation | stereo | new unit · (mocap; needs depth) |
 

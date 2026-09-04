@@ -211,26 +211,23 @@ Item {
         root.enabledKeys = e
         if (persist) root._persistPref("series", e)
     }
-    // What the panel's title says. The combo names the preset in a 10px gutter control; the
-    // title says the same thing in the display face, so a reader who glances at the panel knows
-    // which vocabulary the curves belong to without hunting for the control.
+    // What the panel's title says: THE VOCABULARY ON SCREEN, never the state of the selection.
     //
-    // ⚠ UNDER "Custom" IT NAMES THE GROUP AND ADMITS THE SELECTION LEFT IT, rather than naming
-    // the group outright. The combo already drops to "Custom" for exactly this reason — a label
-    // claiming a group the hand-picked selection no longer matches would lie about what is on
-    // screen — and a title in twice the point size would tell that lie twice as loudly. The
-    // group is still worth naming because it is the vocabulary being edited, and it is what the
-    // legend below is listing (see _legendSeries).
+    // It used to append "· custom" once a legend chip was hand-toggled, on the reasoning that a
+    // title naming a group the selection no longer matches would lie about what is on screen. The
+    // reasoning was sound and the conclusion was still wrong: the COMBO already reads "Custom",
+    // two controls apart, so the title was repeating a state the reader could already see — in
+    // twice the point size, and at the cost of the one thing only the title says, which is which
+    // family of metrics these curves belong to. A title is a name, not a status line.
     readonly property string _presetTitle: {
-        if (root.preset === "Custom")
-            return (root._presetBase === "" || root._presetBase === "All")
-                   ? qsTr("Custom metrics")
-                   : qsTr("%1 · custom").arg(root._presetBase)
+        // Under a hand-picked selection the name is still the group it was picked FROM: that is
+        // the vocabulary being edited and what the legend is listing (see _legendSeries).
+        const name = root.preset === "Custom" ? root._presetBase : root.preset
         // "" is the pre-resolution state — _syncPreset has not run, or this swing produced no
         // groups at all. Reading as "All" matches what enabledKeys actually is at that moment
         // (empty ⇒ every series on), so the title is never briefly wrong on the way in.
-        if (root.preset === "" || root.preset === "All") return qsTr("All metrics")
-        return root.preset          // a catalogue group name — manifest data, not a UI string
+        if (name === "" || name === "All") return qsTr("All metrics")
+        return name                 // a catalogue group name — manifest data, not a UI string
     }
 
     // Re-resolve against the swing on screen. Called when the groups change (a new swing) and
@@ -251,16 +248,24 @@ Item {
     }
     on_GroupsChanged: root._syncPreset()
     function _name(s)  { return cm.shortLabel(s.key) || s.label || s.key }
-    // Format a value in its series' own unit. Degrees keep the signed-deviation
-    // convention ("+12°", no separator); other units (e.g. "mph") read as "75 mph"
-    // with no forced + sign. Unit omitted ⇒ degrees (the pre-multi-unit default).
-    function _fmt(v, unit) {
-        var u = (unit === undefined || unit === null || unit === "") ? "°" : unit
-        var r = Math.round(v)
-        var sign = (r > 0 && u === "°") ? "+" : ""
-        var sep  = (u === "°") ? "" : " "
-        return sign + r + sep + u
-    }
+    // ── Units on this panel: ONE SHORT TOKEN, STATED ONCE PER CONTEXT ─────────────
+    //
+    // Two rules, and between them they are why the summary grid stopped overprinting itself.
+    //
+    //   1. The token is SHORT. ChartMetrics.shortUnit turns "% stance width" into "%". The
+    //      denominator lives in the metric's name and in the Metric Library; beside a number in a
+    //      data face it was longer than the value it qualified.
+    //   2. A unit is named ONCE per surface that has somewhere to name it. The summary card heads
+    //      each card with its unit, so the four values under it are BARE. The split-mode gutter
+    //      names it under the facet name, so the @end readout is bare. The legend chips and the
+    //      hover tooltip have no header of their own and mix units row by row, so those carry it.
+    //
+    // Rule 2 is the one that generalises: a repeated unit is not redundancy to be tolerated, it is
+    // a label in the wrong place. Put it on the container, not on every number inside it.
+    //
+    // The formatting itself is ChartMetrics.formatValue / .formatBare — one implementation in C++,
+    // shared with PpChartSummary and PpTransitTimeline, and the only version of this rule that can
+    // be asserted in a test.
 
     readonly property bool _hasAny: root._plottable.length > 0
 
@@ -722,8 +727,10 @@ Item {
                         domStartUs: root.viewStartUs
                         domEndUs:   root.viewEndUs
                         impactUs:   root.impactUs
-                        unitLabel:  (plotSeries.length > 0 && plotSeries[0].unit)
-                                    ? plotSeries[0].unit : qsTr("deg")
+                        // "°" rather than "deg": the fallback now matches what _fmt prints for a
+                        // unitless series, where the two spellings used to sit inches apart.
+                        unitLabel:  cm.shortUnit((plotSeries.length > 0 && plotSeries[0].unit)
+                                                 ? plotSeries[0].unit : "°")
                         playheadUs:    root.playheadUs
                         showPlayhead:  root.showPlayhead
                         showDots:      root.showDots
@@ -735,8 +742,10 @@ Item {
                         gutterLeft:    root._gutterLeft
                         padR:          root._padR
                         facetName:     facetSeries ? root._name(facetSeries) : ""
+                        // Bare: PpChartPlot's split gutter prints unitLabel directly above this,
+                        // so spelling it again here put the unit twice in one 40px column.
                         facetEndText:  facetSeries
-                            ? "@end " + root._fmt(cm.summary(facetSeries.t_us, facetSeries.value,
+                            ? "@end " + cm.formatBare(cm.summary(facetSeries.t_us, facetSeries.value,
                                                              root.viewStartUs, root.viewEndUs).end,
                                                   facetSeries.unit)
                             : ""
@@ -799,7 +808,7 @@ Item {
                                 color: Theme.colorText2
                             }
                             Text {
-                                text: root._fmt(labels.valueAtNearest(trow.modelData.t_us,
+                                text: cm.formatValue(labels.valueAtNearest(trow.modelData.t_us,
                                                                       trow.modelData.value, root._cursorUs),
                                                 trow.modelData.unit)
                                 font.family: Theme.fontData; font.pixelSize: Theme.fontSzLabel
@@ -844,8 +853,8 @@ Item {
                         color: Theme.colorText2
                     }
                     Text {
-                        text: root._fmt(chip.val, chip.modelData.unit)
-                              + "  Δ" + root._fmt(chip.val - root._addrValue(chip.modelData), chip.modelData.unit)
+                        text: cm.formatValue(chip.val, chip.modelData.unit)
+                              + "  Δ" + cm.formatValue(chip.val - root._addrValue(chip.modelData), chip.modelData.unit)
                         anchors.verticalCenter: parent.verticalCenter
                         font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                         color: Theme.colorText3

@@ -254,6 +254,38 @@ QVariantMap ChartMetrics::barDomain(double greenLo, double greenHi,
                         { QStringLiteral("valid"), d.valid } };
 }
 
+// ── Units ───────────────────────────────────────────────────────────────────────
+
+QString ChartMetrics::shortUnit(const QString &unit) const
+{
+    // Percent of a body dimension. The denominator is what the phrase carries, and on this panel
+    // the METRIC'S OWN NAME already carries it — "Sway" is a percentage of stance width because
+    // that is what pelvis sway is measured in, and a reader who wants the denominator spelled out
+    // has the Metric Library. Four units, one token.
+    if (unit.startsWith(QLatin1Char('%')))
+        return QStringLiteral("%");
+    return unit;
+}
+
+QString ChartMetrics::formatBare(double v, const QString &unit) const
+{
+    const QString u = shortUnit(unit.isEmpty() ? QStringLiteral("°") : unit);
+    const long long r = std::llround(v);
+    // The leading "+" is a DEGREES-ONLY convention and is deliberately not generalised: these are
+    // signed deviations from a reference posture, where the sign is the reading. A "+75 mph" or a
+    // "+2 in" would be decoration on a quantity whose sign nobody is asking about.
+    return ((r > 0 && u == QStringLiteral("°")) ? QStringLiteral("+") : QString())
+           + QString::number(r);
+}
+
+QString ChartMetrics::formatValue(double v, const QString &unit) const
+{
+    const QString u = shortUnit(unit.isEmpty() ? QStringLiteral("°") : unit);
+    // Degrees close up against the number, everything else takes a space. "12°" is one token to a
+    // reader and "12mph" is a typo.
+    return formatBare(v, unit) + (u == QStringLiteral("°") ? QString() : QStringLiteral(" ")) + u;
+}
+
 // ── Chart metric presets ────────────────────────────────────────────────────────
 
 QVariantList ChartMetrics::seriesGroups(const QVariantList &seriesList) const
@@ -268,6 +300,7 @@ QVariantList ChartMetrics::seriesGroups(const QVariantList &seriesList) const
     }
     if (plotted.isEmpty())
         return {};
+    const QSet<QString> plottable = plotted;   // the group walk below consumes `plotted`
 
     // Manifest order, preserved by walking all() once and appending a group the first time it
     // is seen. A QHash keyed on the group name would lose exactly the ordering the Metric
@@ -285,6 +318,43 @@ QVariantList ChartMetrics::seriesGroups(const QVariantList &seriesList) const
         } else {
             groups[it.value()].second.append(d->key);
         }
+    }
+
+    // ── Cross-cutting presets ───────────────────────────────────────────────────────────────
+    //
+    // A metric has one `group`, and the groups above are the presets derived from it. A coaching
+    // read that deliberately spans groups needs a second, additive mechanism — MetricDescriptor's
+    // `presets` — or the metric has to be taken out of the group it is properly filed under. The
+    // plumb bob is the case: the hip centre over the stance and the tilt of the hip line are read
+    // and graded together, while hip tilt's home stays with pelvis sway and lift.
+    //
+    // Manifest order again, both for the presets themselves and for the keys inside each, so this
+    // list and the Metric Library sequence the same metrics the same way.
+    //
+    // ⚠ AT LEAST TWO MEMBERS, or the preset is not offered. A preset exists to put several curves
+    // on screen together; a one-curve preset duplicates a legend chip and pads the combo with an
+    // entry that says nothing the group does not. It also means the preset disappears honestly on
+    // a swing that produced only one of its members — a plumb bob with no plumb-bob curve is not a
+    // plumb bob.
+    {
+        std::vector<std::pair<QString, QStringList>> presets;
+        QHash<QString, int> presetIndexOf;
+        for (const pinpoint::analysis::MetricDescriptor *d : m_catalogue.all()) {
+            if (!plottable.contains(d->key))
+                continue;
+            for (const QString &name : d->presets) {
+                auto it = presetIndexOf.constFind(name);
+                if (it == presetIndexOf.constEnd()) {
+                    presetIndexOf.insert(name, int(presets.size()));
+                    presets.push_back({ name, QStringList{ d->key } });
+                } else {
+                    presets[it.value()].second.append(d->key);
+                }
+            }
+        }
+        for (auto &pr : presets)
+            if (pr.second.size() >= 2)
+                groups.push_back(std::move(pr));
     }
 
     // Whatever the manifest did not claim. Sorted: `plotted` is a QSet, whose iteration order is

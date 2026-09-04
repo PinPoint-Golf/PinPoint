@@ -855,6 +855,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .shortLabel = QStringLiteral("Sway"),
         .unit = QStringLiteral("% stance width"),
         .group = QStringLiteral("Pelvis & lateral"),
+        .presets = { QStringLiteral("Plumb Bob") },
         .description = QStringLiteral(
             "How far the pelvis slides laterally relative to address — the linear partner to "
             "pelvis rotation — as a percentage of the golfer's own stance. POSITIVE IS TOWARD THE "
@@ -955,6 +956,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .shortLabel = QStringLiteral("Hip tilt"),
         .unit = QStringLiteral("°"),
         .group = QStringLiteral("Pelvis & lateral"),
+        .presets = { QStringLiteral("Plumb Bob") },
         .description = QStringLiteral(
             "The tilt of the line between the two hips, seen face-on. POSITIVE MEANS THE TRAIL HIP "
             "SITS ABOVE THE LEAD HIP. The trail hip riding upward at the top is the signature of a "
@@ -972,7 +974,13 @@ void installMetricManifest(MetricCatalogue &cat)
             "phases, and positive still means the trail hip sits higher."),
         .signPositive = QStringLiteral("the TRAIL hip sits above the lead hip"),
         .signNegative = QStringLiteral("the lead hip sits above the trail hip"),
-        .phases = { P::Address, P::Top, P::Impact },
+        // THE WHOLE P1-P7 LADDER, not three instants. The hip line is read as a progression — level
+        // at address, the trail hip riding up at the top, and back toward level through impact —
+        // and the shape of that travel is the reading, which three points cannot draw. The
+        // corridors still live at P1 and P4 where there are numbers to grade against; the rest are
+        // shown and not graded, which is the honest state of them.
+        .phases = { P::Address, P::ShaftParallelBack, P::MidBackswing, P::Top,
+                    P::ArmParallelDown, P::Delivery, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("the hip line's angle to horizontal, in the face-on image")) },
@@ -980,6 +988,52 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("characteristic:trail_hip_hike"),
                     QStringLiteral("characteristic:hip_alignment_open"),
                     QStringLiteral("characteristic:hip_alignment_closed") },
+    });
+
+    // The plumb bob: where the hips sit over the stance, and — with hipLineTilt above — the pair a
+    // coach reads together at address. It keeps `Pelvis & lateral` as its group, because sway and
+    // lift are what it is read AGAINST, and joins the cross-cutting "Plumb Bob" preset so the two
+    // can be plotted together without either leaving its group.
+    cat.addDescriptor({
+        .key = QStringLiteral("plumbBobDistance"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Plumb bob"),
+        .shortLabel = QStringLiteral("Plumb bob"),
+        .unit = QStringLiteral("in"),
+        .group = QStringLiteral("Pelvis & lateral"),
+        .presets = { QStringLiteral("Plumb Bob") },
+        .description = QStringLiteral(
+            "Where the centre of the hips sits relative to the centre of the stance, measured along "
+            "the stance line and seen face-on. POSITIVE MEANS THE HIPS ARE AHEAD OF THE STANCE "
+            "CENTRE, toward the lead side. It is the setup reading a coach takes by dropping a line "
+            "from the hips, and how far it should sit ahead depends on the club: about an inch or "
+            "two with a wedge, half that with a mid-iron, and roughly an inch BEHIND centre with a "
+            "driver, where the ball is forward and the upper body is tilted away from the target."),
+        .howToRead = QStringLiteral(
+            "Read it first at address, against the corridor for the club in hand — the same number "
+            "means different things with a wedge and a driver, and the corridors differ "
+            "accordingly. Then read the travel: the hips move toward the lead side through the "
+            "downswing on every good swing, so the value at impact is larger than at address, and "
+            "the shift between them is the number that says whether the golfer got onto the lead "
+            "side at all. ⚠ IT IS AN ESTIMATE TO A FRACTION OF AN INCH, NOT A MEASUREMENT. The "
+            "inches come from the ball's own diameter used as a ruler, which is exact at the "
+            "ball's depth on the ground and the hips are about a metre above that — a camera not "
+            "at hip height carries a small scale bias. ⚠ AND THE MID-SWING READINGS CARRY A TURN "
+            "ARTEFACT: turning the pelvis moves the APPARENT hip centre sideways in a face-on image "
+            "with no actual shift, so address and impact are the trustworthy ends of the ladder "
+            "and the readings between them overstate the travel. Needs a face-on camera and a "
+            "detected ball; without the ball there is no ruler and the metric is absent rather "
+            "than reported in some other unit."),
+        .signPositive = QStringLiteral("the hips sit AHEAD of the stance centre, toward the lead side"),
+        .signNegative = QStringLiteral("the hips sit behind centre, toward the trail side"),
+        .phases = { P::Address, P::ShaftParallelBack, P::MidBackswing, P::Top,
+                    P::ArmParallelDown, P::Delivery, P::Impact },
+        .routes = {
+            via("faceOnBall", RM::Projected, Direct,
+                { .faceOnCamera = true, .ballTrack = true },
+                QStringLiteral("the hip centre's offset from the ankle-line centre along the stance "
+                               "line in the face-on image, in the ball's own diameter ruler")) },
+        .usedBy = { QStringLiteral("chart:review") },
     });
 
     cat.addDescriptor({

@@ -1208,6 +1208,87 @@
       "highMeans": "the trail hip sitting higher than the lead hip at address"
     },
     {
+      "id": "m_hipLineTiltImpact",
+      "kind": "provided",
+      "metricKey": "hipLineTilt",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Hip line tilt, at P7",
+      "unit": "°",
+      "viewNeeded": "faceOn",
+      "highMeans": "the trail hip sitting higher than the lead hip at impact"
+    },
+    {
+      "id": "m_hipLineTiltShift",
+      "kind": "provided",
+      "metricKey": "hipLineTilt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Hip line tilt, change P1 to P7",
+      "unit": "°",
+      "viewNeeded": "faceOn",
+      "highMeans": "the trail hip having risen relative to the lead hip between address and impact"
+    },
+    {
+      "id": "m_plumbBobAddress",
+      "kind": "provided",
+      "metricKey": "plumbBobDistance",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Plumb bob, at P1",
+      "unit": "in",
+      "viewNeeded": "faceOn",
+      "aliases": [
+        "hips over the stance at address"
+      ],
+      "highMeans": "the hip centre further AHEAD of the stance centre, toward the lead side"
+    },
+    {
+      "id": "m_plumbBobImpact",
+      "kind": "provided",
+      "metricKey": "plumbBobDistance",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Plumb bob, at P7",
+      "unit": "in",
+      "viewNeeded": "faceOn",
+      "highMeans": "the hip centre further ahead of the stance centre at impact"
+    },
+    {
+      "id": "m_plumbBobShift",
+      "kind": "provided",
+      "metricKey": "plumbBobDistance",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Plumb bob, change P1 to P7",
+      "unit": "in",
+      "viewNeeded": "faceOn",
+      "highMeans": "the hips having travelled further toward the lead side between address and impact"
+    },
+    {
       "id": "m_headSwayBack",
       "kind": "provided",
       "metricKey": "headSway",

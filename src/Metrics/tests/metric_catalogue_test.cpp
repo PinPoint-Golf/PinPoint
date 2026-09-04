@@ -70,7 +70,8 @@ int main()
         // 90 -> 94 with Phase F: forearmRotation (a segment axial rotation, which no
         // existing key expressed) plus the three HackMotion rungs hm.leadWristFlexExt,
         // hm.leadWristRadUln and hm.forearmRotation.
-        checkEqI(static_cast<int>(cat.all().size()), 94, "descriptor count == 94");   // 71 + 26 lm. - 9 renamed, + transitionPlaneDelta, + compoundMiss, + 4 wrist/HM
+        // 94 -> 95 with plumbBobDistance, the hip centre over the stance centre in inches.
+        checkEqI(static_cast<int>(cat.all().size()), 95, "descriptor count == 95");   // 71 + 26 lm. - 9 renamed, + transitionPlaneDelta, + compoundMiss, + 4 wrist/HM, + plumbBobDistance
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -107,7 +108,7 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  43, "TimeSeries count");   // +balanceHeelToe, +forearmRotation, +3 hm.
+        checkEqI(countType(cat, MetricType::TimeSeries),  44, "TimeSeries count");   // +balanceHeelToe, +forearmRotation, +3 hm., +plumbBobDistance
         // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
         // as duplicates of a series the catalogue already carries.
         checkEqI(countType(cat, MetricType::PointInTime), 45, "PointInTime count");   // +17: a monitor reports one number per shot; +transitionPlaneDelta, +compoundMiss
@@ -504,7 +505,11 @@ int main()
         // face-on view, so the depth component is exactly what a calibrated pair
         // would recover — the reason the brief ships only the delta and leaves the
         // absolute angle uncalibrated.
-        checkEqI(refines, 28, "28 projected readings taken past Address");
+        // 29 with plumbBobDistance, and it is the textbook case for this grade rather than an
+        // awkward one: turning the pelvis moves the APPARENT hip centre sideways in a face-on
+        // image with no actual shift, so every reading past Address overstates the travel by a
+        // term a calibrated pair would remove. Its howToRead says so in those words.
+        checkEqI(refines, 29, "29 projected readings taken past Address");
     }
 
     // 3d-quater. The upgrade hint — what more kit would buy, on a real shot.
@@ -810,6 +815,18 @@ int main()
               "leadHeelLift Measured with face-on camera + ball track");
         check(cat.resolve(QStringLiteral("leadHeelLift"), feet).state == MetricAvailability::Unavailable,
               "leadHeelLift Unavailable without the ball-diameter ruler (it reads in cm)");
+
+        // plumbBobDistance is the third reading on that ruler, and the only one in the pelvis group.
+        // Its four sibling channels are body-relative and answer on any face-on shot; this one is in
+        // INCHES, and lower_body_metrics.cpp declines to emit it without the ruler. So the two must
+        // resolve DIFFERENTLY on the same shot, which is what pins the requirement to the metric
+        // rather than to the producer stage.
+        check(cat.resolve(QStringLiteral("plumbBobDistance"), ballCtx).state == MetricAvailability::Measured,
+              "plumbBobDistance Measured with face-on camera + ball track");
+        check(cat.resolve(QStringLiteral("plumbBobDistance"), feet).state == MetricAvailability::Unavailable,
+              "plumbBobDistance Unavailable without the ball-diameter ruler (it reads in inches)");
+        check(cat.resolve(QStringLiteral("hipLineTilt"), feet).state == MetricAvailability::Measured,
+              "…while hipLineTilt, its preset partner, needs no ball at all");
 
         // Tempo needs no devices at all beyond something that segmented the swing —
         // an IMU-only shot with no camera and no club must still resolve Measured.

@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace pinpoint::analysis {
@@ -79,13 +80,35 @@ inline double interpChannel(const std::vector<int64_t> &xs, const std::vector<do
     return ys[lo] + (ys[hi] - ys[lo]) * f;
 }
 
-// The instant of a phase in the ladder, or `fallback` when the segmenter never found it. Callers
-// pass the grid front so an unsegmented phase reads the first frame rather than time zero.
-inline int64_t phaseTime(const std::vector<PhaseEvent> &phases, Phase p, int64_t fallback)
+// The instant of a phase in the ladder, or nullopt when the segmenter never found it.
+//
+// ⚠ USE THIS, NOT phaseTime(), WHEN EMITTING A phaseSample. phaseTime() takes a `fallback` and
+// every sample-emitting caller passed the grid front, so an UNSEGMENTED phase emitted a sample
+// taken at the FIRST FRAME wearing that phase's label. It was masked while every producer asked
+// only for Address / Top / Impact, which a successful segmentation always has. It stops being
+// masked the moment anything samples P2/P3/P5/P6 — those are located by the P-position bridge and
+// are genuinely missing on real swings — and the lie would not stay cosmetic: measure_sample.cpp
+// falls back to the LABELLED sample where the curve has nothing, so a frame-0 reading labelled P6
+// would be graded against a P6 corridor.
+//
+// An absent phase must produce NO sample. "We could not measure this" and "this is the value" are
+// different statements, and merging them turns a segmentation gap into a confident number.
+//
+// The `fallback` form below survives for the OTHER use: picking a reference instant (the address
+// anchor, the impact anchor) where coasting to the first or last frame is the intended behaviour
+// and no phase label is attached to the result.
+inline std::optional<int64_t> phaseTimeOpt(const std::vector<PhaseEvent> &phases, Phase p)
 {
     for (const PhaseEvent &e : phases)
         if (e.phase == p) return e.t_us;
-    return fallback;
+    return std::nullopt;
+}
+
+// The instant of a phase in the ladder, or `fallback` when the segmenter never found it. For
+// reference instants only — see the warning on phaseTimeOpt() before using it to emit a sample.
+inline int64_t phaseTime(const std::vector<PhaseEvent> &phases, Phase p, int64_t fallback)
+{
+    return phaseTimeOpt(phases, p).value_or(fallback);
 }
 
 // Index of the grid sample nearest t. The grid is the full per-frame timeline, so this is the frame
@@ -141,7 +164,9 @@ inline MetricSeries buildChannelSeries(const std::vector<int64_t> &grid, const M
         m.value[i] = interpChannel(ch.t_us, ch.value, grid[i]);
 
     for (const Phase p : sampleAt) {
-        const int idx = nearestIndex(grid, phaseTime(phases, p, grid.front()));
+        const std::optional<int64_t> t = phaseTimeOpt(phases, p);
+        if (!t) continue;                           // unsegmented — no sample, never a frame-0 one
+        const int idx = nearestIndex(grid, *t);
         m.phaseSamples.push_back({ p, grid[idx], m.value[size_t(idx)], QString() });
     }
     return m;

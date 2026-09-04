@@ -853,6 +853,42 @@
       "source": "heuristic"
     },
     {
+      "measure": "m_plumbBobAddress",
+      "context": "any",
+      "mu": 0.5,
+      "sigmaLo": 1.5,
+      "unit": "in",
+      "source": "heuristic",
+      "citation": "Club unknown, so a wider tolerance than any single club would take — the reading genuinely means different things with a wedge and a driver, and the per-club rows below are the ones that should normally resolve. COACHING DOCTRINE, NOT A RESULTS TABLE: no published figure for hip-centre offset over the stance was found in any unit, so every mu here is an authored starting figure to be seated from a corpus before anyone reads a grade off it."
+    },
+    {
+      "measure": "m_plumbBobAddress",
+      "context": "driver",
+      "mu": -1.0,
+      "sigmaLo": 0.5,
+      "unit": "in",
+      "source": "heuristic",
+      "citation": "BEHIND centre with a driver, and the sign is the point: the ball is forward, the upper body is tilted away from the target to strike up on it, and the hips sit back of the stance centre as a result. A driver setup that reads like a wedge is the finding. Coaching doctrine; unseated."
+    },
+    {
+      "measure": "m_plumbBobAddress",
+      "context": "iron",
+      "mu": 0.5,
+      "sigmaLo": 0.5,
+      "unit": "in",
+      "source": "heuristic",
+      "citation": "About half the wedge's offset with a mid-iron. The Ideal band is 0 to 1 inch. This row covers iron_3 through iron_9 by inheritance; long irons plausibly sit nearer the driver and that refinement is deliberately left unseated rather than guessed. Coaching doctrine; unseated."
+    },
+    {
+      "measure": "m_plumbBobAddress",
+      "context": "wedge",
+      "mu": 1.5,
+      "sigmaLo": 0.5,
+      "unit": "in",
+      "source": "heuristic",
+      "citation": "The hips sit about an inch or two ahead of the stance centre with a wedge — the narrowest stance, the ball near the middle, and the most weight forward of the three. sigma is set so the Ideal band is exactly the 1 to 2 inch range that is taught. Coaching doctrine; unseated."
+    },
+    {
       "measure": "m_ballPosition",
       "context": "any",
       "mu": 30.0,

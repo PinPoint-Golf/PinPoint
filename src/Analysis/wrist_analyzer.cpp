@@ -795,9 +795,27 @@ struct LowerBodyMetricsStage : AnalysisStage {
             if (const PhaseEvent *a = ctx.seg.eventFor(Phase::Address))
                 addressUs = a->t_us;
         const bool leadIsLeft = (ctx.job.handedness != 2);
+
+        // The ball-diameter px->mm ruler, for plumbBobDistance's inches.
+        //
+        // DEGENERATE HEELS, but the REAL Address instant. The heel pair is genuinely irrelevant —
+        // computeBallPosition resolves the centre and the ruler before it gates on the heels, so a
+        // hip metric never fails because a foot was occluded. `addressUs` is NOT irrelevant, and
+        // passing -1 here (copied from ClubDeliveryStage, which has no address instant to give) cost
+        // three corpus swings their reading: with an Address the ruler is built from the samples
+        // around it, and without one it falls back to every pre-launch sample, which on a long
+        // pre-roll drifts far enough that the cluster filter leaves fewer than `minSamples`. The
+        // stage has the instant in hand — FootMetricsStage passes it — so withholding it produced a
+        // metric that was absent on swings whose ball was tracked perfectly well.
+        const BallPositionResult bp =
+            computeBallPosition(ctx.detail->ball, QPointF(), QPointF(), addressUs,
+                                int(cfmt->width), int(cfmt->height),
+                                BallPositionConfig::fromOverrides(ctx.job.tuningOverrides));
+
         const LowerBodyResult lb =
             trackLowerBody(ctx.detail->pose2d, int(cfmt->width), int(cfmt->height), leadIsLeft,
-                           addressUs, LowerBodyConfig::fromOverrides(ctx.job.tuningOverrides));
+                           addressUs, LowerBodyConfig::fromOverrides(ctx.job.tuningOverrides),
+                           bp.mmPerPx);
         for (const MetricSeries &m : buildLowerBodySeries(lb, phases))
             ctx.detail->series.push_back(m);
     }

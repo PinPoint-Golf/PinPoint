@@ -21,7 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <initializer_list>
+#include <optional>
 
 namespace pinpoint::analysis {
 namespace {
@@ -30,6 +30,7 @@ namespace {
 constexpr int kLHip = 11, kRHip = 12, kLKnee = 13, kRKnee = 14, kLAnkle = 15, kRAnkle = 16;
 
 constexpr double kRadToDeg = 57.29577951308232;
+constexpr double kMmPerInch = 25.4;
 
 double medianOf(std::vector<double> v)
 {
@@ -110,11 +111,15 @@ double interpChannel(const std::vector<int64_t> &xs, const std::vector<double> &
     return ys[lo] + (ys[hi] - ys[lo]) * f;
 }
 
-int64_t phaseTime(const std::vector<PhaseEvent> &phases, Phase p, int64_t fallback)
+// The instant of a phase in the ladder, or nullopt when the segmenter never found it. Same
+// contract as metric_channel.h's phaseTimeOpt(), and OPTIONAL FOR THE REASON STATED THERE: a
+// fallback to the grid front would emit a first-frame reading wearing an unsegmented phase's
+// label, and P2/P3/P5/P6 are genuinely missing on real swings.
+std::optional<int64_t> phaseTimeOpt(const std::vector<PhaseEvent> &phases, Phase p)
 {
     for (const PhaseEvent &e : phases)
         if (e.phase == p) return e.t_us;
-    return fallback;
+    return std::nullopt;
 }
 
 int nearestIndex(const std::vector<int64_t> &grid, int64_t t)
@@ -130,7 +135,7 @@ int nearestIndex(const std::vector<int64_t> &grid, int64_t t)
 } // namespace
 
 LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, bool leadIsLeft,
-                               int64_t addressUs, const LowerBodyConfig &cfg)
+                               int64_t addressUs, const LowerBodyConfig &cfg, double mmPerPx)
 {
     LowerBodyResult res;
     res.frameW = frameW;
@@ -251,6 +256,22 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
                                       + (midY - s.leadAnklePx.y()) * uy) / ul;
                 res.comOverLead.t_us.push_back(s.t_us);
                 res.comOverLead.value.push_back(std::abs(along) * toPct);
+
+                // plumbBobDistance — the SIGNED twin of the reading above, taken about the stance
+                // CENTRE rather than the lead ankle, and in inches rather than a fraction of the
+                // stance. `u` runs trail ankle -> lead ankle, so the projection is lead-positive by
+                // construction and needs no leadSign: a mirrored camera cannot invert it.
+                //
+                // Inches only, and only when the ball ruler resolved. See the header: the figures
+                // this is read against are absolute inches a coach quotes out loud, and a metric
+                // whose unit changes per swing cannot carry a norm.
+                if (mmPerPx > 0.0) {
+                    const double cx = 0.5 * (s.leadAnklePx.x() + s.trailAnklePx.x());
+                    const double cy = 0.5 * (s.leadAnklePx.y() + s.trailAnklePx.y());
+                    const double off = ((midX - cx) * ux + (midY - cy) * uy) / ul;
+                    res.plumbBob.t_us.push_back(s.t_us);
+                    res.plumbBob.value.push_back(off * mmPerPx / kMmPerInch);
+                }
             }
         }
     }
@@ -275,8 +296,8 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
 
     const auto pushSeries = [&](const LowerBodyChannel &ch, const QString &key, const QString &label,
                                 const QString &unit,
-                                std::initializer_list<Phase> at = { Phase::Address, Phase::Top,
-                                                                    Phase::Impact }) {
+                                const std::vector<Phase> &at = { Phase::Address, Phase::Top,
+                                                                 Phase::Impact }) {
         if (ch.t_us.empty())
             return;
         std::vector<double> vals(grid.size());
@@ -291,14 +312,37 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
         // Address / Top / Impact by default, the same three every other frontal-plane channel
         // samples. Top is P4 — the reading the knee-drift and hip-tilt corridors are both keyed on.
         // The caller may ask for more: comOverLeadFoot is read at the FINISH, which nothing sampled
-        // before it existed. The four original channels keep the original list deliberately, so
+        // before it existed, and hipLineTilt / plumbBobDistance are read across the whole P1–P7
+        // ladder. The four channels that predate those keep their original list deliberately, so
         // their serialized phaseSamples stay byte-identical and no corpus gate has to be re-run to
         // prove this change was additive.
+        //
+        // AN UNSEGMENTED PHASE PRODUCES NO SAMPLE. It used to coast to the grid front, which was
+        // invisible while the list was Address/Top/Impact and is a fabricated reading the moment
+        // P2/P3/P5/P6 are asked for — those come off the P-position bridge and are genuinely
+        // missing on plenty of swings.
         for (const Phase p : at) {
-            const int idx = nearestIndex(grid, phaseTime(phases, p, grid.front()));
+            const std::optional<int64_t> t = phaseTimeOpt(phases, p);
+            if (!t)
+                continue;
+            const int idx = nearestIndex(grid, *t);
             m.phaseSamples.push_back({ p, grid[idx], vals[idx], QString() });
         }
         out.push_back(std::move(m));
+    };
+
+    // P1..P7 in ladder order — NOT enum order, which is append-only and unrelated (see the Phase
+    // enum in swing_analysis.h). The two channels a coach reads as a progression rather than at one
+    // instant take this list; the rest keep Address/Top/Impact so their serialized phaseSamples
+    // stay byte-identical.
+    static const std::vector<Phase> kP1toP7 = {
+        Phase::Address,             // P1
+        Phase::ShaftParallelBack,   // P2
+        Phase::MidBackswing,        // P3
+        Phase::Top,                 // P4
+        Phase::ArmParallelDown,     // P5
+        Phase::Delivery,            // P6
+        Phase::Impact,              // P7
     };
 
     const QString pct = QStringLiteral("% stance width");
@@ -309,12 +353,14 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
     pushSeries(res.pelvisLift, QStringLiteral("pelvisLift"),
                QStringLiteral("Pelvis lift"), pct);
     pushSeries(res.hipTilt,    QStringLiteral("hipLineTilt"),
-               QStringLiteral("Hip line tilt"), QStringLiteral("°"));
+               QStringLiteral("Hip line tilt"), QStringLiteral("°"), kP1toP7);
     pushSeries(res.feetAlign,  QStringLiteral("feetAlignment"),
                QStringLiteral("Feet alignment"), QStringLiteral("°"));
     pushSeries(res.comOverLead, QStringLiteral("comOverLeadFoot"),
                QStringLiteral("Balance over the lead foot"), pct,
                { Phase::Address, Phase::Top, Phase::Impact, Phase::Finish });
+    pushSeries(res.plumbBob,   QStringLiteral("plumbBobDistance"),
+               QStringLiteral("Plumb bob"), QStringLiteral("in"), kP1toP7);
     return out;
 }
 

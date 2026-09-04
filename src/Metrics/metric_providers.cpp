@@ -75,7 +75,8 @@ std::vector<QString> LowerBodyMetricProvider::provides() const
 {
     return { QStringLiteral("leadKneeDrift"),  QStringLiteral("pelvisSway"),
              QStringLiteral("pelvisLift"),     QStringLiteral("hipLineTilt"),
-             QStringLiteral("feetAlignment"),  QStringLiteral("comOverLeadFoot") };
+             QStringLiteral("feetAlignment"),  QStringLiteral("comOverLeadFoot"),
+             QStringLiteral("plumbBobDistance") };
 }
 
 // ------------------------------------------------------------------- UpperBodyMetricProvider

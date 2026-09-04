@@ -98,9 +98,41 @@
 // figure it is read against is absolute: the trail hip sits somewhat above the
 // lead hip at the top for every golfer, and the question is how much.
 //
+// ── plumbBobDistance, and why it is the one metric here in INCHES ───────────
+//
+// The plumb-bob reading a coach takes at address: where the centre of the hips
+// sits relative to the centre of the stance, along the stance line. It is the
+// SIGNED twin of comOverLeadFoot about the stance CENTRE rather than the lead
+// ankle, and it uses the same projection — the component along the live ankle
+// line — so a tilted stance line or slightly uneven ground does not leak into
+// the number.
+//
+// Its sign needs no leadSign term: the unit vector runs from the TRAIL ankle to
+// the LEAD ankle, so the dot product is lead-positive by construction and a
+// mirrored camera cannot invert it. Positive means the hips sit AHEAD of the
+// stance centre, toward the lead side.
+//
+// It is the ONE channel here stated in a real-world unit, and the exception is
+// deliberate rather than an oversight of the rule below. The figures it is read
+// against are absolute inches a coach quotes out loud — a wedge about 1–2 in
+// ahead, a mid-iron 0–1, a driver about 1 behind — and unlike stance width they
+// are not a statement about the golfer's height. So it takes the ball-diameter
+// ruler, and follows leadHeelLift's rule exactly: emitted in inches when that
+// ruler resolves and ABSENT when it does not, never rescaled into a fallback
+// unit. A metric whose unit changes per swing cannot carry a norm, because the
+// norm declares one unit and grading compares the numbers without consulting it.
+//
+// TWO LIMITS, both real, both stated in the descriptor rather than hidden here:
+// the ruler is calibrated at the ball's ground-plane depth while the hips are
+// about a metre above it, so a camera not at hip height carries a small scale
+// bias; and pelvic rotation moves the APPARENT hip centre sideways with no
+// actual shift, so the address and impact readings are the trustworthy ends of
+// the ladder and the mid-swing ones carry a turn artefact.
+//
 // ── Units ───────────────────────────────────────────────────────────────────
 //
 // Displacements are a PERCENTAGE OF THE ADDRESS ANKLE SPAN; angles are degrees.
+// plumbBobDistance is the documented exception, in inches — see above.
 // One unit each, for all time. The alternative — centimetres via a ruler — was
 // rejected: the ruler needs a detected ball, and a metric that is present in cm
 // on some swings and absent on others is worse than one that is always present
@@ -178,6 +210,8 @@ struct LowerBodyResult {
     // unsigned distance.
     LowerBodyChannel kneeDrift, pelvisSway, pelvisLift, hipTilt;
     LowerBodyChannel feetAlign, comOverLead;
+    // INCHES, and empty when the ball ruler did not resolve. Lead-positive.
+    LowerBodyChannel plumbBob;
 
     QPointF addrLeadHipPx, addrTrailHipPx;
     QPointF addrLeadKneePx;
@@ -193,16 +227,24 @@ struct LowerBodyResult {
 // feet (the caller resolves it, e.g. `handedness != 2`). addressUs = the Address
 // phase instant for the robust reference; < 0 ⇒ fall back to the first
 // cfg.addrMinFrames frames with a usable lower body.
+// `mmPerPx` is the ball-diameter ruler (ball_position.h) at the ball's ground-plane
+// depth — face-on, essentially the feet's depth. Pass <= 0 (the default) when it did
+// not resolve and `plumbBob` stays empty, which is what makes that metric absent
+// rather than present in a second unit.
 LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, bool leadIsLeft,
-                               int64_t addressUs = -1, const LowerBodyConfig &cfg = {});
+                               int64_t addressUs = -1, const LowerBodyConfig &cfg = {},
+                               double mmPerPx = -1.0);
 
 // Resample the sparse channels onto the full per-frame grid (linear interp, hold
 // at ends, gaps bridged — NEVER NaN) and emit leadKneeDrift / pelvisSway /
-// pelvisLift / hipLineTilt / feetAlignment / comOverLeadFoot with phase samples.
-// The finish is sampled alongside Address/Top/Impact because comOverLeadFoot is
-// read there and nothing sampled it before. UNSCORED here
-// (the corridors live in the diagnostics norm set, not in the producer). Empty
-// when the address reference is unresolved or the stance span is unusable.
+// pelvisLift / hipLineTilt / feetAlignment / comOverLeadFoot / plumbBobDistance
+// with phase samples. The finish is sampled alongside Address/Top/Impact because
+// comOverLeadFoot is read there and nothing sampled it before; hipLineTilt and
+// plumbBobDistance are sampled across the whole P1–P7 ladder because both are
+// read as a progression rather than at one instant. AN UNSEGMENTED PHASE EMITS
+// NO SAMPLE. UNSCORED here (the corridors live in the diagnostics norm set, not
+// in the producer). Empty when the address reference is unresolved or the stance
+// span is unusable.
 std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
                                                const std::vector<PhaseEvent> &phases);
 

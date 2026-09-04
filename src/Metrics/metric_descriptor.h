@@ -275,6 +275,21 @@ struct MetricDescriptor {
     QString    unit;                       // "°", "mph", "×frame", …
     QString    group;                      // "Wrist & forearm" | "Club & speed" | "Setup" | …
 
+    // CROSS-CUTTING reading lists, empty for almost every metric. A metric belongs to exactly one
+    // `group`, and the chart's preset combo is derived from that group (ChartMetrics::seriesGroups)
+    // — so a group is also the unit a reader plots together, and a metric cannot be in two of them
+    // without being taken out of one.
+    //
+    // That is the right constraint for the DIRECTORY, where a metric filed twice reads as two
+    // metrics, and the wrong one for a COACHING READ that deliberately spans groups. The plumb bob
+    // is one: the hip centre over the stance and the tilt of the hip line are read together and
+    // graded together, while hipLineTilt's home stays with pelvis sway and lift, which is what it is
+    // read AGAINST. Presets are additive and never move a metric out of its group.
+    //
+    // Order within a preset follows manifest order, the same as groups, so the chart and the Metric
+    // Library list the same metrics in the same sequence.
+    std::vector<QString> presets;          // { "Plumb Bob" } — usually empty
+
     QString    description;                // what it means (consolidated from docs/)
     QString    howToRead;                  // sign convention, when to read, what good looks like
     bool       flexPositive = true;        // sign polarity, mirrors MetricSeries.flexPositive

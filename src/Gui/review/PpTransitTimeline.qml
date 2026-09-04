@@ -117,6 +117,9 @@ Item {
                                                                   shotReplay.positionUs) : 0
     readonly property string _metricUnit: (_series0 && _series0.unit) ? _series0.unit : ""
 
+    // The one value-formatting rule, shared with PpMetricChart and PpChartSummary.
+    ChartMetrics { id: chartFmt }
+
     TimelineLabels { id: solver }
 
     // Map a pointer position (in `root` coords) to a seek. Imperative handler helper
@@ -480,8 +483,11 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
+                    // ChartMetrics.formatValue, not a local round-and-concatenate: this used to
+                    // print "12% stance width" — the catalogue's full phrase, jammed against the
+                    // number with no separator — in a bead chip a few characters wide.
                     visible: root._series0 !== null
-                    text: Math.round(root._metricVal) + root._metricUnit
+                    text: chartFmt.formatValue(root._metricVal, root._metricUnit)
                     color: Theme.colorText3
                     font.family: Theme.fontData; font.pixelSize: Theme.fontSzLabel
                     anchors.verticalCenter: parent.verticalCenter

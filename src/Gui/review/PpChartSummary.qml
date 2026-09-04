@@ -49,14 +49,23 @@ ColumnLayout {
     ChartMetrics   { id: cm }
     TimelineLabels { id: labels }         // value-at-time lookup (impact landmark)
 
-    // Format a value in its series' own unit (see PpMetricChart._fmt): degrees keep the
-    // signed "+12°" convention, word units read as "75 mph"; omitted ⇒ degrees.
-    function _fmt(v, unit) {
-        var u = (unit === undefined || unit === null || unit === "") ? "°" : unit
-        var r = Math.round(v)
-        var sign = (r > 0 && u === "°") ? "+" : ""
-        var sep  = (u === "°") ? "" : " "
-        return sign + r + sep + u
+    // ── THE CARD NAMES ITS UNIT ONCE, IN THE HEADER ──────────────────────────────
+    //
+    // Every value here used to carry the full unit, so a sway card said "% stance width" five
+    // times — beside the name, and again on @impact, peak, Δ and the rate. In a 150px column with
+    // a data face that is wider than the number it qualifies, and the grid overprinted itself:
+    // "12 % stance wi34 %tance w". Two things were wrong and only one of them was the length.
+    //
+    // The other is placement. Four values in one card share one unit, so the unit is a property of
+    // the CARD, not of each number — it belongs beside the name, where it already was, and nowhere
+    // else. Values are bare. The same rule strips the unit from the split-mode @end readout, whose
+    // gutter names it directly above (PpMetricChart's _fmt / _num note states it in full).
+    //
+    // ChartMetrics.formatBare keeps the same sign convention formatValue uses, so a reading does
+    // not change shape between the card and the legend: degrees carry a leading "+" when positive,
+    // nothing else does. _unit is the card's own token — short, and shown in exactly one place.
+    function _unit(unit) {
+        return cm.shortUnit((unit === undefined || unit === null || unit === "") ? "°" : unit)
     }
     function _bandColor(b) {
         return b === "warn"      ? Theme.colorWarn
@@ -134,7 +143,7 @@ ColumnLayout {
                             color: Theme.colorText
                         }
                         Text {
-                            text: (card.modelData.unit || qsTr("deg"))
+                            text: root._unit(card.modelData.unit)
                             font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                             font.letterSpacing: Theme.trackingData
                             color: Theme.colorText3
@@ -154,7 +163,7 @@ ColumnLayout {
                                  && card.modelData.sigma !== null) ? card.modelData.sigma : 0
                             visible: sigmaChip.sigma > 0
                             text: "± " + sigmaChip.sigma.toFixed(1)
-                                       + (card.modelData.unit || "°")
+                                       + root._unit(card.modelData.unit)
                             font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                             font.letterSpacing: Theme.trackingData
                             color: Theme.colorText3
@@ -181,7 +190,7 @@ ColumnLayout {
                             Text { text: qsTr("@ IMPACT"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
-                            Text { text: root._fmt(card.impVal, card.modelData.unit); font.family: Theme.fontData
+                            Text { text: cm.formatBare(card.impVal, card.modelData.unit); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData; color: root._bandColor(card.bnd) }
                         }
                         Column {
@@ -189,7 +198,7 @@ ColumnLayout {
                             Text { text: qsTr("PEAK"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
-                            Text { text: root._fmt(card.st.peak, card.modelData.unit); font.family: Theme.fontData
+                            Text { text: cm.formatBare(card.st.peak, card.modelData.unit); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData; color: Theme.colorText }
                         }
                         Column {
@@ -197,7 +206,7 @@ ColumnLayout {
                             Text { text: qsTr("Δ SEGMENT"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
-                            Text { text: root._fmt(card.st.delta, card.modelData.unit); font.family: Theme.fontData
+                            Text { text: cm.formatBare(card.st.delta, card.modelData.unit); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData; color: Theme.colorText }
                         }
                         Column {
@@ -210,8 +219,10 @@ ColumnLayout {
                                 Text { id: rateVal
                                        text: Math.round(card.st.rate); font.family: Theme.fontData
                                        font.pixelSize: Theme.fontSzData; color: Theme.colorText }
+                                // The ONE value whose unit differs from the card's — a rate, not a
+                                // reading — so it says so, and is the only one that may.
                                 Text { anchors.baseline: rateVal.baseline
-                                       text: (card.modelData.unit || "°") + qsTr("/100ms")
+                                       text: root._unit(card.modelData.unit) + qsTr("/100ms")
                                        font.family: Theme.fontData
                                        font.pixelSize: Theme.fontSzMicro; color: Theme.colorText3 }
                             }

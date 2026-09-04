@@ -218,21 +218,30 @@ Item {
         }
 
 
-        function test_012_a_hand_picked_selection_is_not_titled_as_its_group() {
-            // The combo drops to "Custom" so it stops claiming a group the selection has left.
-            // The title is four times the size, so it must not re-tell that lie — it names the
-            // vocabulary being edited AND says the selection is hand-picked.
+        function test_012_a_hand_picked_selection_is_still_titled_by_its_vocabulary() {
+            // ⚠ THIS TEST ASSERTED THE OPPOSITE UNTIL 2026-09-04, and the reasoning it encoded was
+            // sound: the combo drops to "Custom" so it stops claiming a group the selection has
+            // left, and a title four times the size should not re-tell that lie. It was overruled
+            // on the ground that it solves the wrong problem — the COMBO already says "Custom",
+            // two controls away, so the title was spending the largest text on the panel
+            // repeating a state the reader can already see, and spending it instead of saying the
+            // one thing only a title says: which family these curves belong to.
+            //
+            // A title is a NAME, not a status line. Under a hand-picked selection it names the
+            // group the selection was picked from, which is the vocabulary being edited and what
+            // the legend is listing.
             chart.seriesList = probe.wristAndSpeed
             chart._applyPreset("Wrist & forearm", true)
             chart._toggle("leadWristRadUln")
-            compare(chart.preset, "Custom")
-            compare(chart._presetTitle, "Wrist & forearm · custom")
+            compare(chart.preset, "Custom")               // the combo still tells the truth
+            compare(chart._presetTitle, "Wrist & forearm")
 
-            // Hand-picking from "All" has no group to name, so it says only that it is custom.
+            // Hand-picking from "All" has no group to name, so it stays on "All metrics" rather
+            // than inventing a state word for itself.
             chart._applyPreset("All", true)
             chart._toggle("handSpeed")
             compare(chart.preset, "Custom")
-            compare(chart._presetTitle, "Custom metrics")
+            compare(chart._presetTitle, "All metrics")
         }
     }
 }

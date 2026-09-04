@@ -107,11 +107,17 @@ static PoseTrack2D trackOf(const std::vector<Upper> &poses)
     return t;
 }
 
+// A ladder carrying the four phases this module samples. THE FINISH IS ON IT DELIBERATELY: an
+// unsegmented phase now emits no sample at all, where the producer used to coast to the first frame
+// and hand back a first-frame reading labelled "Finish". §9 below asserts that all four samples are
+// present, and it was passing on the fabricated one — the balance measures read the finish, so a
+// frame-0 value under that label would have been graded as the golfer's finish position.
 static std::vector<PhaseEvent> phasesAt(int64_t addrUs, int64_t topUs, int64_t impactUs)
 {
     return { { Phase::Address, addrUs, 1.f, SegmentRole::Unknown },
              { Phase::Top,     topUs,  1.f, SegmentRole::Unknown },
-             { Phase::Impact,  impactUs, 1.f, SegmentRole::Unknown } };
+             { Phase::Impact,  impactUs, 1.f, SegmentRole::Unknown },
+             { Phase::Finish,  impactUs + 10000, 1.f, SegmentRole::Unknown } };
 }
 
 // Value of a named series at the given phase sample.
@@ -315,6 +321,25 @@ int main()
         for (const MetricSeries &m : series)
             allFour = allFour && m.phaseSamples.size() == 4;
         CHECK("every series samples Address / Top / Impact / Finish", allFour);
+
+        // …and when the ladder has NO finish, the sample is absent rather than taken at frame 0.
+        // The balance measures read this phase, so a fabricated value here would be graded as the
+        // golfer's finish position on any swing the segmenter failed to close out.
+        {
+            const std::vector<PhaseEvent> noFinish{
+                { Phase::Address, 20000,  1.f, SegmentRole::Unknown },
+                { Phase::Top,     90000,  1.f, SegmentRole::Unknown },
+                { Phase::Impact,  110000, 1.f, SegmentRole::Unknown } };
+            std::vector<Upper> poses;
+            for (int i = 0; i < 6; ++i) poses.push_back(a);
+            for (int i = 0; i < 6; ++i) poses.push_back(a);
+            const UpperBodyResult r = trackUpperBody(trackOf(poses), kW, kH, true, 20000);
+            const auto partial = buildUpperBodySeries(r, noFinish);
+            bool threeOnly = !partial.empty();
+            for (const MetricSeries &m : partial)
+                threeOnly = threeOnly && m.phaseSamples.size() == 3;
+            CHECK("an unsegmented finish emits NO sample, not a frame-0 one", threeOnly);
+        }
         CHECK("no stray keys", hasSeries(series, "leadHandWidth")
                                    && !hasSeries(series, "hipAlignment")
                                    && !hasSeries(series, "shoulderAlignment"));

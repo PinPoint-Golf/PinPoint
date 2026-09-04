@@ -29,6 +29,8 @@
 
 #include "chart_metrics.h"
 
+#include "../../Metrics/metric_catalogue.h"
+
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
@@ -161,13 +163,72 @@ int main()
                                    curve("pelvisSway"), curve("pelvisLift"),
                                    curve("hipLineTilt"), curve("thoraxLateralDrift") };
         const QVariantList g = cm.seriesGroups(series);
-        checkEqI("two groups, not one", g.size(), 2);
+        // Two GROUPS, plus the cross-cutting "Plumb Bob" preset, which this set trips because it
+        // carries both pelvisSway and hipLineTilt. groupOf() answers with the first entry a key
+        // appears in, so the group assertions below are unaffected: a preset is additive and never
+        // moves a metric out of the group it is filed under.
+        checkEqI("two groups plus one preset", g.size(), 3);
         checkStr("side bend",  groupOf(g, "spineSideBend"),      "Spine & tilt");
         checkStr("axis tilt",  groupOf(g, "secondaryAxisTilt"),  "Spine & tilt");
         checkStr("sway",       groupOf(g, "pelvisSway"),         "Pelvis & lateral");
         checkStr("lift",       groupOf(g, "pelvisLift"),         "Pelvis & lateral");
         checkStr("hip line",   groupOf(g, "hipLineTilt"),        "Pelvis & lateral");
         checkStr("thx drift",  groupOf(g, "thoraxLateralDrift"), "Pelvis & lateral");
+        checkStr("the preset comes last",
+                 g.at(g.size() - 1).toMap().value(QStringLiteral("group")).toString(), "Plumb Bob");
+    }
+
+    // ── Cross-cutting presets ────────────────────────────────────────────────────
+    {
+        std::printf("seriesGroups — cross-cutting presets\n");
+
+        // A metric has one `group` and the presets above are derived from it, so a coaching read
+        // that spans groups — the plumb bob is the hip centre over the stance READ WITH the tilt of
+        // the hip line — could only exist by taking hipLineTilt out of the group it belongs in.
+        // MetricDescriptor::presets is the additive answer, and this is what it must do.
+        {
+            const QVariantList series{ curve("plumbBobDistance"), curve("hipLineTilt"),
+                                       curve("pelvisSway"), curve("leadWristFlexExt") };
+            const QVariantList g = cm.seriesGroups(series);
+            QStringList presetKeys;
+            bool found = false;
+            for (const QVariant &v : g) {
+                const QVariantMap m = v.toMap();
+                if (m.value(QStringLiteral("group")).toString() == QLatin1String("Plumb Bob")) {
+                    presetKeys = m.value(QStringLiteral("keys")).toStringList();
+                    found = true;
+                }
+            }
+            checkTrue("the preset is offered", found);
+            // Manifest order, the same rule the groups follow, so the chart and the Metric Library
+            // sequence the same metrics the same way.
+            checkStr("its members, in manifest order", presetKeys.join(','),
+                     "pelvisSway,hipLineTilt,plumbBobDistance");
+            // And every member still answers with its own group.
+            checkStr("hip tilt keeps its group", groupOf(g, "hipLineTilt"), "Pelvis & lateral");
+            checkStr("plumb bob keeps its group", groupOf(g, "plumbBobDistance"), "Pelvis & lateral");
+            // The preset sits after the groups and before Other.
+            checkStr("presets follow the groups",
+                     g.at(g.size() - 1).toMap().value(QStringLiteral("group")).toString(),
+                     "Plumb Bob");
+        }
+
+        // ⚠ ONE MEMBER IS NOT A PRESET. A preset exists to put several curves on screen together;
+        // with one member it duplicates a legend chip and pads the combo with an entry that says
+        // nothing its group does not. It is also how the preset disappears honestly on a swing
+        // where the ball was never found — no ruler, no plumb-bob curve, and a "Plumb Bob" preset
+        // holding only a hip angle would be a preset lying about its own name.
+        {
+            const QVariantList series{ curve("hipLineTilt"), curve("leadWristFlexExt") };
+            const QVariantList g = cm.seriesGroups(series);
+            bool found = false;
+            for (const QVariant &v : g)
+                if (v.toMap().value(QStringLiteral("group")).toString() == QLatin1String("Plumb Bob"))
+                    found = true;
+            checkTrue("a single member does not make a preset", !found);
+            checkStr("…and the metric is still reachable in its group",
+                     groupOf(g, "hipLineTilt"), "Pelvis & lateral");
+        }
     }
 
     // ── A key the manifest never declared stays reachable ─────────────────────────
@@ -186,6 +247,59 @@ int main()
         checkStr("Other is last", last.value(QStringLiteral("group")).toString(), "Other");
         checkStr("Other sorted", last.value(QStringLiteral("keys")).toStringList().join(','),
                  "aaaAlsoNotAMetric,zzzNotAMetric");
+    }
+
+    // ── shortUnit: one short token, so a value is longer than its unit ───────────
+    {
+        std::printf("shortUnit — the display token\n");
+        // The four percent-of-a-body-dimension units all collapse. The denominator is what the
+        // metric's own NAME carries on this panel, and the Metric Library still spells it out.
+        checkStr("stance width",   cm.shortUnit(QStringLiteral("% stance width")),   "%");
+        checkStr("shoulder width", cm.shortUnit(QStringLiteral("% shoulder width")), "%");
+        checkStr("foot length",    cm.shortUnit(QStringLiteral("% foot length")),    "%");
+        checkStr("arm length",     cm.shortUnit(QStringLiteral("% arm length")),     "%");
+
+        // Everything else is already a token and passes through untouched. Shortening these would
+        // be inventing an abbreviation nobody asked for, which is the opposite of the point.
+        for (const char *u : { "°", "mph", "yd", "cm", "mm", "in", "ratio", "s", "ft", "°/s", ":1" })
+            checkStr(u, cm.shortUnit(QString::fromUtf8(u)), u);
+
+        // ⚠ THE CANONICAL UNIT IS UNCHANGED, and this is the assertion that says so. It still has
+        // to match the norm's unit — the loader refuses a mismatch — and measureUnitMismatch still
+        // compares it against the producer's. A display token that leaked back into the catalogue
+        // would make six metrics claim the same unit as four others and grade against each other's
+        // corridors.
+        const pinpoint::analysis::MetricCatalogue cat = pinpoint::analysis::makeMetricCatalogue();
+        const pinpoint::analysis::MetricDescriptor *d =
+            cat.descriptor(QStringLiteral("pelvisSway"));
+        checkTrue("the descriptor still carries the full phrase",
+                  d != nullptr && d->unit == QLatin1String("% stance width"));
+    }
+
+    // ── formatValue / formatBare: ONE rule, and the only place it can be asserted ─
+    {
+        std::printf("formatValue / formatBare — the shared rule\n");
+        // Degrees close up and carry a signed-deviation "+"; everything else takes a space and
+        // does not. This used to live three times in QML — twice as a copy of itself and once as
+        // a variant that concatenated with no separator, which is where "12mph" came from.
+        checkStr("degrees, positive", cm.formatValue(12.4,  QStringLiteral("°")),  "+12°");
+        checkStr("degrees, negative", cm.formatValue(-8.2,  QStringLiteral("°")),  "-8°");
+        checkStr("percent",           cm.formatValue(12.4,  QStringLiteral("% stance width")), "12 %");
+        checkStr("mph gets a space",  cm.formatValue(75.2,  QStringLiteral("mph")), "75 mph");
+        checkStr("inches",            cm.formatValue(1.6,   QStringLiteral("in")),  "2 in");
+        // Empty unit reads as degrees — the pre-multi-unit default, kept so an uncatalogued
+        // series does not render a bare number where every neighbour carries a token.
+        checkStr("no unit ⇒ degrees", cm.formatValue(3.0,   QString()),             "+3°");
+
+        // The bare form, for a card or gutter that already names the unit. Same sign rule, so a
+        // reading does not change shape between the summary card and the legend chip.
+        checkStr("bare degrees",      cm.formatBare(12.4,   QStringLiteral("°")),  "+12");
+        checkStr("bare percent",      cm.formatBare(12.4,   QStringLiteral("% stance width")), "12");
+        checkStr("bare negative",     cm.formatBare(-8.2,   QStringLiteral("°")),  "-8");
+        // ⚠ The "+" is degrees-ONLY and deliberately not generalised: degrees here are signed
+        // deviations from a reference posture, where the sign IS the reading. "+75 mph" would be
+        // decoration on a quantity whose sign nobody is asking about.
+        checkStr("no + on a speed",   cm.formatBare(75.2,   QStringLiteral("mph")), "75");
     }
 
     // ── shortLabel reads the manifest, so a new metric is short-named on arrival ──

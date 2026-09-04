@@ -30,6 +30,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
+#include <utility>
 #include <vector>
 
 using namespace pinpoint::analysis;
@@ -85,6 +87,30 @@ static const MetricSeries *findSeries(const std::vector<MetricSeries> &v, const 
     for (const MetricSeries &m : v)
         if (m.key == QLatin1String(key)) return &m;
     return nullptr;
+}
+
+// A phase ladder. Every sample-emitting call in this file passes one, because AN UNSEGMENTED PHASE
+// NOW EMITS NO SAMPLE — the producer used to coast to the first frame, which put a first-frame
+// reading under an unsegmented phase's label. That was invisible while the sample list was
+// Address/Top/Impact (a successful segmentation always has those three) and is a fabricated number
+// the moment P2/P3/P5/P6 are asked for, which hipLineTilt and plumbBobDistance now do.
+static std::vector<PhaseEvent> ladder(std::initializer_list<std::pair<Phase, int64_t>> at)
+{
+    std::vector<PhaseEvent> out;
+    for (const auto &pr : at) {
+        PhaseEvent e;
+        e.phase = pr.first;
+        e.t_us  = pr.second;
+        out.push_back(e);
+    }
+    return out;
+}
+
+static bool hasPhase(const MetricSeries &m, Phase p)
+{
+    for (const PhaseSample &s : m.phaseSamples)
+        if (s.phase == p) return true;
+    return false;
 }
 
 static double valueAt(const MetricSeries &m, int64_t t)
@@ -336,7 +362,11 @@ int main()
         }
         PoseTrack2D track; track.frames = frames;
         const LowerBodyResult res = trackLowerBody(track, W, H, true, 2 * dt, {});
-        const auto series = buildLowerBodySeries(res, {});
+        const auto phases = ladder({ { Phase::Address, 2 * dt },
+                                     { Phase::Top,     6 * dt },
+                                     { Phase::Impact,  9 * dt },
+                                     { Phase::Finish, 11 * dt } });
+        const auto series = buildLowerBodySeries(res, phases);
 
         const MetricSeries *fa = findSeries(series, "feetAlignment");
         CHECK("feetAlignment emitted", fa != nullptr);
@@ -360,13 +390,95 @@ int main()
             CHECK("comOverLeadFoot samples the FINISH, which is where it is read", hasFinish);
         }
 
-        // The four original channels keep the original three-phase list, so their serialized
-        // phaseSamples are byte-identical to what they were before this batch and no corpus gate
-        // has to be re-run to prove the change was additive.
-        for (const char *k : { "leadKneeDrift", "pelvisSway", "pelvisLift", "hipLineTilt" }) {
+        // The three channels that predate the P-ladder work keep the original three-phase list, so
+        // their serialized phaseSamples are byte-identical to what they were before and no corpus
+        // gate has to be re-run to prove the change was additive. hipLineTilt is DELIBERATELY not
+        // in this list any more — it moved to P1–P7, which is the point of that change.
+        for (const char *k : { "leadKneeDrift", "pelvisSway", "pelvisLift" }) {
             const MetricSeries *m = findSeries(series, k);
             CHECK(k, m && m->phaseSamples.size() == 3);
         }
+        {
+            // P2/P3/P5/P6 are absent from this ladder, so hipLineTilt gets exactly the three that
+            // ARE on it. The old behaviour would have put four more samples at the first frame.
+            const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+            CHECK("hipLineTilt samples only the phases the ladder actually has",
+                  tilt && tilt->phaseSamples.size() == 3);
+            CHECK("…and they are P1/P4/P7, not a frame-0 P5 or P6",
+                  tilt && hasPhase(*tilt, Phase::Address) && hasPhase(*tilt, Phase::Top)
+                       && hasPhase(*tilt, Phase::Impact)
+                       && !hasPhase(*tilt, Phase::ArmParallelDown)
+                       && !hasPhase(*tilt, Phase::Delivery));
+        }
+    }
+
+    // ── 6c) plumbBobDistance ───────────────────────────────────────────────
+    //
+    // The signed twin of comOverLeadFoot about the stance CENTRE, in inches off the ball ruler.
+    // Three properties carry it: the sign is lead-positive without a leadSign term (the projection
+    // runs trail ankle -> lead ankle, so a mirrored camera cannot invert it), the scale is the
+    // ruler's and nothing else, and it is ABSENT rather than rescaled when the ruler does not
+    // resolve.
+    {
+        std::printf("=== 6c) plumb bob ===\n");
+
+        // 1 px = 1 mm makes the arithmetic legible: an offset of n px is n/25.4 inches.
+        const double mmPerPx = 1.0;
+
+        // Address, then the hips slid 0.012 of frame width (12 px) toward the LEAD side, which is
+        // −x here. Ankles stay put, so the stance centre does not move.
+        std::vector<PoseFrame2D> frames;
+        for (int k = 0; k < 6; ++k) frames.push_back(makeLower(k * dt, addressPose()));
+        for (int s = 1; s <= 5; ++s) {
+            Lower p = addressPose();
+            const double d = 0.012 * s / 5.0;
+            p.lHip = QPointF(p.lHip.x() - d, p.lHip.y());
+            p.rHip = QPointF(p.rHip.x() - d, p.rHip.y());
+            frames.push_back(makeLower((5 + s) * dt, p));
+        }
+        PoseTrack2D pose; pose.frames = frames;
+        LowerBodyConfig cfg; cfg.addrWindowUs = 30000;
+
+        const auto phases = ladder({ { Phase::Address,           2 * dt },
+                                     { Phase::ShaftParallelBack, 4 * dt },
+                                     { Phase::MidBackswing,      5 * dt },
+                                     { Phase::Top,               6 * dt },
+                                     { Phase::ArmParallelDown,   7 * dt },
+                                     { Phase::Delivery,          8 * dt },
+                                     { Phase::Impact,           10 * dt } });
+
+        const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt, cfg, mmPerPx);
+        const auto series = buildLowerBodySeries(res, phases);
+        const MetricSeries *pb = findSeries(series, "plumbBobDistance");
+        CHECK("plumbBobDistance emitted when the ruler resolves", pb != nullptr);
+        if (pb) {
+            CHECK("its unit is inches", pb->unit == QStringLiteral("in"));
+            // Address: the hip centre (0.50) sits on the stance centre (0.50) — a true plumb line.
+            CHECK("hips over the stance centre read 0", near(valueAt(*pb, 2 * dt), 0.0, 0.02));
+            // Moved 12 px toward the lead side ⇒ +12 mm ⇒ +12/25.4 in, POSITIVE for lead-ward even
+            // though the lead side is image −x. That is the whole point of projecting along the
+            // trail->lead stance line rather than taking a raw Δx.
+            CHECK("hips ahead of centre, toward the LEAD side, read POSITIVE",
+                  near(valueAt(*pb, 10 * dt), 12.0 / 25.4, 0.02));
+            CHECK("the full P1–P7 ladder is sampled", pb->phaseSamples.size() == 7);
+        }
+
+        // The same swing seen with the lead on the other side must produce the same MAGNITUDE with
+        // the opposite sign — the hips are now behind centre for that golfer.
+        const LowerBodyResult mirrored = trackLowerBody(pose, W, H, false, 2 * dt, cfg, mmPerPx);
+        const auto mirroredSeries = buildLowerBodySeries(mirrored, phases);
+        const MetricSeries *pbm = findSeries(mirroredSeries, "plumbBobDistance");
+        CHECK("mirroring the handedness flips the sign and nothing else",
+              pbm && near(valueAt(*pbm, 10 * dt), -12.0 / 25.4, 0.02));
+
+        // ⚠ ABSENT, NEVER RESCALED. A metric whose unit changes per swing cannot carry a norm: the
+        // norm declares one unit and grading compares the numbers without consulting it, so a
+        // fallback scale would be graded against inches in silence.
+        const LowerBodyResult noRuler = trackLowerBody(pose, W, H, true, 2 * dt, cfg);
+        const auto without = buildLowerBodySeries(noRuler, phases);
+        CHECK("no ball ruler ⇒ no plumb bob at all",
+              findSeries(without, "plumbBobDistance") == nullptr);
+        CHECK("…and every other channel is unaffected", without.size() == 6);
     }
 
     // ── 7) fromOverrides ───────────────────────────────────────────────────

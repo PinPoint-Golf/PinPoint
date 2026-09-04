@@ -85,6 +85,7 @@ forward of the lead heel is a real driver setup and reads below `0 %`.
 |---|---|
 | `pelvisSway` | the pelvis has moved toward the lead side. Sway *away* in the backswing is therefore **negative**, and a slide toward the lead side in the downswing is **positive**. |
 | `thoraxLateralDrift` | the chest has moved toward the lead side. The counterpart to pelvis sway, and read with it. |
+| `plumbBobDistance` | the centre of the hips sits **ahead of the centre of the stance**, toward the lead side. Negative is behind centre, which is where a driver setup belongs. Unlike the two above it is an **absolute** position rather than a displacement from address, and its sign comes out of the projection rather than from a resolved `leadSign`: the stance line is taken trail ankle → lead ankle, so the dot product is lead-positive by construction and a mirrored camera cannot invert it. |
 
 Lead-relative rather than left/right, matching the rest of the vocabulary: the same statement holds
 for a right- and a left-handed golfer and needs no `leadIsLeft` at the point of reading. Prefer
@@ -139,7 +140,7 @@ fail review, not the absence of it.
 | **Club & ball** | ISB defines *human joint* motion. A clubhead is not a joint. World frame instead. | every `lm.*`, `clubPath`, `ballSpeed` |
 | **Turn magnitudes** | Unsigned magnitudes of turn from address, not signed axial rotations about a defined axis. A face-on camera or one IMU gives no bony-landmark triad. | `pelvisRotation`, `thoraxRotation`, `xFactor` |
 | **Image-plane body lines** | 2D *apparent* angles between two keypoints as one camera sees them. Not joint rotations at all. | `hipLineTilt`, `shoulderPlaneAngle`, `elbowAlignment`, `feetAlignment` |
-| **Normalised displacements** | Not angles. Fractions of stance or shoulder width, or centimetres. | `pelvisSway`, `headSway`, `ballPosition` |
+| **Normalised displacements** | Not angles. Fractions of stance or shoulder width, or real-world units off a ruler. | `pelvisSway`, `headSway`, `ballPosition`, `plumbBobDistance` |
 | **Segment axial rotations** | A signed twist of **one** segment about its own long axis, referenced to Address — not a rotation *between* two segment triads. ISB's radioulnar rotation is defined against the humerus; a forearm sensor on its own has no humerus to be defined against. | `forearmRotation` |
 | **Composites & timings** | Derived from other metrics, or durations. | `xFactorStretch`, `tempoRatio`, the scores |
 

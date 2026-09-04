@@ -73,6 +73,46 @@ public:
     // same metric, and a metric added to the manifest is short-named everywhere at once.
     Q_INVOKABLE QString shortLabel(const QString &key) const;
 
+    // The DISPLAY form of a unit — what goes beside a number on the chart panel.
+    //
+    // The catalogue's unit is a full phrase where the denominator matters: "% stance width" and
+    // "% shoulder width" are different quantities and the Metric Library, which is a reference
+    // surface with room, is right to spell both out. On the chart it is repeated beside every
+    // value in a data face, and "12 % stance width" next to "34 % stance width" overprinted its
+    // neighbour in the summary grid — the phrase was longer than the number it qualified.
+    //
+    // So this returns the SHORT token: "%" for every percent-of-something, the unit unchanged for
+    // everything else. It is keyed on the UNIT, not the metric, deliberately — six metrics share
+    // "% stance width" and all six want the same token, so authoring it per descriptor would be six
+    // chances to disagree. The canonical unit is untouched: it still has to match the norm's unit
+    // (the loader refuses a mismatch) and measureUnitMismatch still compares it against the
+    // producer's, so this cannot drift into being the real unit.
+    //
+    // What replaces the lost words is CONTEXT, not guesswork — see the rule below.
+    Q_INVOKABLE QString shortUnit(const QString &unit) const;
+
+    // ── The two value formatters, and why they live here ────────────────────────────────────────
+    //
+    // ONE rule, ONE implementation. This was three: PpMetricChart._fmt, PpChartSummary._fmt (whose
+    // comment said "see PpMetricChart._fmt" — a copy that knew it was a copy), and a third in
+    // PpTransitTimeline that concatenated value and unit with no separator and so read "12mph".
+    // Three copies of a five-line rule is three chances to disagree, and they already did.
+    //
+    // It belongs in C++ for the reason this class exists at all: it is derivation, and the "no
+    // JavaScript logic in QML" rule keeps derivation out of the .qml files. It is also the only
+    // way to TEST it — chart_metrics_test can assert "-8°" and "12 %"; a QML function cannot be
+    // asserted anywhere.
+    //
+    // formatValue = the number and its unit, for a surface with no header to lean on (legend
+    // chips, the hover tooltip, the transit bead). Degrees keep the signed-deviation convention
+    // ("+12°", closed up); every other unit takes a space ("75 mph", "12 %").
+    Q_INVOKABLE QString formatValue(double v, const QString &unit) const;
+
+    // formatBare = the number ALONE, for a surface whose container already names the unit — the
+    // summary card's header, the split-mode gutter. Same sign convention as formatValue, so one
+    // reading does not change shape depending on where it is shown.
+    Q_INVOKABLE QString formatBare(double v, const QString &unit) const;
+
     // "Nice" Y-axis tick values across [lo, hi] at a 1/2/5×10ⁿ step chosen so there are
     // about `maxTicks` of them. Returns the tick values (doubles) the chart labels + grids.
     Q_INVOKABLE QVariantList niceTicks(double lo, double hi, int maxTicks) const;
@@ -123,6 +163,12 @@ public:
     // A group is present only when this swing produced at least one of its members, which is
     // what makes the control degrade honestly: no IMU wrist data and there is simply no "Wrist
     // & forearm" preset. That gating is on the DATA, never on the session type.
+    //
+    // After the groups come the CROSS-CUTTING presets — MetricDescriptor::presets, which is how a
+    // coaching read that spans groups ("Plumb Bob" = the hip centre over the stance plus the tilt
+    // of the hip line plus pelvis sway) gets one entry without any of its members leaving the group
+    // it is properly filed under. A preset is offered only when at least TWO of its members are
+    // plottable on this swing: one curve is a legend chip, not a preset.
     //
     // Curve keys the catalogue has never heard of are collected into a trailing "Other" group
     // rather than dropped: a metric added to the pipeline before the manifest should be awkward

@@ -8,6 +8,7 @@
 //   ctest --test-dir build/analyzer-tests -R core_pack --output-on-failure
 
 #include "../characteristic_pack.h"
+#include "../context_tree.h"
 #include "../norm_pack.h"
 #include "../pack_provider.h"
 #include "../reference_pack.h"
@@ -671,6 +672,51 @@ int main()
             check(!isFault("m_pelvisThrustDown", 11.9),
                   "early extension is not a fault at 11.9 cm of downswing thrust");
             check(isFault("m_pelvisThrustDown", 12.1), "…and is beyond 12 cm");
+        }
+
+        // ── The plumb bob's per-club corridors ─────────────────────────────────
+        //
+        // The one shipped measure whose corridor CHANGES SIGN between clubs, which is what makes it
+        // worth pinning here rather than trusting four rows in a JSON file. An inch and a half ahead
+        // of the stance centre is an Ideal wedge setup and a bad driver one; an inch behind is the
+        // reverse. A reader who saw only the `any` row would conclude the metric barely moves.
+        //
+        // Graded through grade() and the measure's own shape rather than by reading mu back, so the
+        // day the policy table moves this fails instead of quietly agreeing with stale arithmetic.
+        // find() is an EXACT-context lookup and does not walk the tree — which is the right tool
+        // here, because the claim is that each row exists under the node the club actually resolves
+        // to. The inheritance half (a 7 iron reaching the `iron` family) is context_tree_test's.
+        {
+            const GradePolicy pol = gradePolicyByName(QStringLiteral("standard"));
+            const Measure *pb = p.measure(QStringLiteral("m_plumbBobAddress"));
+            check(pb != nullptr, "the plumb bob has a measure at address");
+            auto gradeIn = [&](const char *ctx, double inches) {
+                const Norm *n = nres.pack.find(QStringLiteral("m_plumbBobAddress"),
+                                               QString::fromLatin1(ctx));
+                return (pb && n) ? grade(inches, *n, pb->shape, pol) : Grade::NotMeasured;
+            };
+
+            check(gradeIn("wedge", 1.5) == Grade::Ideal,
+                  "an inch and a half ahead of centre is an Ideal WEDGE setup");
+            check(gradeIn("driver", 1.5) == Grade::Action,
+                  "…and the same number with a DRIVER is a fault — the corridor changes sign");
+            check(gradeIn("driver", -1.0) == Grade::Ideal,
+                  "an inch BEHIND centre is where the driver wants the hips");
+            check(gradeIn("wedge", -1.0) == Grade::Action, "…and is a fault with a wedge");
+            check(gradeIn("iron", 0.5) == Grade::Ideal, "half an inch ahead suits a mid-iron");
+
+            // The rows have to live under the nodes the clubs actually resolve to, or they are
+            // authored where nothing reaches them and every swing grades against `any`.
+            check(contextIdForClub(QStringLiteral("PITCHING WEDGE")).startsWith(QLatin1String("wedge"))
+                      && contextIdForClub(QStringLiteral("DRIVER")) == QLatin1String("driver")
+                      && contextIdForClub(QStringLiteral("7 IRON")).startsWith(QLatin1String("iron")),
+                  "…and each club resolves into the family its row is authored under");
+
+            // The unknown-club row is deliberately wide: it has to cover a corridor that spans two
+            // and a half inches between the clubs above, and a narrow `any` row would call a
+            // legitimate driver setup a fault on every swing whose club was never recorded.
+            check(gradeIn("any", 1.5) != Grade::Action && gradeIn("any", -1.0) != Grade::Action,
+                  "with the club unknown, neither a wedge nor a driver setup is called a fault");
         }
 
         // ── Nothing the app can DETECT is left without an EXPLANATION ───────────
