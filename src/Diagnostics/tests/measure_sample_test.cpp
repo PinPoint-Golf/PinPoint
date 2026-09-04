@@ -97,11 +97,18 @@ double dipCurve(qint64 t)
 
 double rampCurve(qint64 t) { return double(t) / 100'000.0; }   // 1 at 100 ms, 11 at 1100 ms
 
-// ── The dip fixture's P4→P7 span extremes under the WINDOWED-MEAN rule (schema 3) ────────────────
+// ── The dip fixture's P4→P7 span extremes under the WINDOWED-MEAN rule ───────────────────────────
 //
 // Derived, not observed, because a number copied out of a failing run pins nothing. The window is
 // tuned::reduce::kExtremumWindowUs = 40 ms centred, so ±20 ms, and the curve is sampled every 1 ms:
 // 41 samples per window.
+//
+// These three survive both of reduceExtremum's semantics — the unclamped window, and the clamped
+// ≥3-sample window — BY CONSTRUCTION, and that is why the fixture is shaped this way: every extreme
+// here sits 200 ms inside its span, so no window is ever truncated by the search bounds, and 41
+// samples is far past any minimum. Only the RAMP's span extremes move under clamping (its extremes
+// are its endpoints, e.g. P1→P4 min 1.00 → 1.10), and nothing below asserts those as constants —
+// the agreement block compares engine to reducer, which holds either way.
 //
 // The trough is a symmetric tent apexing at −20 at 600 ms with slope 0.3 per ms, so the mean is
 // lowest with the window centred exactly on the apex: the 20 samples either side run −14.0 … −19.7
@@ -436,55 +443,147 @@ int main()
              23.0, "…and that is the number a Measure reduces to, not 99");
     }
 
-    // ── CARD-VS-ENGINE AGREEMENT, BY CONSTRUCTION ───────────────────────────
+    // ── CARD-VS-ENGINE AGREEMENT, UNCONDITIONALLY ───────────────────────────
     //
     // Design §7 item 5: for every authored extremum measure the chart summary over the same window
-    // must report the same number. The chart calls reduceExtremum on the series; the engine calls it
-    // on the same series and caches the answer in a span. So call it BOTH ways here on one fixture
-    // and require equality — the useful failure is not a wrong value, it is the two paths drifting
-    // apart later while each stays plausible on its own.
+    // must report the same number. The chart calls reduceExtremum once over the window; the engine
+    // aggregates the cached spans. Those must be the SAME number for every metric, every window and
+    // both senses — no exemptions, which is the point. An earlier version of this block excused
+    // itself with "equality holds where the span extreme dominates the endpoint medians", and that
+    // exemption WAS the defect: the engine seeded its aggregate with ±15 ms medians, so on a real
+    // swing it disagreed with the card on 36 of 170 cases and by up to 9.4°.
     //
-    // The engine additionally admits the two endpoint MEDIANS into its search (a peak sitting
-    // exactly on a phase is still the peak), so equality is exact precisely when the span extreme
-    // dominates them. That is the case for any genuine excursion, and it is the case here: the dip
-    // reaches -16.93 and the crest +27.95 either side of endpoints that both read 10.
-    std::printf("\nagreement with the shared reducer\n");
+    // Three properties make the equality exact, and each is a decision in measure_sample.cpp:
+    // the spans are CLOSED (so the union of their candidates is the window's candidate set), the
+    // aggregate has NO endpoint seed (so only windowed means meet in the min/max), and min/max are
+    // idempotent (so the shared boundary sample being in two spans changes nothing).
+    std::printf("\nagreement with the shared reducer, every case\n");
     {
         const QJsonObject an = fixtureAnalysis();
+
+        struct PhaseAtUs { Phase p; int64_t tUs; const char *name; };
+        const PhaseAtUs kPhases[] = { { Phase::Address,  100'000, "P1" },
+                                     { Phase::Top,      400'000, "P4" },
+                                     { Phase::Impact, 1'100'000, "P7" } };
+        const char *kMetrics[] = { "pelvisSway", "thoraxRotation" };
+
+        ReduceConfig rc;                   // the engine's defaults, unmodified
+        int cases = 0;
+
+        for (const char *keyC : kMetrics) {
+            const QString        key = QString::fromLatin1(keyC);
+            std::vector<int64_t> ts;
+            std::vector<double>  vs;
+            const SeriesView     view = viewOfMetric(metricNamed(an, key), ts, vs);
+
+            for (const PhaseAtUs &from : kPhases) {
+                for (const PhaseAtUs &to : kPhases) {
+                    if (to.tUs <= from.tUs)
+                        continue;
+                    for (const ExtremumSense sense : { ExtremumSense::Min, ExtremumSense::Max }) {
+                        const bool wantMax = (sense == ExtremumSense::Max);
+
+                        // The card's call: ONE reduction over the whole closed window.
+                        const Reduced card = reduceExtremum(view, from.tUs, to.tUs, wantMax, rc);
+                        // The engine's: the cached spans, aggregated.
+                        const std::optional<double> eng =
+                            reduceOverGrid(grid, key, extremum(from.p, to.p, sense));
+
+                        char label[160];
+                        std::snprintf(label, sizeof label, "%s %s->%s %s: engine == reduceExtremum",
+                                      keyC, from.name, to.name, wantMax ? "max" : "min");
+                        check(eng.has_value() && card.ok, label);
+                        if (eng && card.ok)
+                            near(*eng, card.value, label);
+                        ++cases;
+
+                        // The ANCHORED (signed-deviation) form too, since that is what the shipped
+                        // pack authors: extremum - the anchor's own reduceAt median.
+                        const Reduced anchor = reduceAt(view, from.tUs, rc);
+                        const std::optional<double> engA =
+                            reduceOverGrid(grid, key, extremum(from.p, to.p, sense, from.p));
+                        if (anchor.ok && card.ok) {
+                            std::snprintf(label, sizeof label,
+                                          "%s %s->%s %s anchored: == extremum - reduceAt(anchor)",
+                                          keyC, from.name, to.name, wantMax ? "max" : "min");
+                            check(engA.has_value(), label);
+                            if (engA)
+                                near(*engA, card.value - anchor.value, label);
+                        }
+
+                        // And the phase values themselves are the shared reducer's, not a second
+                        // median convention living in the engine.
+                        const std::optional<double> engAt = reduceOverGrid(grid, key, at(to.p));
+                        const Reduced               cardAt = reduceAt(view, to.tUs, rc);
+                        if (cardAt.ok) {
+                            std::snprintf(label, sizeof label, "%s at %s: engine == reduceAt",
+                                          keyC, to.name);
+                            check(engAt.has_value(), label);
+                            if (engAt)
+                                near(*engAt, cardAt.value, label);
+                        }
+                    }
+                }
+            }
+        }
+        check(cases == 12, "all 2 metrics x 3 windows x 2 senses were actually exercised");
+    }
+
+    // ── TWO PHASES AT ONE INSTANT ───────────────────────────────────────────
+    //
+    // Not hypothetical: the rich_7iron corpus fixture segments Address and Takeaway at the same
+    // t_us. Two things have to hold, and both failed before schema 4.
+    //
+    // The span between them is ZERO-WIDTH and must not be stored. [t, t] is not a search window —
+    // it holds one candidate scored over a near-raw reading — so caching it drops a different
+    // smoothing scale into an aggregate that is otherwise all 40 ms windowed means. On rich_7iron
+    // that one span was the whole of the worst disagreement with the card, 9.4° on
+    // shaftAngleVsHorizontal P1->P4.
+    //
+    // And the two values must come out in DOCUMENT order, which is what stable_sort buys: an
+    // unstable sort over equal keys orders them however the implementation feels like, so the same
+    // swing.json could grid to two different sidecars on two machines.
+    std::printf("\ntwo phases at one instant\n");
+    {
+        QJsonArray phases;
+        phases.append(phaseEvent(Phase::Address,   100'000));
+        phases.append(phaseEvent(Phase::Takeaway,  100'000));   // the same instant, as rich_7iron
+        phases.append(phaseEvent(Phase::Top,       400'000));
+        phases.append(phaseEvent(Phase::Impact,  1'100'000));
+
+        QJsonObject an = fixtureAnalysis();
+        an.insert(QStringLiteral("phases"), phases);
+        const SwingPhaseGrid   g = buildPhaseGrid(an);
+        const MetricPhaseGrid *m = g.metric(QStringLiteral("pelvisSway"));
+
+        check(m != nullptr && m->values.size() == 4, "both coincident phases get a value");
+        check(m != nullptr && m->spans.size() == 2,
+              "the zero-width span between them is NOT stored: 4 values, 2 spans");
+        if (m) {
+            check(m->values[0].phase == Phase::Address && m->values[1].phase == Phase::Takeaway,
+                  "coincident phases keep DOCUMENT order — stable_sort, not sort");
+            bool degenerate = false;
+            for (const PhaseGridSpan &sp : m->spans)
+                if (sp.from == sp.to) degenerate = true;
+            check(!degenerate, "no stored span begins and ends at the same phase");
+        }
+
+        // And the card still agrees across the window that contains the coincident pair.
         std::vector<int64_t> ts;
         std::vector<double>  vs;
         const SeriesView     view = viewOfMetric(metricNamed(an, QStringLiteral("pelvisSway")),
                                                  ts, vs);
-        ReduceConfig rc;                       // the engine's defaults, unmodified
-        const int64_t p4 = 400'000, p7 = 1'100'000;
-
-        // (from, to] — the same half-open span the grid stores, spelled the same way.
-        const Reduced mn = reduceExtremum(view, p4 + 1, p7, /*wantMax=*/false, rc);
-        const Reduced mx = reduceExtremum(view, p4 + 1, p7, /*wantMax=*/true,  rc);
-        check(mn.ok && mx.ok, "the shared reducer answers over the span directly");
-
-        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
-                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Min)).value_or(-999),
-             mn.value, "engine Min == reduceExtremum(min) on the same samples");
-        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
-                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Max)).value_or(-999),
-             mx.value, "engine Max == reduceExtremum(max) on the same samples");
-
-        // The ANCHORED (signed-deviation) form too, since that is what the shipped pack authors.
-        const Reduced anchor = reduceAt(view, 100'000, rc);
-        check(anchor.ok, "…and the anchor's own median comes from reduceAt");
-        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
-                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Min, Phase::Address))
+        ReduceConfig rc;
+        near(reduceOverGrid(g, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Address, Phase::Impact, ExtremumSense::Min))
                  .value_or(-999),
-             mn.value - anchor.value, "anchored Min == reduceExtremum(min) - reduceAt(anchor)");
-        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"),
-                            extremum(Phase::Top, Phase::Impact, ExtremumSense::Max, Phase::Address))
+             reduceExtremum(view, 100'000, 1'100'000, /*wantMax=*/false, rc).value,
+             "…and P1->P7 still equals the card across the coincident pair");
+        near(reduceOverGrid(g, QStringLiteral("pelvisSway"),
+                            extremum(Phase::Address, Phase::Impact, ExtremumSense::Max))
                  .value_or(-999),
-             mx.value - anchor.value, "anchored Max == reduceExtremum(max) - reduceAt(anchor)");
-
-        // And the phase values are the shared reducer's too, not a second median convention.
-        near(reduceOverGrid(grid, QStringLiteral("pelvisSway"), at(Phase::Top)).value_or(-999),
-             reduceAt(view, p4, rc).value, "engine At == reduceAt at the same instant");
+             reduceExtremum(view, 100'000, 1'100'000, /*wantMax=*/true, rc).value,
+             "…in the max sense too");
     }
 
     // ── phaseSamples: the only data a whole class of metric has ─────────────
@@ -529,6 +628,24 @@ int main()
              12.0, "a phaseSample at a phase the LADDER lacks is still answerable");
         check(!reduceOverGrid(g, QStringLiteral("stanceWidth"), at(Phase::Top)).has_value(),
               "…but a phase with neither curve nor phaseSample stays unavailable");
+
+        // THE WHOLE-AGGREGATION FALLBACK, on the class of metric that needs it. stanceWidth has no
+        // curve at all, so no span can answer and none is stored — yet an Extremum over its two
+        // labelled phases must still report the better of them rather than darkening the measure.
+        // This used to happen per span, which meant medians leaked into aggregates that had real
+        // windowed-mean answers elsewhere; hoisted into reduceOverGrid it fires only here, where
+        // there is genuinely nothing else.
+        check(g.metric(QStringLiteral("stanceWidth")) != nullptr
+                  && g.metric(QStringLiteral("stanceWidth"))->spans.empty(),
+              "a curveless metric stores NO span — there is no interval to search");
+        near(reduceOverGrid(g, QStringLiteral("stanceWidth"),
+                            extremum(Phase::Address, Phase::Delivery, ExtremumSense::Min))
+                 .value_or(-999),
+             12.0, "…and its Extremum still answers, from the endpoint values, as a last resort");
+        near(reduceOverGrid(g, QStringLiteral("stanceWidth"),
+                            extremum(Phase::Address, Phase::Delivery, ExtremumSense::Max))
+                 .value_or(-999),
+             41.5, "…in the max sense too");
 
         // The curve WINS where it has samples: one convention, not two. thoraxRotation carries a
         // real curve, so a contradictory phaseSample must not displace the median.
@@ -734,19 +851,60 @@ int main()
         const SwingPhaseGrid s3 = loadPhaseGrid(future, size, mtime, &stale);
         check(!stale && s3.isEmpty(), "a NEWER schema is rebuilt, never partially read");
 
-        // THE SCHEMA BUMP IS THE ONLY THING THAT RETIRES A v2 SIDECAR, and that is why it is
+        // THE SCHEMA BUMP IS THE ONLY THING THAT RETIRES AN OLDER SIDECAR, and that is why it is
         // asserted rather than left to a code review. Schema 3 changed every span (the windowed-mean
-        // extreme), but it rewrote no swing.json — so a v2 sidecar's size+mtime guard still MATCHES,
-        // and without the bump every cached grid in the library would keep serving raw-sample peaks
-        // to the corridor editor with nothing anywhere saying so.
-        check(kPhaseGridSchemaVersion == 3,
-              "the sidecar schema is 3: spans are windowed-mean extremes (design 5.2)");
-        QJsonObject v2 = doc;
-        v2.insert(QStringLiteral("schema"), 2);
-        stale = true;
-        const SwingPhaseGrid s4 = loadPhaseGrid(v2, size, mtime, &stale);
-        check(!stale && s4.isEmpty(),
-              "…and a v2 sidecar is discarded even though its size+mtime guard still matches");
+        // extreme) and schema 4 changed them again (closed spans, no zero-width span, no
+        // endpoint-median seed) — but neither rewrote a swing.json, so an old sidecar's size+mtime
+        // guard still MATCHES. Without the bump every cached grid in the library would keep serving
+        // superseded peaks to the corridor editor with nothing anywhere saying so.
+        check(kPhaseGridSchemaVersion == 4,
+              "the sidecar schema is 4: closed spans, no zero-width span, no endpoint seed");
+        for (const int old : { 2, 3 }) {
+            QJsonObject prev = doc;
+            prev.insert(QStringLiteral("schema"), old);
+            stale = true;
+            const SwingPhaseGrid sPrev = loadPhaseGrid(prev, size, mtime, &stale);
+            check(!stale && sPrev.isEmpty(),
+                  old == 2 ? "…and a v2 sidecar is discarded despite a matching size+mtime guard"
+                           : "…and so is a v3 one, whose spans were the OTHER boundary convention");
+        }
+
+        // THE REDUCTION GUARD. size and mtime cannot see the reduction parameters, so sweeping one
+        // leaves every sidecar in the library matching its swing.json byte-for-byte while holding
+        // numbers computed the old way. That is the one failure a cache must not have: a wrong answer
+        // wearing a valid guard. All three parameters that move a number are checked.
+        {
+            PhaseGridConfig wider;
+            wider.extremumWindowUs = 80'000;
+            stale = true;
+            const SwingPhaseGrid sw = loadPhaseGrid(doc, size, mtime, &stale, wider);
+            check(!stale && sw.isEmpty(),
+                  "a sidecar built at a 40 ms extremum window is NOT served to an 80 ms run");
+
+            PhaseGridConfig tighter;
+            tighter.windowHalfUs = 8'000;
+            stale = true;
+            const SwingPhaseGrid st = loadPhaseGrid(doc, size, mtime, &stale, tighter);
+            check(!stale && st.isEmpty(),
+                  "…nor is a +-15 ms median grid served to a +-8 ms run");
+
+            // minValidSamples is in the guard for a reason of its own: raising it makes phases
+            // DISAPPEAR from the grid, so a cache built at 1 would re-admit every phase a run
+            // configured for 3 had deliberately refused — the values AND the spans differ.
+            PhaseGridConfig stricter;
+            stricter.minValidSamples = 3;
+            stale = true;
+            const SwingPhaseGrid sv = loadPhaseGrid(doc, size, mtime, &stale, stricter);
+            check(!stale && sv.isEmpty(),
+                  "…nor is a 1-sample grid served to a run that demands 3 valid samples");
+
+            // And the matching case still loads, so the guard is not simply refusing everything.
+            stale = false;
+            const SwingPhaseGrid ss = loadPhaseGrid(doc, size, mtime, &stale, PhaseGridConfig{});
+            check(stale && !ss.isEmpty(), "…while the configuration it was built at still loads");
+            check(sameGridReduction(ss.config, PhaseGridConfig{}),
+                  "…and the loaded grid reports the reduction it is valid for");
+        }
     }
 
     // ── The instrument ladder: Measure::preferKeys ──────────────────────────────

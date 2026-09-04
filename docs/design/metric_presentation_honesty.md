@@ -161,6 +161,15 @@ part of it. Initial authoring, the frontal-plane pelvis family:
 | `shoulderPlaneAngle`, `elbowAlignment`, `spineSideBend`, `secondaryAxisTilt`, `thoraxLateralDrift` | Address → Impact | same argument, one segment up |
 | `comOverLeadFoot` | whole swing | it is READ at the finish and is defined as a distance along the stance line, which survives the turn |
 
+The domain is also **written into the series as validity** (added 2026-09-04, Phase 2): the ten
+Address→Impact producers mark every sample after the Impact frame invalid, with the same
+nearest-frame snap the phase samples use, so both consumers exclude post-impact samples by the
+mask they already honour and no reducer needs to know where a domain ends. The head is left
+open on purpose: the samples before Address are honest readings of a still golfer's address
+posture, the chart never clips the start of a domain whose first phase is Address (that is the
+default), and the still-address window the definition of done measures lives there. The chart's
+clamp and the descriptor field remain for swings analysed before this.
+
 The domain does three things: the reducers search only inside it (the chart summary clamps
 its window to it; the pack validator in `measure_facets.cpp` refuses a window outside it);
 the chart draws the curve outside it dimmed and dashed, with no phase dots and no summary
@@ -204,6 +213,21 @@ A new Qt-only header `src/Analysis/series_reduce.h` holding the three reductions
 
 Both windows are tuned constants (`tuned::reduce`) with dark-flag overrides, so they can be
 swept on the corpus without a rebuild.
+
+**Two rules added on 2026-09-04, from the Phase 2 build.** (1) The extremum's *support* (the
+samples a window mean draws on) is query-independent: it takes any valid sample within the
+window, not only those inside `[from, to]`. The diagnostics engine caches one extreme per
+phase span and aggregates spans per measure, and that cache can only agree with the chart's
+whole-window reduction if a candidate's mean does not depend on where the caller cut its
+window; clamped to the query bounds the two disagreed on 20 of 514 cases on the real fixture,
+unclamped on none. (2) Consequently the phase domain is enforced as a *mask, not a clamp*: the
+ten Address→Impact producers mark every sample outside their domain invalid, so both consumers
+exclude out-of-domain samples by the rule they already honour, and a P1–P7 peak cannot borrow
+post-impact samples. (3) In sparse regions the 40 ms window widens symmetrically until it holds
+three valid samples, because at 27 ms spacing a fixed 40 ms window holds one sample and reduces
+nothing (the probe showed `peakSigma` at exactly zero across every still-address row). (4) The
+σ on a peak is the standard error of the window mean about a local straight line, so a clean
+fast-moving curve reports zero rather than its own slope as error.
 
 The diagnostics engine's `PhaseGridSpan.min/max` becomes the windowed-mean extremes, which
 changes the value of every authored Extremum measure by roughly the noise amplitude. That is

@@ -51,22 +51,36 @@
 // magnitude larger (pinned by series_reduce_test §3) — but a single LARGE outlier still moves it.
 // For a window of n samples spanning T seconds an outlier of magnitude A displaces the slope by
 // roughly 6A/(nT) per second, so at 8 ms spacing over 50 ms (n ≈ 8, T ≈ 0.056 s) a 99-unit spike on
-// an 8-unit ramp still reads ≈ 72 per 100 ms against the ramp's 1.0 — 16× better than the
+// an 8-unit ramp still reads ≈ 100 per 100 ms against the ramp's 1.0 — 12× better than the
 // adjacent-frame 1188, and nowhere near the truth. What saves the presentation there is `sigma`:
-// the fit's own standard error comes back the same order as the slope (≈ 56), which is exactly the
+// the fit's own standard error comes back the same order as the slope (≈ 57), which is exactly the
 // signal design §5.3 renders as "± σ" beside PK RATE. If a spike-PROOF rate is ever needed the
 // answer is a robust regression (Theil–Sen over the window's pairwise slopes) or a residual gate,
 // not a wider window; that is a design decision and is NOT taken here.
 //
 // Valid-aware throughout: a sample marked 0 in MetricSeries::valid was BRIDGED across a gated or
 // absent run (metric_channel.h channelValidityMask) and is a line the producer drew, not a
-// measurement. It may not pull a median, be an extremum, or sit in a fit. Same rule in all four.
+// measurement. It may not pull a median, be an extremum, or sit in a fit. Same rule in all four,
+// and a NON-FINITE sample is treated identically — see SeriesView::isValid.
 //
-// Qt-only and Gui-free: the reductions themselves touch no Qt type at all — they run on borrowed
-// C arrays, so a tool or a test can point one at anything — and only viewOf() needs MetricSeries
-// (whose key/label are QString). Header-only, so no consumer needs a link-time addition.
+// std-only: no Qt, no OpenCV, nothing but <algorithm>/<cmath>/<vector> and the frozen constants, so
+// a tool, a probe or a test can point one of these at any pair of arrays. MetricSeries is one line
+// away in series_reduce_metric.h, which is the only file here that knows the analysis types exist.
+// Header-only, so no consumer needs a link-time addition.
+//
+// COMPLEXITY, stated because a reducer that runs per metric per span is easy to make quadratic by
+// accident. At and Rate are O(n·w) in the samples n and the window occupancy w — each anchor walks
+// only its own window, and the windows are bounded in TIME (±15 ms, 50 ms), so w is ≈5 in the dense
+// pose zone and ≈3 in the sparse one. Extremum is O(n·m) in the series length and the CANDIDATE
+// count m, because each anchor's support is a neighbourhood of the whole series (the support is
+// deliberately not clamped to the query — see reduceExtremum) and the symmetric widening has to
+// know how far away the next valid sample outside the window is. m is a span's own sample count for
+// the engine (a handful) and the whole series for the chart's one full-window call, where 207²
+// comparisons is nothing. Two degenerate shapes are handled rather than tolerated: the anchor loops
+// start at the first sample at or after `fromUs` instead of at 0, so a late span does not rescan the
+// prefix once per anchor; and every loop that is bounded by `toUs` tests it BEFORE validity and
+// breaks, so a long all-bridged tail is not rescanned either (it was, when validity came first).
 
-#include "swing_analysis.h"                // MetricSeries
 #include "../Core/pp_tuned_constants.h"    // tuned::sampler:: / tuned::reduce::
 
 #include <algorithm>
@@ -81,14 +95,16 @@ namespace pinpoint::analysis {
 // override plumbing in this phase (docs/validation/tunable_parameters_reference.md §2.17 records
 // the keys the sweep will use when there is).
 struct ReduceConfig {
-    int64_t atHalfWindowUs   = tuned::sampler::kWindowHalfUs;      // ±15 ms, the existing convention
+    int64_t atHalfWindowUs     = tuned::sampler::kWindowHalfUs;      // ±15 ms, the existing convention
     // How many valid samples an At window needs. 1 — a single measurement at the instant IS the
     // measurement. It is configurable only because PhaseGridConfig::minValidSamples already exists
     // and the engine has to be able to delegate WITHOUT changing its answer.
-    int     minAtSamples     = tuned::sampler::kMinValidSamples;
-    int64_t extremumWindowUs = tuned::reduce::kExtremumWindowUs;   // 40 ms, CENTRED (±20 ms)
-    int64_t rateWindowUs     = tuned::reduce::kRateWindowUs;       // 50 ms minimum time base
-    int     minRateSamples   = tuned::reduce::kMinRateSamples;     // 3
+    int     minAtSamples       = tuned::sampler::kMinValidSamples;
+    int64_t extremumWindowUs   = tuned::reduce::kExtremumWindowUs;   // 40 ms, CENTRED (±20 ms)
+    // The floor that keeps the centred window from being a single sample where the grid is sparse.
+    int     minExtremumSamples = tuned::reduce::kMinExtremumSamples; // 3
+    int64_t rateWindowUs       = tuned::reduce::kRateWindowUs;       // 50 ms minimum time base
+    int     minRateSamples     = tuned::reduce::kMinRateSamples;     // 3
 };
 
 // A borrowed view of one series: no ownership, no copy, no Qt.
@@ -96,33 +112,34 @@ struct ReduceConfig {
 // `valid` may be null, and null means EVERY SAMPLE IS VALID — the same statement MetricSeries's
 // empty mask makes. THE CALLER APPLIES THE SHORT-MASK RULE: a mask shorter than the curve is a
 // malformed document rather than a partial statement, and is treated as no mask at all (guessing
-// which end it was truncated from would invent validity we were never told about). viewOf() below
-// applies it; a caller assembling a view from QVariantLists must do the same, which is why
-// chart_metrics.cpp and measure_sample.cpp each have exactly one place that decides it.
+// which end it was truncated from would invent validity we were never told about). viewOf() in
+// series_reduce_metric.h applies it; a caller assembling a view from QVariantLists must do the
+// same, which is why chart_metrics.cpp and measure_sample.cpp each have exactly one place that
+// decides it.
+//
+// ⚠ TIMESTAMPS MUST BE ASCENDING. Every reducer walks the window with that assumption and stops
+// early on it. Coincident (equal) timestamps are TOLERATED but DOUBLE-WEIGHTED: two samples at one
+// instant both enter a median, a mean and a fit, which is the right reading of two measurements
+// that happen to share a clock tick and the wrong reading of an accidentally duplicated row. No
+// producer emits one — the grid is a set of instants — so this is stated rather than defended
+// against.
 struct SeriesView {
     const int64_t *t     = nullptr;   // ASCENDING, absolute µs
     const double  *v     = nullptr;
     const uint8_t *valid = nullptr;   // null ⇒ all valid
     size_t         n     = 0;
 
-    bool isValid(size_t i) const { return !valid || valid[i] != 0; }
+    // A NON-FINITE VALUE IS NOT A MEASUREMENT EITHER. NaN and ±inf are folded in here rather than
+    // guarded at four call sites: a NaN that reaches std::nth_element is undefined behaviour, and
+    // one that reaches a mean or a least-squares fit poisons the whole window silently and comes
+    // back as a confident `ok = true` with a NaN in it. Nothing in the pipeline should produce one
+    // (interpChannel never returns NaN by contract), which is exactly why it must not be trusted
+    // as an invariant here.
+    bool isValid(size_t i) const
+    {
+        return (!valid || valid[i] != 0) && std::isfinite(v[i]);
+    }
 };
-
-// The one view constructor that knows about MetricSeries — and the one place the short-mask rule is
-// applied for it. `n` is the shorter of t_us / value, defensively: a curve whose two arrays
-// disagree has only as many samples as both of them carry.
-inline SeriesView viewOf(const MetricSeries &m)
-{
-    SeriesView s;
-    s.n = std::min(m.t_us.size(), m.value.size());
-    if (s.n == 0)
-        return s;
-    s.t = m.t_us.data();
-    s.v = m.value.data();
-    if (m.valid.size() >= s.n)
-        s.valid = m.valid.data();      // empty (the common case) or short ⇒ stays null: all valid
-    return s;
-}
 
 // One reduction's answer. `ok` false means THE CURVE HAS NOTHING TO SAY HERE — not zero. Every
 // caller must branch on it rather than printing `value`, which is the whole of design §4
@@ -153,6 +170,65 @@ inline double medianOfWindow(std::vector<double> w)
 
 inline int64_t absUs(int64_t d) { return d < 0 ? -d : d; }
 
+// Does `cand` beat `best` by enough to be a different answer?
+//
+// ⚠ TIES GO TO THE EARLIEST WINDOW, AND THAT NEEDS A MARGIN RATHER THAN `>`. On a clean ramp every
+// sliding window has the same slope to the last bit, and a bare `>` handed the reported instant to
+// whichever anchor accumulated its sums 1e-16 higher — anchor 48 of 93 on the test's ramp, which
+// then moves with the optimiser, the platform and the sample count. `atUs` is shown to the user
+// (the PEAK dot, tRateUs) and is compared between runs, so it may not be decided by float noise.
+// The margin is relative, floored at 1, so it is meaningful for both a 0.001-unit curve and a
+// 100-unit one.
+inline bool improves(double cand, double best, bool wantMax)
+{
+    const double margin = 1.0e-12 * std::max(1.0, std::fabs(best));
+    return wantMax ? (cand > best + margin) : (cand < best - margin);
+}
+
+// The noise the WINDOW MEAN carries — NOT the spread of the window's samples.
+//
+// ⚠ THIS IS THE DISTINCTION THE FIRST VERSION GOT WRONG, and it reported a NOISELESS ramp as
+// ±0.08: the sample standard deviation of a window sitting on a rising curve measures the CURVE'S
+// OWN MOTION across 40 ms, which is signal, not error. Beside a peak, "± 0.08" then reads as
+// measurement uncertainty when it is the slope. So the scatter is taken about a LOCAL STRAIGHT
+// LINE through the window (any real excursion is locally linear over 40 ms), and what is returned
+// is the standard error of the MEAN of k samples: sqrt(SSE/(k−2)) / sqrt(k). A clean ramp gives 0,
+// a noisy still gives σ/√k, and a spike in the window gives something large — which is the honest
+// answer for a mean that a spike is inside.
+//
+// Fewer than three samples ⇒ 0: a two-point window is fitted exactly by the line and has no
+// residual to speak from, and pretending otherwise would print certainty.
+inline double windowMeanSigma(const std::vector<double> &xs, const std::vector<double> &ys,
+                              double ybar)
+{
+    const std::size_t k = xs.size();
+    if (k < 3)
+        return 0.0;
+
+    double sx = 0.0;
+    for (double x : xs) sx += x;
+    const double xbar = sx / static_cast<double>(k);
+
+    double sxx = 0.0, sxy = 0.0;
+    for (std::size_t m = 0; m < k; ++m) {
+        const double dx = xs[m] - xbar;
+        sxx += dx * dx;
+        sxy += dx * (ys[m] - ybar);
+    }
+    // sxx == 0 only when every sample in the window shares one timestamp (see the coincident-
+    // timestamp note on SeriesView): the scatter is then taken about the mean itself.
+    const double b = (sxx > 0.0) ? sxy / sxx : 0.0;
+
+    double sse = 0.0;
+    for (std::size_t m = 0; m < k; ++m) {
+        const double res = (ys[m] - ybar) - b * (xs[m] - xbar);
+        sse += res * res;
+    }
+    if (!(sse > 0.0))
+        return 0.0;                    // an exact local fit — a clean ramp, a constant
+    return std::sqrt(sse / static_cast<double>(k - 2)) / std::sqrt(static_cast<double>(k));
+}
+
 } // namespace detail
 
 // ── At ──────────────────────────────────────────────────────────────────────
@@ -168,6 +244,8 @@ inline Reduced reduceAt(const SeriesView &s, int64_t us, const ReduceConfig &cfg
 
     std::vector<double> win;
     for (std::size_t i = 0; i < s.n; ++i) {
+        if (s.t[i] - us > cfg.atHalfWindowUs)
+            break;                     // ascending: nothing later is in the window either
         if (detail::absUs(s.t[i] - us) > cfg.atHalfWindowUs)
             continue;
         if (!s.isValid(i))
@@ -184,7 +262,9 @@ inline Reduced reduceAt(const SeriesView &s, int64_t us, const ReduceConfig &cfg
 
 // ── Delta ───────────────────────────────────────────────────────────────────
 // At(to) − At(from), and ok ONLY when both ends are. A delta with one end missing is not a smaller
-// delta, it is no delta. atUs = toUs (the instant the change is reported AS OF).
+// delta, it is no delta. atUs = toUs (the instant the change is reported AS OF), which is also
+// what makes a BACKWARDS delta — to earlier than from — the negation of the forward one rather
+// than an error: the caller chose the direction and the sign is the answer.
 inline Reduced reduceDelta(const SeriesView &s, int64_t fromUs, int64_t toUs,
                            const ReduceConfig &cfg = {})
 {
@@ -206,15 +286,47 @@ inline Reduced reduceDelta(const SeriesView &s, int64_t fromUs, int64_t toUs,
 // For every valid sample i whose t lies in the window, the mean of the valid samples within
 // ±extremumWindowUs/2 of t_i — always at least one, itself. `value` is the winning mean, `atUs` the
 // winner's OWN time (the centre of its window, which is what makes the reported instant the middle
-// of the excursion rather than one edge of it), `sigma` the sample standard deviation of that
-// window about the mean (0 with fewer than two samples).
+// of the excursion rather than one edge of it), `sigma` the standard error of that mean about a
+// local straight line (detail::windowMeanSigma — the noise the mean carries, NOT the curve's
+// spread). Ties go to the earliest window (detail::improves).
 //
-// ⚠ THE NEIGHBOURS ARE NOT CLAMPED TO [from, to]. A sample 15 ms outside the window still enters
-// the mean of a window-edge sample, deliberately: the 40 ms is that reading's own support, and
-// truncating it at the edge would make the same instant reduce differently depending on where the
-// caller cut its window. It does mean an Extremum taken right up to a phase domain's edge borrows
-// up to 20 ms of samples from outside the domain; if that is ever shown to matter, clamp here and
-// nowhere else.
+// ⚠ [from, to] BOUNDS THE CANDIDATES, NOT THE SUPPORT. Only the anchors — the instants that may
+// WIN — are required to lie in the window; each anchor's ±half-window mean draws on every valid
+// sample near it, inside the window or not. That is deliberate and it is the harder of the two
+// choices to defend, so here is the argument.
+//
+// The diagnostics engine CACHES an extreme per (lo, hi] span and the review card reduces a whole
+// window in one call. Those two can only ever agree if a sample's windowed mean is the same number
+// whoever asked — i.e. if the support is QUERY-INDEPENDENT. Clamp the support and it is not: the
+// same instant reduces to one value as the last anchor of span B and to another as an interior
+// anchor of the union, and the card and the engine then disagree by construction. W2 measured it on
+// rich_7iron: 20 of 514 authored extremum measures disagreed between the span cache and the
+// whole-window reduction with the support clamped, 0 of 514 with it unclamped. Cache agreement is
+// design §5.2's whole reason for existing, so the support stays unclamped and what the reducers
+// guarantee instead is the invariant the cache actually needs — the extreme over a union of
+// adjacent spans is the extreme OF their extremes (pinned in series_reduce_test §8).
+//
+// An earlier cut clamped it, for a real reason: on a rise-to-impact-then-reverse curve the mean at
+// a span's first anchor averages in the steeper approach BEFORE the span, so a P6→P7 span whose
+// samples run 18.4 → 20.0 reports a minimum of 17.92 — a number the curve never had inside the
+// span. ⚠ THAT IS A DOMAIN LEAK AND IT IS CLOSED AT THE PRODUCER, WHICH IS THE ONLY PLACE IT CAN
+// BE CLOSED ONCE: a sample PAST IMPACT on one of the ten Address→Impact channels is now marked
+// INVALID by lower_body_metrics.cpp / upper_body_metrics.cpp, so it is not a measurement and no
+// reducer at any query can draw on it. Clamping here would have hidden the leak for spans while
+// leaving it wide open for every whole-window card — and cost the cache agreement. (The pre-Address
+// head is deliberately NOT marked: the chart does not clip that side, so marking it made every
+// clamped card read `partial`, and those samples are honest readings of a still address —
+// applyPhaseDomainMask carries that argument.)
+//
+// ⚠ THE SAMPLE FLOOR IS WHY THE SUPPORT MATTERS AT ALL. At the 27 ms spacing outside the dense
+// pose zone a ±20 ms window holds exactly ONE sample, so the "mean" was the sample and the reducer
+// did nothing whatever in the address and backswing regions — the corpus probe printed peakSigma
+// 0.000 on every still-address row, which is the tell. So the window WIDENS symmetrically (the same
+// half-width both sides, out to the next valid sample's distance) until it holds
+// minExtremumSamples valid samples, or until there is no valid sample left to add. Widening obeys
+// the same rule as the window it grows: it takes valid samples wherever they are, which keeps a
+// widened mean query-independent too. It is inert wherever the grid is dense — every 8 ms fixture
+// answers identically with the floor at 1.
 inline Reduced reduceExtremum(const SeriesView &s, int64_t fromUs, int64_t toUs, bool wantMax,
                               const ReduceConfig &cfg = {})
 {
@@ -222,40 +334,72 @@ inline Reduced reduceExtremum(const SeriesView &s, int64_t fromUs, int64_t toUs,
     if (s.n == 0)
         return r;
 
-    const int64_t half = cfg.extremumWindowUs / 2;
-    std::size_t   lo   = 0;        // walks forward with i: t is ascending, so the window is too
+    const int64_t half  = cfg.extremumWindowUs / 2;
+    const int     minEx = std::max(1, cfg.minExtremumSamples);
 
-    for (std::size_t i = 0; i < s.n; ++i) {
-        if (!s.isValid(i) || s.t[i] < fromUs || s.t[i] > toUs)
+    // The CANDIDATE block starts here — the anchors, not their support (see the note above), so
+    // this bounds the outer loop only and a late span does not walk the prefix once per anchor.
+    std::size_t first = 0;
+    while (first < s.n && s.t[first] < fromUs)
+        ++first;
+
+    for (std::size_t i = first; i < s.n; ++i) {
+        if (s.t[i] > toUs)
+            break;                     // ascending: no later anchor is in range either
+        if (!s.isValid(i))
             continue;
-        while (lo < i && s.t[i] - s.t[lo] > half)
-            ++lo;
 
-        double      sum = 0.0;
-        std::size_t cnt = 0;
-        std::size_t end = lo;
-        for (std::size_t j = lo; j < s.n && s.t[j] - s.t[i] <= half; ++j) {
-            if (!s.isValid(j))
-                continue;
-            sum += s.v[j];
-            ++cnt;
-            end = j;
+        // This anchor's half-width and its window mean, in one walk per widening step. `next` is
+        // the smallest distance strictly outside the current width, i.e. where the window would
+        // have to reach to admit one more sample; when there is none the series has nothing further
+        // to give and the window is as wide as it will ever be.
+        //
+        // ⚠ THE WALK IS OVER THE WHOLE SERIES, NOT OVER [from, to] — see the note above. The
+        // support is the anchor's own neighbourhood, so that this mean is the same number whichever
+        // query asked for it and the engine's span cache can agree with the card.
+        int64_t     h    = half;
+        double      sum  = 0.0;
+        std::size_t cnt  = 0;
+        for (;;) {
+            sum = 0.0;
+            cnt = 0;
+            int64_t next = -1;
+            for (std::size_t j = 0; j < s.n; ++j) {
+                if (!s.isValid(j))
+                    continue;
+                const int64_t d = detail::absUs(s.t[j] - s.t[i]);
+                if (d <= h) {
+                    sum += s.v[j];
+                    ++cnt;
+                } else if (next < 0 || d < next) {
+                    next = d;
+                }
+            }
+            if (static_cast<int>(cnt) >= minEx || next < 0)
+                break;
+            h = next;
         }
         // cnt >= 1 always: sample i is valid and is inside its own window.
         const double mean = sum / static_cast<double>(cnt);
-        if (r.ok && !(wantMax ? mean > r.value : mean < r.value))
+        if (r.ok && !detail::improves(mean, r.value, wantMax))
             continue;
 
-        double ss = 0.0;
-        for (std::size_t j = lo; j <= end; ++j) {
+        // The winner's window, gathered once for its standard error. x in SECONDS from the anchor,
+        // never raw µs — see reduceRate for why.
+        std::vector<double> xs, ys;
+        xs.reserve(cnt);
+        ys.reserve(cnt);
+        for (std::size_t j = 0; j < s.n; ++j) {
             if (!s.isValid(j))
                 continue;
-            const double d = s.v[j] - mean;
-            ss += d * d;
+            if (detail::absUs(s.t[j] - s.t[i]) > h)
+                continue;
+            xs.push_back(static_cast<double>(s.t[j] - s.t[i]) * 1.0e-6);
+            ys.push_back(s.v[j]);
         }
         r.value = mean;
         r.atUs  = s.t[i];
-        r.sigma = (cnt >= 2) ? std::sqrt(ss / static_cast<double>(cnt - 1)) : 0.0;
+        r.sigma = detail::windowMeanSigma(xs, ys, mean);
         r.ok    = true;
     }
     return r;
@@ -275,18 +419,27 @@ inline Reduced reduceExtremum(const SeriesView &s, int64_t fromUs, int64_t toUs,
 // slope through two points.
 //
 // atUs = the winning window's CENTRE (a slope is a statement about an interval, and its midpoint is
-// the least misleading single instant to hang it on). sigma = that slope's standard error,
-// sqrt(SSE/(n−2)) / sqrt(Sxx), also per 100 ms — 0 for a two-point window or an exact fit, where
-// the fit has no residual to speak from.
+// the least misleading single instant to hang it on); ties go to the earliest window
+// (detail::improves). sigma = that slope's standard error, sqrt(SSE/(n−2)) / sqrt(Sxx), also per
+// 100 ms — 0 for an exact fit, where there is no residual to speak from.
 inline Reduced reduceRate(const SeriesView &s, int64_t fromUs, int64_t toUs,
                           const ReduceConfig &cfg = {})
 {
     Reduced r;
-    // A slope needs two points whatever the config says.
-    const int minN = std::max(2, cfg.minRateSamples);
+    // ⚠ THREE IS A FLOOR, NOT A DEFAULT. A two-point "fit" passes through both points, so its SSE
+    // is 0 and its standard error is 0 — and a rate of 39 per 100 ms reported as "± 0" is a
+    // confident reading of two samples of noise. The third point is what buys the residual degree
+    // of freedom that makes `sigma` mean anything, so it is required whatever the config says.
+    const int minN = std::max(3, cfg.minRateSamples);
 
-    for (std::size_t i = 0; i < s.n; ++i) {
-        if (!s.isValid(i) || s.t[i] < fromUs || s.t[i] > toUs)
+    std::size_t first = 0;
+    while (first < s.n && s.t[first] < fromUs)
+        ++first;
+
+    for (std::size_t i = first; i < s.n; ++i) {
+        if (s.t[i] > toUs)
+            break;
+        if (!s.isValid(i))
             continue;
 
         // Pass 1 — the window's extent and its means. x is SECONDS FROM t_i, never raw µs: a
@@ -297,10 +450,10 @@ inline Reduced reduceRate(const SeriesView &s, int64_t fromUs, int64_t toUs,
         double      sx   = 0.0;
         double      sy   = 0.0;
         for (std::size_t j = i; j < s.n; ++j) {
+            if (s.t[j] > toUs)
+                break;                 // range first, so an all-bridged tail is not rescanned
             if (!s.isValid(j))
                 continue;
-            if (s.t[j] > toUs)
-                break;
             sx += static_cast<double>(s.t[j] - s.t[i]) * 1.0e-6;
             sy += s.v[j];
             ++cnt;
@@ -325,14 +478,16 @@ inline Reduced reduceRate(const SeriesView &s, int64_t fromUs, int64_t toUs,
             sxx += dx * dx;
             sxy += dx * (s.v[j] - ybar);
         }
+        // Unreachable, and kept: the span test above already guarantees two distinct timestamps in
+        // the window, so Sxx > 0. It costs one compare and it is the difference between a future
+        // caller with a degenerate view getting a 0 and getting an inf.
         if (!(sxx > 0.0))
-            continue;              // coincident timestamps only (defensive: the span test passed)
+            continue;
 
         const double slope = sxy / sxx;                     // units per SECOND
 
-        // Pass 3 — the residual, for the standard error. sqrt(SSE/(n−2))/sqrt(Sxx): with two points
-        // there is no residual degree of freedom left and an exact fit has no residual at all, and
-        // in both cases the honest answer is 0 rather than a divide by zero.
+        // Pass 3 — the residual, for the standard error. sqrt(SSE/(n−2))/sqrt(Sxx): an exact fit
+        // has no residual at all, and the honest answer there is 0 rather than a divide by zero.
         double sse = 0.0;
         for (std::size_t j = i; j <= end; ++j) {
             if (!s.isValid(j))
@@ -347,7 +502,7 @@ inline Reduced reduceRate(const SeriesView &s, int64_t fromUs, int64_t toUs,
 
         // Per 100 ms LAST, so the fit and its error are scaled by exactly the same factor.
         const double value = slope * 0.1;
-        if (r.ok && !(std::fabs(value) > std::fabs(r.value)))
+        if (r.ok && !detail::improves(std::fabs(value), std::fabs(r.value), true))
             continue;
         r.value = value;
         r.sigma = se * 0.1;

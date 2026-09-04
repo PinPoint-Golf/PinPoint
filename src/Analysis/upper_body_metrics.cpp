@@ -484,26 +484,37 @@ std::vector<MetricSeries> buildUpperBodySeries(const UpperBodyResult &res,
     // sampled Finish, which put an out-of-domain reading into swing.json on every swing.
     static const std::vector<Phase> kP1toP7Samples{ Phase::Address, Phase::Top, Phase::Impact };
 
+    // `p1toP7Domain` says the channel is an ADDRESS->IMPACT quantity, and it is the same statement
+    // kP1toP7Samples makes about which instants it may be READ at, one layer down: PAST IMPACT the
+    // sample is not a measurement of this quantity, so it is marked invalid and no reducer at any
+    // query can draw on it. The pre-Address head is deliberately left open — applyPhaseDomainMask
+    // carries the whole argument, including why this cannot be done inside a reducer instead. Behind
+    // the same off-switch as the bridge mask: maxBridgeUs < 0 means "emit no validity mask at all",
+    // for a parity run.
     const auto push = [&](const MetricChannel &ch, const char *key, const char *label,
                           const QString &unit,
                           const std::vector<int64_t> &gated = kNoneGated,
-                          const std::vector<Phase> &sampleAt = defaultPhaseSamples()) {
-        appendIfProduced(out, buildChannelSeries(res.grid, ch, QString::fromLatin1(key),
-                                                 QString::fromUtf8(label), unit, phases,
-                                                 sampleAt, res.maxBridgeUs,
-                                                 res.bridgeSpacingFactor, gated));
+                          const std::vector<Phase> &sampleAt = defaultPhaseSamples(),
+                          bool p1toP7Domain = false) {
+        MetricSeries m = buildChannelSeries(res.grid, ch, QString::fromLatin1(key),
+                                            QString::fromUtf8(label), unit, phases,
+                                            sampleAt, res.maxBridgeUs,
+                                            res.bridgeSpacingFactor, gated);
+        if (res.maxBridgeUs >= 0 && p1toP7Domain)
+            applyPhaseDomainMask(m, phases);
+        appendIfProduced(out, std::move(m));
     };
 
     push(res.axisTilt,         "secondaryAxisTilt",   "Secondary axis tilt",     deg,
-         kNoneGated, kP1toP7Samples);
+         kNoneGated, kP1toP7Samples, /*p1toP7Domain=*/true);
     push(res.sideBend,         "spineSideBend",       "Spine side bend",         deg,
-         res.gatedSideBend, kP1toP7Samples);
+         res.gatedSideBend, kP1toP7Samples, /*p1toP7Domain=*/true);
     push(res.thoraxDrift,      "thoraxLateralDrift",  "Thorax lateral drift",    pctSt,
-         kNoneGated, kP1toP7Samples);
+         kNoneGated, kP1toP7Samples, /*p1toP7Domain=*/true);
     push(res.shoulderPlane,    "shoulderPlaneAngle",  "Shoulder plane angle",    deg,
-         res.gatedShoulderLine, kP1toP7Samples);
+         res.gatedShoulderLine, kP1toP7Samples, /*p1toP7Domain=*/true);
     push(res.elbowLine,        "elbowAlignment",      "Elbow alignment",         deg,
-         res.gatedElbowLine, kP1toP7Samples);
+         res.gatedElbowLine, kP1toP7Samples, /*p1toP7Domain=*/true);
     // trailElbowHeight divides by the SHOULDER line's dx, so it is refused on exactly the instants
     // the shoulder line is (see the gate block in trackUpperBody).
     push(res.trailElbowHeight, "trailElbowHeight",    "Trail elbow height",      pctSh,

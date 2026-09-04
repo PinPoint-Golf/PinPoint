@@ -460,13 +460,26 @@ inline constexpr double       kBridgeSpacingFactor = 1.5;    // channel.bridgeSp
 // over 50 ms divides the noise by roughly √n and the time base by 6. Reported per 100 ms as it
 // always has been.
 //
+// kMinExtremumSamples (3) is what stops the centred window from being a SINGLE SAMPLE where the
+// grid is sparse, which is the failure the corpus probe found after the first cut of this work: at
+// 27 ms spacing a ±20 ms window holds exactly one sample, so the "windowed mean" was the sample and
+// the reducer did nothing at all across the address and the backswing (every still-address row
+// printed peakSigma 0.000 — the tell). The window widens symmetrically until it holds this many
+// valid samples, or until the reduction's own [from, to] leaves nothing further to add. 3 is the
+// same floor kMinRateSamples uses and for the same reason: it is the smallest window that has a
+// residual left over after a straight line, so the peak's sigma means something.
+//
 // kMinRateSamples (3) is the floor that stops a "slope" being a line through two points, which has
 // no residual and therefore no standard error to be honest with. A window with fewer — a sparsely
-// posed address — yields NO rate rather than a confident one.
+// posed address — yields NO rate rather than a confident one. THIS one is enforced at 3 in code
+// whatever is configured here — a two-point fit's zero standard error reads as certainty — where
+// kMinExtremumSamples above is a target the widening aims at and 1 legitimately restores the
+// single-sample window, which is how the test pins what the widening changed.
 namespace reduce {
-inline constexpr std::int64_t kExtremumWindowUs = 40000;   // reduce.extremumWindowUs — centred, ±20 ms
-inline constexpr std::int64_t kRateWindowUs     = 50000;   // reduce.rateWindowUs — minimum fit span
-inline constexpr int          kMinRateSamples   = 3;       // reduce.minRateSamples
+inline constexpr std::int64_t kExtremumWindowUs   = 40000; // reduce.extremumWindowUs — centred, ±20 ms
+inline constexpr int          kMinExtremumSamples = 3;     // reduce.minExtremumSamples — widen to this
+inline constexpr std::int64_t kRateWindowUs       = 50000; // reduce.rateWindowUs — minimum fit span
+inline constexpr int          kMinRateSamples     = 3;     // reduce.minRateSamples
 } // namespace reduce
 
 // --- Lower-body frontal-plane metrics (src/Analysis/lower_body_metrics.h) -----

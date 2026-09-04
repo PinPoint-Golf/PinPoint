@@ -109,8 +109,10 @@ Lifted lift(const QVariantList &tUs, const QVariantList &value, const QVariantLi
 }
 
 // A borrowed C8 view of the whole curve. Named `chartView` rather than reusing C8's own viewOf()
-// because that one takes a MetricSeries and the chart never has one — it has the QML bridge's
-// parallel QVariantLists.
+// (which lives in series_reduce_metric.h, the one file over there that knows the analysis types
+// exist) because that one takes a MetricSeries and the chart never has one — it has the QML
+// bridge's parallel QVariantLists. series_reduce.h itself is std-only, which is why including it
+// from the Gui costs nothing.
 pa::SeriesView chartView(const Lifted &s)
 {
     pa::SeriesView view;
@@ -250,6 +252,20 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
     const double start = edgeAt(startUs);
     const double end   = edgeAt(endUs);
 
+    // ── edgeOk: is there ANY measurement in this series to read an edge from? ────────────────
+    //
+    // ⚠ THE SAME PRINCIPLE AS rateOk, APPLIED TO THE OTHER SIX NUMBERS. A series whose every
+    // sample is bridged — or an empty curve — has no valid sample at all, so interpValid has
+    // nothing to interpolate BETWEEN and returns 0.0. Every number built on that (start, end,
+    // min, max, peak, range, delta) is then a confident 0 drawn from nothing: PEAK 0, Δ 0,
+    // RANGE 0, wearing a PARTIAL chip that reads as "mostly fine". `partial` is not strong enough
+    // for that case and never was — it qualifies numbers, and these are not numbers.
+    //
+    // So the card gates those tiles on `edgeOk` exactly as it gates PK RATE on `rateOk`. The
+    // values are still returned (a caller mid-migration gets today's zeros rather than a crash),
+    // but a display that prints them has been told not to.
+    const bool edgeOk = s.good.size() > 0;
+
     // ── min / max — the extremum of the CENTRED-WINDOW MEAN, no longer a raw argmax ────────────
     //
     // ⚠ THIS IS A DEFINITION CHANGE and it is the point of the phase: a one-sample outlier can no
@@ -293,15 +309,25 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
 
     // ── partial: this window's numbers do not rest on a continuous measurement ──────────────
     //
-    // Rule 1 — an edge fell back to interpolation (above): no valid sample within ±15 ms of it, so
-    // that endpoint, Δ and possibly min/max came from across unmeasured ground. This is the case
-    // rule 2 misses, including the window that sits ENTIRELY inside a bridged run and so contains
-    // no sample to scan at all.
+    // Rule 1 — an edge fell back to interpolation (above) ON A MASKED SERIES: no valid sample
+    // within ±15 ms of it, so that endpoint, Δ and possibly min/max came from across ground the
+    // producer bridged. This is the case rule 2 misses, including the window that sits ENTIRELY
+    // inside a bridged run and so contains no sample to scan at all.
+    //
+    // ⚠ AND `s.masked` IS WHY IT IS NOT JUST `fellBack`. A fallback also happens with NO MASK at
+    // all, whenever a window edge lands more than 15 ms from any sample — which on a real timeline
+    // is common, not exotic: 21 % of a rich_7iron series' span is more than 15 ms from a sample and
+    // its largest gap is 83 ms, so a brush dragged there would have put a PARTIAL chip on a swing
+    // with nothing whatever to declare. Pre-Phase-2 `partial` was unreachable without a mask, and
+    // it must stay that way: the chip's claim is "the producer bridged part of this window", and
+    // the mask is the only thing that ever says so. A COARSE series is not an incomplete one — it
+    // was measured everywhere it claims to have been — and the case where there is nothing to read
+    // at all is `edgeOk`, not this.
     //
     // Rule 2 — an invalid sample lies inside the window. Whatever the reducers returned, part of
     // the span they cover was never measured, so a reader comparing this card against a neighbour
     // is comparing different amounts of evidence.
-    bool partial = fellBack;
+    bool partial = fellBack && s.masked;
     if (!partial && s.masked) {
         for (size_t i = 0; i < s.valid.size(); ++i) {
             if (s.valid[i] != 0) continue;
@@ -322,6 +348,14 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
     r.insert(QStringLiteral("min"),       mn);
     r.insert(QStringLiteral("max"),       mx);
     r.insert(QStringLiteral("peak"),      peak);
+    // ⚠ range AND delta REST ON DIFFERENT EVIDENCE and can therefore contradict each other: range
+    // is a span of 40 ms windowed MEANS anchored at the samples inside the window, delta a
+    // difference of ±15 ms MEDIANS taken at its two edges (neither support is clamped to the
+    // window; what differs is what each is anchored on). On a window
+    // narrower than the sample spacing the medians can move while there is nothing inside to have
+    // a span, so a card can read RANGE 0.2 beside Δ 4. Left inconsistent deliberately: see the
+    // header — forcing range ≥ |delta| would blend two reducers and hide the only signal a reader
+    // gets that the window is too narrow for the curve in it.
     r.insert(QStringLiteral("range"),     mx - mn);
     r.insert(QStringLiteral("delta"),     end - start);
     r.insert(QStringLiteral("rate"),      rateR.ok ? rateR.value : 0.0);
@@ -330,12 +364,14 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
     // NEW IN PHASE 2. peakSigma / rateSigma are the σ the card prints beside the two tiles a
     // reader's trust is decided on; rateOk gates the rate tile; tRateUs is the centre of the
     // winning slope window, so a caller can mark WHERE the steepest change was, exactly as
-    // tPeakUs does for the peak. tRateUs is 0 when no rate was fitted, and 0 is a legitimate
-    // instant in this (window-relative) timebase — so rateOk, never tRateUs, is the thing to test.
-    // (tPeakUs has no such state: with no valid sample in the window the extremes come from the
-    // edges, and it names the edge they came from.)
+    // tPeakUs does for the peak. Both are in the CALLER'S timebase, whatever that is — for the
+    // review chart, the clip µs of analysisDetail.series[i].t_us — so tRateUs is 0 when no rate
+    // was fitted AND 0 is a perfectly ordinary instant in it: rateOk, never tRateUs, is the thing
+    // to test. (tPeakUs has no such state: with no valid sample in the window the extremes come
+    // from the edges, and it names the edge they came from.)
     r.insert(QStringLiteral("peakSigma"), peakSigma);
     r.insert(QStringLiteral("rateSigma"), rateR.ok ? rateR.sigma : 0.0);
+    r.insert(QStringLiteral("edgeOk"),    edgeOk);
     r.insert(QStringLiteral("rateOk"),    rateR.ok);
     r.insert(QStringLiteral("tRateUs"),   rateR.ok ? qint64(rateR.atUs) : qint64(0));
     return r;

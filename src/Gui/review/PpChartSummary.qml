@@ -34,7 +34,9 @@
 // slope, both from src/Analysis/series_reduce.h — the same reducers the diagnostics engine grades
 // with, so a card and a corridor cannot disagree about the same window. PK RATE therefore also has
 // an ABSENT state (`rateOk` false: no window long enough, or too few valid samples in it), and it
-// prints "—" with its unit hidden rather than a fitted-from-nothing 0.
+// prints "—" with its unit hidden rather than a fitted-from-nothing 0. The same for PEAK and Δ on a
+// series with no valid sample anywhere (`edgeOk` false), where every window number is a 0 read out
+// of nothing rather than a flat curve.
 
 pragma ComponentBehavior: Bound
 
@@ -186,6 +188,19 @@ ColumnLayout {
                 // key gives `undefined`, and `!card.st.rateOk` would then print a rate that was
                 // never fitted.
                 readonly property bool   rateOk: card.st.rateOk === true && !card.collapsed
+                // ── IS THERE ANY READING ON THIS SERIES AT ALL? ─────────────────────────────
+                // `edgeOk` false means the series carries no valid sample anywhere — every sample
+                // bridged, or an empty curve — so PEAK, Δ and every other window number came back
+                // 0.0 out of nothing. A "PEAK 0 / Δ 0" card wearing only a PARTIAL chip reads as a
+                // still, well-behaved curve, which is the same confident absurdity `rateOk` exists
+                // to stop for the rate. Same treatment: "—".
+                //
+                // ⚠ `!== false`, where rateOk above is `=== true`, and the asymmetry is deliberate.
+                // A map without `rateOk` costs one tile; a map without `edgeOk` would blank EVERY
+                // tile on EVERY card, so the missing-key direction has to differ. (Neither can
+                // happen with this build — chart_metrics_test pins both keys as present — the
+                // guards are for a QML file that outlives a C++ change.)
+                readonly property bool   valueOk: card.st.edgeOk !== false && !card.collapsed
 
                 // Value at the impact landmark — a fixed anatomical reference, so it reads the
                 // whole series (not the view window); the more useful thing to compare against
@@ -345,11 +360,11 @@ ColumnLayout {
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
                             Text { Layout.fillWidth: true; elide: Text.ElideRight
-                                   text: card.collapsed ? "—"
-                                         : cm.formatBare(card.st.peak, card.modelData.unit)
+                                   text: card.valueOk
+                                         ? cm.formatBare(card.st.peak, card.modelData.unit) : "—"
                                    font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData
-                                   color: card.collapsed ? Theme.colorText3 : Theme.colorText }
+                                   color: card.valueOk ? Theme.colorText : Theme.colorText3 }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -359,11 +374,11 @@ ColumnLayout {
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
                             Text { Layout.fillWidth: true; elide: Text.ElideRight
-                                   text: card.collapsed ? "—"
-                                         : cm.formatBare(card.st.delta, card.modelData.unit)
+                                   text: card.valueOk
+                                         ? cm.formatBare(card.st.delta, card.modelData.unit) : "—"
                                    font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData
-                                   color: card.collapsed ? Theme.colorText3 : Theme.colorText }
+                                   color: card.valueOk ? Theme.colorText : Theme.colorText3 }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true

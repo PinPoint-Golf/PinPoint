@@ -141,7 +141,7 @@ sample all disappear here.
 
 ---
 
-## Phase 2 — Robust reducers, one implementation `[~]`
+## Phase 2 — Robust reducers, one implementation `[x]`
 
 Changes what is *derived*; `value[]` untouched.
 
@@ -164,7 +164,7 @@ Changes what is *derived*; `value[]` untouched.
 - [x] **2.4** `measure_sample.cpp` `buildPhaseGrid`: `PhaseGridSpan.min/max` from
       `reduceExtremum` over the span (valid-aware). `kPhaseGridSchemaVersion` → 3 so the
       sidecar cache rebuilds. `measure_sample_test.cpp`: the spike case; the schema bump.
-- [ ] **2.5** Gate: corpus run. For every authored `extremum` measure, before/after of the
+- [x] **2.5** Gate: corpus run. For every authored `extremum` measure, before/after of the
       reduced value per swing; expected: peaks move toward the mean by about one σ, none
       moves the other way beyond the control's spread. For `at`/`delta`: unchanged within
       the control (already windowed medians). Record the table in the Log. Design §7 items 2,
@@ -363,3 +363,39 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   normalises the RAW curve to st.min/st.max, so unmasked spikes now overshoot the sparkline
   strip — needs raw extremes or a clip there; (4) the unclamped extremum window lets a P1–P7
   PEAK borrow 20 ms past Impact — clamp in reduceExtremum. Resume = build + ctest first.
+
+- **2026-09-04 (Phase 2 resumed after the limit)** — all six suites built and green after one
+  fixture constant moved (m_pelvisSwayBack −28.60 → −28.36, a one-frame trough pulled toward
+  its neighbours). Two adversarial reviews: reducers (R1–R11) and chart+engine (11 items). The
+  headline finding: the card and the engine still disagreed on 36/170 extremum cases on
+  rich_7iron (up to 9.4°) because the engine seeded aggregates with ±15 ms endpoint medians and
+  kept spans half-open — fixed (closed spans, no seed, zero-width spans skipped, schema 4,
+  agreement asserted unconditionally over 12 cases). Then a structural conflict surfaced:
+  clamping the extremum's support to [from,to] (R1) breaks the span cache's agreement
+  (20/514). **Resolution recorded in design §5.2:** support unclamped; the domain becomes a
+  MASK set by the ten narrowed producers (out-of-domain samples valid=0); window widens to ≥3
+  samples in sparse regions; peak σ is a residual standard error. Also: sparkline strip clamps
+  its y; `partial` fires only when a mask exists; new `edgeOk` gates PEAK/Δ on a series with no
+  valid sample; sidecar guard records its windows. **Gate 2.5 (probe, 5 swings of 08-18
+  Wrist_01, still-address window):** 15/20 series under 2 units/100 ms; the 5 above it have
+  rate ≫ its standard error and a consistent trail-ward pelvis drift on all five swings — real
+  pre-takeaway motion, not noise, so §7 item 2 must be re-judged against rateSigma (target
+  proposal: |rate| < 3·rateSigma OR < 2 units) rather than a fixed number. Producer change means
+  the subset after-pass must be re-run before commit.
+
+- **2026-09-04 (Phase 2 CLOSED)** — After the resolution: 13 suites green (`series_reduce_test`,
+  the two producer suites, `measure_sample_test` with the unconditional 12-case card-vs-engine
+  agreement, `chart_metrics_test`, integrity, live-measure, model browser, packs). One test bug
+  found on the way (a pointer into a temporary vector). Subset gate (11 swings, before = 72bfd42
+  worktree, after = this tree): the producer domain mask (post-Impact tail only — the head stays
+  open because the chart never clips a domain that starts at Address and the still-address
+  window lives there) changes NO value and NO phase sample; it adds ~85 post-impact zeros on the
+  ten narrowed channels. Probe on 5 re-analysed swings: no §5.1 violation, CLAMPED cards
+  partial=false on 15/20 — the 5 partials are shoulderPlaneAngle, whose gate fires INSIDE the
+  domain at the top (honest). Still-address gate: 16/20 under 2 units/100 ms; the 4 above are
+  pelvisSway on three swings (2.4–3.0 %/100 ms) and hipLineTilt on one (4.4°/100 ms), each with
+  rate ≫ rateSigma and a consistent trail-ward pelvis drift across all five swings — a real
+  pre-takeaway move; §7 item 2 should be restated as |rate| < max(2 units, 3·rateSigma) or judged
+  on a window the golfer is actually still in. Open design flags carried forward: the
+  least-squares rate is not spike-proof (Theil–Sen / residual gate would be), and the
+  reduce.* keys have no runtime override plumbing yet.

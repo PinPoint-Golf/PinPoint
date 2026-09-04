@@ -58,6 +58,7 @@ const MetricPhaseGrid *SwingPhaseGrid::metric(const QString &key) const
 SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig &cfg)
 {
     SwingPhaseGrid grid;
+    grid.config = cfg;      // the sidecar guard compares these windows; see savePhaseGrid
 
     // The segmented ladder, deduplicated and time-ordered. A doc can legitimately carry the same
     // phase twice (a re-segmentation appended rather than replaced); the FIRST wins, matching
@@ -80,8 +81,11 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
             continue;
         ladder.push_back({ p, po.value(QStringLiteral("t_us")).toVariant().toLongLong() });
     }
-    std::sort(ladder.begin(), ladder.end(),
-              [](const PhaseAt &a, const PhaseAt &b) { return a.tUs < b.tUs; });
+    // STABLE, because phases can share an instant (rich_7iron segments Address and Takeaway at the
+    // same t_us) and an unstable sort would order those two by whatever the implementation felt like.
+    // Document order is the only defensible tie-break: it is what the analyzer wrote.
+    std::stable_sort(ladder.begin(), ladder.end(),
+                     [](const PhaseAt &a, const PhaseAt &b) { return a.tUs < b.tUs; });
 
     if (ladder.empty())
         return grid;   // unsegmented: no phase to read anything at, so nothing is producible
@@ -220,45 +224,52 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
                 mg.values.push_back(PhaseGridValue{ e.phase, it->second.tUs, it->second.value });
         }
 
-        std::sort(mg.values.begin(), mg.values.end(),
-                  [](const PhaseGridValue &a, const PhaseGridValue &b) { return a.tUs < b.tUs; });
+        std::stable_sort(mg.values.begin(), mg.values.end(),
+                         [](const PhaseGridValue &a, const PhaseGridValue &b) {
+                             return a.tUs < b.tUs;
+                         });   // stable for the same reason the ladder is
 
-        // Spans between consecutive PRESENT values. Half-open at the start so aggregating
-        // consecutive spans double-counts nothing, and so a span carries what happened BETWEEN two
-        // phases rather than restating either endpoint.
+        // Spans between consecutive PRESENT values, CLOSED AT BOTH ENDS — [lo, hi], not (lo, hi].
+        //
+        // The engine's whole job here is to cache what the REVIEW CHART would say, and the chart's
+        // candidate set over a phase window includes both instants. Excluding the opening one made
+        // the two disagree by up to 9.4° on a real swing, and it bought nothing: min and max are
+        // idempotent, so a sample shared by two adjacent spans cannot skew either aggregate.
+        //
+        // The extreme is the extreme of the CENTRED-WINDOW MEAN, not of the raw samples (design
+        // §5.2): each candidate is scored over its own ±extremumWindowUs/2 neighbourhood, so the
+        // single wild sample that used to BE the peak — and be cached here, and be graded against a
+        // corridor — has to hold its value for the width of the window to win. A bridged sample is
+        // neither a candidate nor a member of anyone's window, the same rule the median follows.
         for (std::size_t i = 1; i < mg.values.size(); ++i) {
             const int64_t lo = mg.values[i - 1].tUs;
             const int64_t hi = mg.values[i].tUs;
 
+            // A ZERO-WIDTH SPAN IS NOT A SEARCH WINDOW. Two phases legitimately share an instant
+            // (rich_7iron: Address and Takeaway), and [t, t] holds one candidate scored over one
+            // near-raw reading. Storing that would drop a different smoothing scale into an
+            // aggregate that is otherwise all 40 ms windowed means — which is precisely how the
+            // 9.4° disagreement arose. Nothing is lost by omitting it: the interval is empty, and
+            // both endpoints are already candidates in the neighbouring spans.
+            if (hi <= lo)
+                continue;
+
+            const Reduced mn = reduceExtremum(view, lo, hi, /*wantMax=*/false, rc);
+            const Reduced mx = reduceExtremum(view, lo, hi, /*wantMax=*/true,  rc);
+
+            // Nothing valid in the interval: store NO span. The endpoint-median fallback that used
+            // to sit here is now one whole-aggregation fallback in reduceOverGrid — per span it fired
+            // once per empty interval and injected medians into a windowed-mean min/max even when
+            // other spans had real answers, which is a fabricated extreme wearing a cached number's
+            // clothes. Hoisted, it fires only when the entire window had nothing to say.
+            if (!mn.ok || !mx.ok)
+                continue;
+
             PhaseGridSpan sp;
             sp.from = mg.values[i - 1].phase;
             sp.to   = mg.values[i].phase;
-
-            // (lo, hi] — half-open at the start, so `lo + 1` is the first admissible candidate
-            // instant. reduceExtremum's bounds are inclusive, and µs are integers, so t ≥ lo + 1 is
-            // exactly t > lo with no epsilon anywhere.
-            //
-            // The extreme is now the extreme of the CENTRED-WINDOW MEAN, not of the raw samples
-            // (design §5.2): the candidates are still only the valid samples strictly inside the
-            // span, but each is scored over its own ±extremumWindowUs/2 neighbourhood. So the
-            // single wild sample that used to BE the peak — and be cached here, and be graded
-            // against a corridor — has to hold its value for the width of the window to win.
-            //
-            // A bridged sample is neither a candidate nor a member of anyone's window, which is the
-            // same rule the median follows and for the same reason (see the mask note above).
-            const Reduced mn = reduceExtremum(view, lo + 1, hi, /*wantMax=*/false, rc);
-            const Reduced mx = reduceExtremum(view, lo + 1, hi, /*wantMax=*/true,  rc);
-            if (mn.ok && mx.ok) {
-                sp.min = mn.value;
-                sp.max = mx.value;
-            }
-            // No samples strictly inside: fall back to the two endpoint medians, so an Extremum
-            // over a sparse window still answers with the best the curve supports rather than
-            // reporting the whole measure unavailable.
-            else {
-                sp.min = std::min(mg.values[i - 1].value, mg.values[i].value);
-                sp.max = std::max(mg.values[i - 1].value, mg.values[i].value);
-            }
+            sp.min  = mn.value;
+            sp.max  = mx.value;
             mg.spans.push_back(sp);
         }
 
@@ -314,10 +325,13 @@ std::optional<double> reduceOverGrid(const SwingPhaseGrid &grid, const QString &
         if (!lo || !hi || lo->tUs > hi->tUs)
             return std::nullopt;
 
-        // The endpoints themselves are part of the search — a peak sitting exactly on a phase is
-        // still the peak.
-        double best = (r.sense == ExtremumSense::Min) ? std::min(lo->value, hi->value)
-                                                      : std::max(lo->value, hi->value);
+        // THE SPANS AND NOTHING ELSE. There is deliberately no endpoint-median seed: the spans are
+        // closed, so both endpoints are already candidates inside them, and seeding a windowed-mean
+        // min/max with a ±15 ms MEDIAN mixed two smoothing scales in one aggregate — the engine then
+        // reported extremes the review chart could not reproduce (36 of 170 cases on one corpus
+        // swing, worst 9.4°). See the header note on this function.
+        bool   any  = false;
+        double best = 0.0;
         for (const PhaseGridSpan &sp : mg->spans) {
             const PhaseGridValue *f = mg->at(sp.from);
             const PhaseGridValue *t = mg->at(sp.to);
@@ -325,9 +339,20 @@ std::optional<double> reduceOverGrid(const SwingPhaseGrid &grid, const QString &
                 continue;
             if (f->tUs < lo->tUs || t->tUs > hi->tUs)
                 continue;
-            best = (r.sense == ExtremumSense::Min) ? std::min(best, sp.min)
-                                                   : std::max(best, sp.max);
+            const double v = (r.sense == ExtremumSense::Min) ? sp.min : sp.max;
+            if (!any) { best = v; any = true; }
+            else      { best = (r.sense == ExtremumSense::Min) ? std::min(best, v)
+                                                              : std::max(best, v); }
         }
+
+        // LAST RESORT, once per query rather than once per span. No span in this window answered —
+        // every interval was zero-width or wholly bridged — so the only readings the curve supports
+        // here are the two endpoint medians. Reporting the better of them beats darkening a measure
+        // whose value is sitting right there, and it is structurally what the chart does when its own
+        // window reduces to its edges.
+        if (!any)
+            best = (r.sense == ExtremumSense::Min) ? std::min(lo->value, hi->value)
+                                                   : std::max(lo->value, hi->value);
 
         if (!r.anchor.has_value())
             return best;
@@ -374,9 +399,16 @@ QJsonObject savePhaseGrid(const SwingPhaseGrid &grid, qint64 sourceSize, qint64 
     QJsonObject root;
     root.insert(QStringLiteral("schema"), kPhaseGridSchemaVersion);
 
+    // The guard. size+mtime say "this swing.json has not changed"; the reduction parameters say "and
+    // it was reduced the way you are about to ask for". Without the second half a swept window leaves
+    // every sidecar in the library matching its source byte-for-byte while serving the OLD window's
+    // numbers, and nothing anywhere would say so.
     QJsonObject src;
-    src.insert(QStringLiteral("size"),     sourceSize);
-    src.insert(QStringLiteral("mtime_ms"), sourceMtimeMs);
+    src.insert(QStringLiteral("size"),               sourceSize);
+    src.insert(QStringLiteral("mtime_ms"),           sourceMtimeMs);
+    src.insert(QStringLiteral("window_half_us"),     qint64(grid.config.windowHalfUs));
+    src.insert(QStringLiteral("extremum_window_us"), qint64(grid.config.extremumWindowUs));
+    src.insert(QStringLiteral("min_valid_samples"),  grid.config.minValidSamples);
     root.insert(QStringLiteral("source"), src);
 
     root.insert(QStringLiteral("session"),  grid.sessionId);
@@ -418,10 +450,11 @@ QJsonObject savePhaseGrid(const SwingPhaseGrid &grid, qint64 sourceSize, qint64 
 }
 
 SwingPhaseGrid loadPhaseGrid(const QJsonObject &root, qint64 sourceSize, qint64 sourceMtimeMs,
-                             bool *guardOk)
+                             bool *guardOk, const PhaseGridConfig &cfg)
 {
     if (guardOk) *guardOk = false;
     SwingPhaseGrid grid;
+    grid.config = cfg;
 
     if (root.value(QStringLiteral("schema")).toInt() != kPhaseGridSchemaVersion)
         return grid;
@@ -430,6 +463,16 @@ SwingPhaseGrid loadPhaseGrid(const QJsonObject &root, qint64 sourceSize, qint64 
     if (src.value(QStringLiteral("size")).toVariant().toLongLong() != sourceSize
         || src.value(QStringLiteral("mtime_ms")).toVariant().toLongLong() != sourceMtimeMs)
         return grid;                                   // stale: rebuild, never trust
+
+    // Built under a different reduction: the numbers are internally consistent and answer a question
+    // this run is not asking. Rebuild rather than reconcile — there is no way to rescale a cached
+    // extreme to a wider window, and the guard is here precisely so nobody has to try.
+    PhaseGridConfig had;
+    had.windowHalfUs     = src.value(QStringLiteral("window_half_us")).toVariant().toLongLong();
+    had.extremumWindowUs = src.value(QStringLiteral("extremum_window_us")).toVariant().toLongLong();
+    had.minValidSamples  = src.value(QStringLiteral("min_valid_samples")).toInt();
+    if (!sameGridReduction(had, cfg))
+        return grid;
 
     grid.sessionId   = root.value(QStringLiteral("session")).toString();
     grid.club        = root.value(QStringLiteral("club")).toString();
@@ -485,8 +528,8 @@ SwingPhaseGrid readPhaseGrid(const QString &swingDir, bool writeSidecar, const P
         QFile sf(sidePath);
         if (sf.open(QIODevice::ReadOnly)) {
             bool ok = false;
-            SwingPhaseGrid cached =
-                loadPhaseGrid(QJsonDocument::fromJson(sf.readAll()).object(), size, mtimeMs, &ok);
+            SwingPhaseGrid cached = loadPhaseGrid(QJsonDocument::fromJson(sf.readAll()).object(),
+                                                 size, mtimeMs, &ok, cfg);
             if (ok) {
                 cached.swingDir = swingDir;
                 return cached;

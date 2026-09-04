@@ -299,6 +299,96 @@ inline MetricSeries buildChannelSeries(const std::vector<int64_t> &grid, const M
     return m;
 }
 
+// A sample OUTSIDE THE METRIC'S PHASE DOMAIN is not a measurement of that quantity — mark it.
+//
+// Design docs/design/metric_presentation_honesty.md §5.1's domain table: `pelvisSway`, `pelvisLift`,
+// `leadKneeDrift`, `plumbBobDistance`, `hipLineTilt`, `secondaryAxisTilt`, `spineSideBend`,
+// `thoraxLateralDrift`, `shoulderPlaneAngle` and `elbowAlignment` are Address→Impact quantities.
+// Past impact the pelvis and thorax have turned toward the target, so the frontal-plane projection
+// of a LATERAL quantity is measuring rotation — `MetricDescriptor::stereoGain()`'s own comment says
+// it: "turning the pelvis moves the APPARENT hip centre sideways with no sway at all". The +35 %
+// sway step after impact in design §2's screenshot is that, and it is not noise: no amount of
+// smoothing or windowing makes it a sway reading, because the quantity did not exist there.
+//
+// ⚠ THIS IS THE ONLY PLACE THE DOMAIN LEAK CAN BE CLOSED ONCE. The reducers cannot close it: the
+// diagnostics engine caches an extremum per (lo, hi] span while the review card reduces a whole
+// window, and those two agree only while a sample's windowed mean is the same number whoever asked
+// — so a reducer may not clip its own support to its query (series_reduce.h says why, with W2's
+// 20-of-514 measurement). Clip the support and out-of-domain samples still leak into every
+// whole-window card; mark them INVALID here and no reduction at any query can draw on them, because
+// they have stopped being measurements. Same mechanism as a gated frame, same reason.
+//
+// The VALUES are untouched: the curve is still continuous and still drawn (dashed, outside the
+// domain, PpChartPlot.qml), the tooltip still prints it. What changes is what may be REDUCED, which
+// is the whole shape of this design.
+//
+// ⚠ AND ONLY THE TAIL IS MARKED — see the paragraph above the function. The pre-Address head stays
+// valid on purpose.
+//
+// ⚠ THE HEAD IS OPEN BY DEFAULT, AND ONLY THE POST-IMPACT TAIL IS MARKED. `first` is nullopt unless
+// a caller asks for a bound, and no producer asks. Two reasons, both found by the 5-swing gate that
+// followed the first cut, where every clamped summary card came back `partial: true`:
+//
+//   * THE CHART DOES NOT CLIP THE START SIDE. A domain whose first phase is Address IS the default
+//     first phase, so `ChartMetrics::domainFor` reports `firstNarrowed = false` and the card's window
+//     still begins at the series' first sample. Marking the pre-Address head invalid then puts the
+//     card's own start edge inside a masked run, reduceAt finds nothing within ±15 ms, the edge falls
+//     back to interpolation and the card says `partial` — on every swing, for a head nobody was
+//     reducing over in the first place.
+//   * THE PRE-ADDRESS SAMPLES ARE HONEST. The golfer is standing still, referenced to the address
+//     frames themselves, so a pelvis or body-line reading there is a reading of address posture and
+//     nothing is turned out of the image plane yet. The design's own still-address gate window is
+//     [Address − 300 ms, Address] (§7 item 2, and the probe's STILL ADDRESS row) — it is measured
+//     ENTIRELY on those samples, and marking them invalid would withdraw the evidence for the number
+//     the phase is judged by.
+//
+// The TAIL is the whole of the problem this closes: past impact the projection stops being the
+// quantity. So the domain here is half-open in practice — unbounded before, Impact-bounded after —
+// and the two-argument form stays for a caller that genuinely has a bounded first phase.
+//
+// Each end is inclusive AT THE NEAREST GRID SAMPLE (nearestIndex — the same snap the chart's phase
+// dots use, so the boundary sample the user sees on the domain edge is the boundary sample the
+// reducers keep). An UNSEGMENTED or UNREQUESTED end is UNBOUNDED on that side: if the segmenter never
+// found Impact there is no instant to mark a tail from, and marking one from a guess would withdraw
+// real measurements. Neither end bounded ⇒ the series is left exactly as it was.
+inline void applyPhaseDomainMask(MetricSeries &m, const std::vector<PhaseEvent> &phases,
+                                 std::optional<Phase> first = std::nullopt,
+                                 std::optional<Phase> last  = Phase::Impact)
+{
+    if (m.t_us.empty())
+        return;
+    const std::optional<int64_t> a = first ? phaseTimeOpt(phases, *first) : std::nullopt;
+    const std::optional<int64_t> b = last  ? phaseTimeOpt(phases, *last)  : std::nullopt;
+    if (!a && !b)
+        return;                                     // no domain to apply — leave the series alone
+
+    const int lo = a ? nearestIndex(m.t_us, *a) : 0;
+    const int hi = b ? nearestIndex(m.t_us, *b) : int(m.t_us.size()) - 1;
+    if (lo > hi)
+        return;                                     // a ladder with Impact before Address: refuse
+
+    if (m.valid.empty())
+        m.valid.assign(m.t_us.size(), 1u);
+    for (int i = 0; i < int(m.t_us.size()); ++i)
+        if (i < lo || i > hi)
+            m.valid[size_t(i)] = 0u;
+
+    // A LABELLED reading outside the domain has to go with them. measure_sample.cpp falls back to
+    // phaseSamples where the curve has nothing to say, so a Finish sample left behind here would be
+    // graded against a corridor by the very path this mask exists to starve.
+    m.phaseSamples.erase(std::remove_if(m.phaseSamples.begin(), m.phaseSamples.end(),
+                                        [&](const PhaseSample &ps) {
+                                            return ps.t_us < m.t_us[size_t(lo)]
+                                                   || ps.t_us > m.t_us[size_t(hi)];
+                                        }),
+                         m.phaseSamples.end());
+
+    // EMPTY MEANS EVERY SAMPLE VALID — never an all-ones array, the same discipline `sigma` and
+    // channelValidityMask follow, so a swing whose grid stops at impact serialises as it always did.
+    if (std::find(m.valid.begin(), m.valid.end(), uint8_t(0)) == m.valid.end())
+        m.valid.clear();
+}
+
 // Append `s` to `out` unless it refused (empty key). Keeps every producer's emit block to one line
 // per series and makes the refusal path impossible to forget.
 inline void appendIfProduced(std::vector<MetricSeries> &out, MetricSeries &&s)

@@ -477,16 +477,60 @@ there would fail the distance test on every sample *including the measured ones*
 all-zeros mask, withdrawing every gated metric from every reducer at once. Both producers guard it and
 both guards are pinned by a test.
 
+**THE PHASE DOMAIN RIDES ON THE SAME MASK, and it is not a tunable — it is authored per metric.**
+Design §5.1's domain table narrows ten channels to **Address→Impact**: `pelvisSway`, `pelvisLift`,
+`leadKneeDrift`, `plumbBobDistance`, `hipLineTilt` in `lower_body_metrics.cpp`, and
+`secondaryAxisTilt`, `spineSideBend`, `thoraxLateralDrift`, `shoulderPlaneAngle`, `elbowAlignment` in
+`upper_body_metrics.cpp`. Past impact the pelvis and thorax have turned toward the target, so the
+frontal-plane projection of a lateral quantity is measuring **rotation** — `MetricDescriptor::
+stereoGain()`'s comment says it outright, "turning the pelvis moves the APPARENT hip centre sideways
+with no sway at all" — and the +35 % sway step after impact in design §2's screenshot is that, not
+noise. Since 2026-09-04 those producers mark **every grid sample past Impact invalid**
+(`metric_channel.h applyPhaseDomainMask`), inclusive **at the nearest grid sample**
+(`nearestIndex`, the same snap the chart's phase dots use, so the boundary sample the user sees is the
+one the reducers keep). An unsegmented Impact is **unbounded**, which leaves the series untouched.
+`value[]` does not move — the curve is still continuous, still drawn (dashed outside the domain) and
+still hovers; only what may be *reduced* changes.
+
+⚠ **THE DOMAIN'S OPEN SIDE IS THE HEAD, and that is not an oversight.** The first cut marked the
+pre-Address samples too, and the 5-swing gate came back with `partial: true` on **every clamped
+card**. Two reasons it stays open. (1) **The chart does not clip the start side.** A domain whose first
+phase is Address *is* the default first phase, so `ChartMetrics::domainFor` reports
+`firstNarrowed = false` and the card's window still begins at the series' first sample; marking the
+head then puts the card's own start edge inside a masked run, `reduceAt` finds nothing within ±15 ms,
+the edge falls back to interpolation and the card declares itself partial — for a head nobody was
+reducing over. (2) **Those samples are honest.** The golfer is standing still and the reading is
+referenced to the address frames themselves, so nothing is turned out of the image plane yet, and the
+phase's own **still-address gate window is [Address − 300 ms, Address]** (§7 item 2) — it is measured
+*entirely* on those samples, so marking them would withdraw the evidence for the number the phase is
+judged by. The two-argument form of `applyPhaseDomainMask` still accepts a first phase for a future
+metric whose domain genuinely starts later; no producer passes one.
+
+⚠ **Why not in the reducers.** `reduceExtremum` deliberately does not clip its ±20 ms support to the
+window it was asked about, because the diagnostics span cache and the whole-window card agree only
+while a sample's windowed mean is query-independent (§2.17 carries W2's 20-of-514 measurement). So a
+reducer cannot close a domain leak without breaking cache agreement, and a card that reduces a whole
+window would leak anyway. Marking the samples closes it **once**, for every consumer and every query,
+because outside its domain a sample has stopped being a measurement of that quantity — the same
+statement a gated frame makes, by the same mechanism.
+
+⚠ It is behind **the same off-switch**: `channel.maxBridgeUs` < 0 emits no validity mask at all,
+domain included, because that knob exists to restore the pre-mask bytes for a parity run and half a
+restoration is not one. And it is a **content change on swings that were never gated** — the four
+channels that predate this work are among the ten — so the phase 2 corpus gate accounts for the
+removed samples, not just for `value[]` equality.
+
 ### 2.17 `reduce.*` — the shared robust reducers (2026-09-04)
 
-Three keys from the second phase of
+Four keys from the second phase of
 [`metric_presentation_honesty.md`](../design/metric_presentation_honesty.md) §5.2, frozen in
 `pinpoint::tuned::reduce` and consumed through `ReduceConfig` in
 [`src/Analysis/series_reduce.h`](../../src/Analysis/series_reduce.h). They change nothing that is
 persisted: `value[]` is untouched, no producer reads them. What they change is what is *derived* from
 a curve — the review chart's summary card (`ChartMetrics::summary`) and the diagnostics phase grid
 (`measure_sample.cpp buildPhaseGrid`), which from this phase on share one arithmetic instead of
-carrying two.
+carrying two. (`series_reduce.h` is std-only so that either consumer, a probe or a tool can use it;
+the one function that knows about `MetricSeries` lives next door in `series_reduce_metric.h`.)
 
 ⚠ **NOT INJECTABLE YET.** There is no `fromOverrides` for these in this phase: both consumers
 default-construct a `ReduceConfig` from the constants. The dotted keys below are the names the sweep
@@ -510,12 +554,46 @@ value *A* among *k* window samples otherwise bounded by *M* cannot push the mean
 `M + A/k`. On the test's ramp (0..8) with one 99 at 8 ms spacing that is `7.92 + 99/5 = 27.72`, and
 the reducer returns **23.16** where the raw argmax returned **99**.
 
-⚠ **The centred window is NOT clamped to the reduction's own [from, to].** A window-edge sample's
-mean still draws on samples up to 20 ms outside the window, deliberately: the 40 ms is that
-reading's own support, and truncating it at the edge would make one instant reduce differently
-depending on where the caller cut its window. The visible consequence is that an Extremum taken up
-to a phase domain's edge borrows up to 20 ms from outside the domain. If that is ever shown to
-matter it is clamped in `reduceExtremum` and nowhere else.
+⚠ **[from, to] bounds the CANDIDATES, not the SUPPORT.** Only the anchors that may *win* have to lie
+in the window; each anchor's ±20 ms mean draws on every valid sample near it, inside the window or
+not. This went back and forth twice, so the argument is recorded: the diagnostics engine **caches** an
+extreme per `(lo, hi]` span while the review card reduces a whole window in one call, and those two
+can agree only if a sample's windowed mean is the same number whoever asked — i.e. only if the support
+is query-independent. W2 measured the alternative on `rich_7iron`: with the support clipped to the
+query, **20 of 514** authored extremum measures disagreed between the span cache and the whole-window
+reduction; unclipped, **0 of 514**. Cache agreement is what design §5.2 exists for, so what the
+reducer guarantees instead is the invariant the cache actually needs — the extreme over a **union** of
+adjacent spans is the extreme *of* their extremes, pinned in `series_reduce_test` §8.
+
+⚠ The price, recorded so nobody rediscovers it as a bug: on a rise-to-impact-then-reverse curve the
+mean at a span's first anchor reaches back before the span, so a P6→P7 span whose samples run
+18.4 → 20.0 reports a minimum of **17.92** — a value the curve never had inside it. **That is a phase
+-domain leak and it is closed at the producer, not here** (§2.16, `applyPhaseDomainMask`): a sample
+outside a metric's domain is marked INVALID, so it is not a measurement and no reducer at any query
+can draw on it. Clipping the support would have hidden the leak for spans, left it wide open for every
+whole-window card, and cost the cache agreement.
+
+**`reduce.minExtremumSamples` (3)** — and this key exists *because* of that clamp plus the grid's
+non-uniform sampling. At the 27 ms spacing outside the dense pose zone a ±20 ms centred window holds
+exactly **one** sample, so the "windowed mean" was the sample itself and the extremum was the raw
+argmax all over again — across the whole address and backswing, which is precisely where the still
+-address PK RATE and PEAK numbers in design §2 were measured. The corpus probe's tell was
+`peakSigma` printing **0.000** on every still-address row: a one-sample window has no residual, so it
+cannot carry an uncertainty. The window therefore **widens symmetrically** — the same half-width both
+sides, out to the next valid sample's distance — until it holds this many valid samples, or until the
+series has no valid sample left to add. Widening follows the same rule as the window it grows — valid
+samples wherever they are — which is what keeps a widened mean query-independent too, and it is
+**inert wherever the grid is dense**: every 8 ms expectation in the test file is identical with the
+floor at 1. 3 is the same floor `minRateSamples` uses, for the
+same reason — it is the smallest window with a residual left over after a straight line.
+
+**σ on the peak is the noise the MEAN carries, not the window's spread.** `reduceExtremum` reports
+`sqrt(SSE/(k−2)) / sqrt(k)` where SSE is the window's residual about a **local straight line** —
+0 for a clean ramp, ≈ σ/√k for a noisy still, and large when a spike is inside the window. The first
+implementation reported the window's *sample standard deviation*, which reads a noiseless ramp as
+**±0.08**: that is the curve's own motion across 40 ms printed beside the peak as if it were
+measurement error, and design §5.3 renders this number as "± σ" on the card. Fewer than three samples
+⇒ 0, because a two-point window is fitted exactly and has no residual to speak from.
 
 **`reduce.rateWindowUs` (50000)** and **`reduce.minRateSamples` (3)** — the minimum **time base** a
 rate may be fitted over, and the minimum evidence in it. `reduceRate` returns the largest-magnitude
@@ -526,7 +604,9 @@ literal 50 ms window holds two samples spanning 27 — fitting that would report
 over half the time base. A window with fewer than `minRateSamples` valid samples, or a span still
 short of `rateWindowUs`, is **skipped**; when none qualifies the answer is *no rate* (`rateOk: false`
 on the card, `ok = false` in the reducer), never a fabricated number. That is what a sparsely posed
-address — 80–100 ms strides — now returns.
+address — 80–100 ms strides — now returns. **Three is enforced in code whatever this key says**: a
+two-point fit passes through both points, so its standard error is 0, and a rate of 39 per 100 ms
+printed as "± 0" is a confident reading of two samples of noise.
 
 What this replaces is the largest **adjacent-frame** |Δv/Δt| scaled to 100 ms, and the arithmetic of
 why that had to go is design §2's whole table: at 8 ms spacing, half a degree of jitter reads as
@@ -547,10 +627,20 @@ beside PK RATE. **If a spike-proof rate is ever required, the answer is a robust
 (Theil–Sen over the window's pairwise slopes) or a residual gate, and it is a design decision, not a
 tuning of these keys.** Nobody should read `reduce.rateWindowUs` as a spike filter.
 
-`reduce.minRateSamples` is floored at 2 in code whatever it is set to: a slope needs two points. At 3
-it also guarantees a residual degree of freedom, which is what gives the standard error above
-something to be honest with — a two-point "fit" has none, and `sigma` comes back 0 for it, which
-would read as certainty.
+**Three properties of all four reducers that are not keys but are pinned by tests**, because each one
+was a defect before it was a rule: ties go to the **earliest** window and need a relative margin to
+do so (a clean ramp's windows have identical slopes to the last bit, and a bare `>` handed the
+reported `atUs` — a dot on the chart — to whichever anchor accumulated 1e-16 higher); a **non-finite**
+sample is ignored exactly as an invalid one is (a NaN reaching `std::nth_element` is undefined
+behaviour, and one reaching a mean returns a confident `ok = true` holding NaN); and **coincident
+timestamps** are tolerated but double-weighted in every reduction, which is the right reading of two
+measurements sharing a clock tick and the wrong reading of a duplicated row — no producer emits one,
+so it is stated rather than defended against.
+
+Cost, since these run per metric per span: At and Rate are O(n·w) in the samples and the window
+occupancy (w ≈ 5 dense, ≈ 3 sparse); Extremum is O(m²) in the **in-range** count, because symmetric
+widening has to know how far away the next sample outside the window is, and m is a span's own
+sample count — a handful — or the whole series for the chart's one full-range call.
 
 The At reducer takes no new key: it is `sampler.windowHalfUs` (±15 ms) and
 `sampler.minValidSamples`, the convention `measure_sample.cpp` has used since it was written. §2.4's

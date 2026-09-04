@@ -589,12 +589,17 @@ int main()
         checkTrue("…and ≥5× below the adjacent-frame definition",
                   std::fabs(rate) < oldRate(t, v) / 5.0);
         checkTrue("rateSigma is non-zero on a noisy fit", rateSigma > 0.0);
-        // The σ of the winning extremum window is reported too, and on noise it is of the order
-        // of the series' own σ. This is the number design §5.3 puts a "±" in front of on PEAK,
-        // and the reason a reader can tell that a 0.7σ excursion is not a finding.
+        // The σ of the winning extremum window is reported too, and here it is NOT of the order of
+        // the series' σ: it is the standard error of that window's MEAN about a local line, so
+        // roughly σ_residual/√k — a fraction of σ (0.21 against σ = 0.90 on this fixture). That is
+        // the number design §5.3 puts a "±" in front of on PEAK, and the reason a reader can tell
+        // that a 0.7σ excursion is not a finding. Bounded loosely on purpose: the exact value
+        // depends on which window won and how many samples it held, neither of which this case is
+        // pinning — what it pins is that a still series reports a NON-ZERO but SUB-σ uncertainty.
         const double peakSigma = s.value(QStringLiteral("peakSigma")).toDouble();
-        checkTrue("peakSigma is of the order of σ",
-                  peakSigma > 0.2 * realSd && peakSigma < 3.0 * realSd);
+        checkTrue("peakSigma is non-zero on noise", peakSigma > 0.05 * realSd);
+        checkTrue("…and well inside σ (it is the mean's error, not the spread)",
+                  peakSigma < 1.5 * realSd);
     }
 
     // ── A clean ramp: the windowed forms must reproduce it EXACTLY ────────────────
@@ -619,10 +624,37 @@ int main()
         checkEqD("start = the ramp at the edge", s.value(QStringLiteral("start")).toDouble(), 36.0);
         checkEqD("end   = the ramp at the edge", s.value(QStringLiteral("end")).toDouble(),   84.0);
         checkEqD("delta = the ramp's rise",      s.value(QStringLiteral("delta")).toDouble(), 48.0);
-        checkEqD("min = the ramp at the start",  s.value(QStringLiteral("min")).toDouble(),   36.0);
-        checkEqD("max = the ramp at the end",    s.value(QStringLiteral("max")).toDouble(),   84.0);
-        checkEqD("peak = the larger magnitude",  s.value(QStringLiteral("peak")).toDouble(),  84.0);
-        checkEqD("range",                        s.value(QStringLiteral("range")).toDouble(), 48.0);
+        // ⚠ WHICH SEMANTICS THESE ENCODE: the extremum support is NOT clamped to [from, to] — the
+        // ANCHORS are inside the window, their ±20 ms support is not — and it widens symmetrically
+        // only where it would otherwise hold fewer than 3 samples. At both window-edge anchors
+        // (104 ms and 296 ms) the support is therefore the full symmetric five (88…120 ms and
+        // 280…312 ms, all of which exist because the window sits 100 ms inside a 400 ms series),
+        // and the mean of a symmetric support on a straight line IS the value at its centre: 36.0
+        // and 84.0, the window's endpoints exactly.
+        //
+        // The clamp was tried and REVERTED: a span-cached engine cannot agree with a clamped card
+        // (20 disagreements in 514 against 0), and the out-of-domain leak it was aimed at is closed
+        // at the PRODUCER instead — samples outside a narrowed metric's phase domain are marked
+        // valid = 0 in swing.json, so these reducers exclude them for the same reason they exclude
+        // every other bridged sample, and no reducer needs a second notion of "outside". Under the
+        // clamp these two read 38.0 and 82.0 (supports truncated to 104/112/120 and 280/288/296);
+        // if this assertion ever fails with THOSE numbers, a clamp has come back — the fixture has
+        // not gone stale.
+        checkEqD("min = the ramp at the window start",
+                 s.value(QStringLiteral("min")).toDouble(),  36.0);
+        checkEqD("max = the ramp at the window end",
+                 s.value(QStringLiteral("max")).toDouble(),  84.0);
+        checkEqD("peak = the larger magnitude", s.value(QStringLiteral("peak")).toDouble(),  84.0);
+        checkEqD("range",                       s.value(QStringLiteral("range")).toDouble(), 48.0);
+        // range AND delta AGREE here — 48 both ways — and that is worth pinning as well: they rest
+        // on different evidence (a span of windowed means at anchors inside the window, against a
+        // difference of ±15 ms medians at its edges), and on a window several samples wider than
+        // either support they must converge. Where they can openly disagree is a window NARROWER
+        // than the support, and that case is documented in the header rather than papered over by
+        // blending the two.
+        checkEqD("…and delta agrees with it on a window this wide",
+                 s.value(QStringLiteral("range")).toDouble(),
+                 std::fabs(s.value(QStringLiteral("delta")).toDouble()));
         checkEqI("tPeakUs = the winning sample",
                  s.value(QStringLiteral("tPeakUs")).toLongLong(), b);
         // ⚠ REPLACES the old adjacent-difference rate expectation on a monotone fixture. On an
@@ -637,11 +669,15 @@ int main()
         checkTrue("tRateUs lies inside the window",
                   s.value(QStringLiteral("tRateUs")).toLongLong() >= a
                   && s.value(QStringLiteral("tRateUs")).toLongLong() <= b);
-        // peakSigma on a ramp is not noise at all — it is the SLOPE across the winning window:
-        // 5 samples 2 apart ⇒ deviations ±4, ±2, 0 ⇒ √10 = 3.162 (n−1) or √8 = 2.828 (n).
-        // Bounded rather than pinned because that denominator is C8's choice, not this test's.
-        const double ps = s.value(QStringLiteral("peakSigma")).toDouble();
-        checkTrue("peakSigma is the in-window spread", ps > 2.7 && ps < 3.3);
+        // ⚠ peakSigma IS ZERO HERE, and that is the assertion, not a rounding. It is the noise the
+        // window MEAN carries — the scatter about a LOCAL STRAIGHT LINE through the window, over
+        // √k — not the spread of the window's samples. A ramp IS a straight line, so it has no
+        // residual and the mean carries no noise: "± 0" beside PEAK is the honest reading of a
+        // noiseless curve, where the sample spread of that support (√10 = 3.16) would have printed
+        // "± 3" and called the slope
+        // measurement error.
+        checkEqD("peakSigma = 0 on a noiseless line",
+                 s.value(QStringLiteral("peakSigma")).toDouble(), 0.0);
     }
 
     // ── Sparse sampling, and a series too short to have a rate at all ─────────────
@@ -659,12 +695,20 @@ int main()
         checkEqD("rate on a 27 ms ramp", s.value(QStringLiteral("rate")).toDouble(), 10.0);
         checkEqD("start", s.value(QStringLiteral("start")).toDouble(), 5.4);
         checkEqD("end",   s.value(QStringLiteral("end")).toDouble(),  48.6);
-        // At 27 ms a ±20 ms extremum window holds ONE sample — itself — so the windowed mean is
-        // the sample and its σ is 0. The "always ≥ 1, itself" clause is what keeps a sparse
-        // series' extremes from vanishing.
+        // At 27 ms a ±20 ms support holds exactly ONE sample, so C8's widen-to-≥3 rule fires on
+        // every anchor here — and because the widening is SYMMETRIC and the support is not clamped
+        // to [from, to], what it widens to is the anchor plus one neighbour each side (±27 ms).
+        // On a straight line a symmetric support's mean is the value at its centre, so the extremes
+        // come back EXACTLY the window's own end samples, sparse or not: the widening changed the σ
+        // this reports, not the value it reports.
         checkEqD("min = the window's first sample", s.value(QStringLiteral("min")).toDouble(),  5.4);
         checkEqD("max = the window's last sample",  s.value(QStringLiteral("max")).toDouble(), 48.6);
-        checkEqD("peakSigma = 0 on a one-sample window",
+        // …and the mean's σ is 0 for the same reason as on the dense ramp: a straight line leaves
+        // no residual to speak from, however few samples the support ended up with. This is the
+        // assertion that would have caught the FIRST version of the sparse path, which reported
+        // peakSigma 0.000 for the wrong reason — because the support was ONE SAMPLE, not because
+        // the curve was clean.
+        checkEqD("peakSigma = 0 on a noiseless line, sparse too",
                  s.value(QStringLiteral("peakSigma")).toDouble(), 0.0);
 
         std::printf("summaryMasked — a series with no rate to report\n");
@@ -741,6 +785,90 @@ int main()
                  clean.value(QStringLiteral("rate")).toDouble(), 12.5);
     }
 
+    // ── A COARSE series is not an incomplete one ──────────────────────────────────
+    //
+    // ⚠ THE CASE THAT MADE `partial` OVER-CLAIM. The fallback edge fires whenever no valid sample
+    // lies within ±15 ms of the window edge, and that has nothing to do with bridging: a series
+    // sampled at 100 ms strides (or any real timeline's larger gaps — a fifth of a rich_7iron
+    // series' span is more than 15 ms from a sample, its worst gap 83 ms) puts most instants out
+    // of reach of the median window. A chip on those swings would be claiming the producer left a
+    // hole where it simply took fewer readings, and pre-Phase-2 the chip was unreachable without a
+    // mask. So `partial` requires an honoured mask, and this is the pair that pins it.
+    {
+        std::printf("summaryMasked — a coarse series declares nothing\n");
+        const QVariantList t{ qlonglong(0),      qlonglong(100000), qlonglong(200000),
+                              qlonglong(300000), qlonglong(400000) };
+        const QVariantList v{ 0.0, 1.0, 2.0, 3.0, 4.0 };
+        // The window starts 40 ms past a sample and 60 ms before the next — every reducer's median
+        // window over it is empty, so the edge is interpolated.
+        const QVariantMap none = cm.summary(t, v, 140000, 300000);
+        checkEqD("the edge is interpolated (1 + 1·0.4)",
+                 none.value(QStringLiteral("start")).toDouble(), 1.4);
+        checkTrue("…and an unmasked series is NOT partial",
+                  !none.value(QStringLiteral("partial")).toBool());
+        checkTrue("…and it does have readings", none.value(QStringLiteral("edgeOk")).toBool());
+        // 100 ms strides: the 50 ms fit window reaches one further sample, which is two points —
+        // below the 3-sample floor — so there is no rate, exactly as C8's note says.
+        checkTrue("no rate at 100 ms strides", !none.value(QStringLiteral("rateOk")).toBool());
+
+        // The same series with ONE bridged sample OUTSIDE the window: rule 2 cannot fire (no
+        // invalid sample inside), so this isolates rule 1 — the fallback, on a masked series.
+        // The interpolation now reaches from (0 ms, 0) to (200 ms, 2) and lands on the same 1.4,
+        // which is the point: the VALUE did not change, the claim about it did.
+        const QVariantList mask{ 1, 0, 1, 1, 1 };
+        const QVariantMap some = cm.summaryMasked(t, v, mask, 140000, 300000);
+        checkEqD("masked: the edge reads the same 1.4",
+                 some.value(QStringLiteral("start")).toDouble(), 1.4);
+        checkTrue("…but a masked fallback IS partial",
+                  some.value(QStringLiteral("partial")).toBool());
+    }
+
+    // ── edgeOk: a series with nothing readable prints no numbers at all ───────────
+    //
+    // The counterpart to rateOk, for the other six. Every sample bridged means interpValid has
+    // nothing to interpolate BETWEEN and returns 0.0, so PEAK, Δ and RANGE all come back 0 — a
+    // card that reads as a still, well-behaved curve while wearing a PARTIAL chip that says
+    // "mostly fine". `partial` qualifies a number; this says there is no number.
+    {
+        std::printf("summaryMasked — edgeOk\n");
+        const int n = 25;
+        const QVariantList t = tAt(n);
+        const QVariantList v = rampV(n, 0.0, 1.0);
+
+        // Every sample bridged. A mask of all zeros IS honoured (it covers the curve), so this is
+        // a series that says, in full, "none of this was measured".
+        QVariantList allBridged;
+        for (int i = 0; i < n; ++i) allBridged.append(0);
+        const QVariantMap dead = cm.summaryMasked(t, v, allBridged, 0, qlonglong(n - 1) * kDtUs);
+        checkTrue("all-bridged ⇒ edgeOk false", !dead.value(QStringLiteral("edgeOk")).toBool());
+        checkTrue("…and no rate either",        !dead.value(QStringLiteral("rateOk")).toBool());
+        checkTrue("…and partial, which is true but not enough",
+                  dead.value(QStringLiteral("partial")).toBool());
+        // The zeros are still RETURNED — a caller mid-migration degrades rather than crashes — and
+        // they are exactly why the flag has to exist. This asserts what the card must not print.
+        checkEqD("peak is a zero from nothing",  dead.value(QStringLiteral("peak")).toDouble(),  0.0);
+        checkEqD("delta is a zero from nothing", dead.value(QStringLiteral("delta")).toDouble(), 0.0);
+        checkEqD("range is a zero from nothing", dead.value(QStringLiteral("range")).toDouble(), 0.0);
+
+        // An EMPTY curve says the same thing with no mask at all, and must not be `partial` for it:
+        // there is no bridged run here, there is no series.
+        const QVariantMap empty = cm.summary(QVariantList{}, QVariantList{}, 0, 100000);
+        checkTrue("empty curve ⇒ edgeOk false", !empty.value(QStringLiteral("edgeOk")).toBool());
+        checkTrue("…and not partial (nothing was bridged; nothing exists)",
+                  !empty.value(QStringLiteral("partial")).toBool());
+        checkTrue("…and no rate", !empty.value(QStringLiteral("rateOk")).toBool());
+
+        // One valid sample is enough to have an edge — the flag is about EXISTENCE, not sufficiency;
+        // `partial` and `rateOk` are what qualify the rest.
+        QVariantList oneGood;
+        for (int i = 0; i < n; ++i) oneGood.append(i == 12 ? 1 : 0);
+        const QVariantMap thin = cm.summaryMasked(t, v, oneGood, 0, qlonglong(n - 1) * kDtUs);
+        checkTrue("one valid sample ⇒ edgeOk true", thin.value(QStringLiteral("edgeOk")).toBool());
+        checkEqD("…and every edge reads that one sample",
+                 thin.value(QStringLiteral("start")).toDouble(), 12.0);
+        checkTrue("…still no rate from one sample", !thin.value(QStringLiteral("rateOk")).toBool());
+    }
+
     // ── An empty mask IS "every sample valid" ─────────────────────────────────────
     //
     // summary() delegates to summaryMasked() with {}, so this pins the delegation as an identity:
@@ -764,7 +892,7 @@ int main()
         // `st.rateOk` against a map without it gets `undefined` — falsy — and the PK RATE tile
         // would print "—" on every card of every swing, which is exactly as wrong as printing a
         // fabricated number.
-        for (const char *k : { "peakSigma", "rateSigma", "rateOk", "tRateUs" })
+        for (const char *k : { "peakSigma", "rateSigma", "edgeOk", "rateOk", "tRateUs" })
             checkTrue(k, a.contains(QLatin1String(k)));
         // …and nothing that was there before was lost on the way: three QML files and one probe
         // read these by name.

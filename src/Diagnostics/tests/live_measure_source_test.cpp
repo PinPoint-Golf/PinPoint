@@ -271,7 +271,11 @@ int main(int argc, char **argv)
         // reaches -28.60 somewhere between the top and address, while the P4 ENDPOINT reads only
         // -24.08. A reduction over phase values alone would miss 4.5% of stance width, and the
         // signed-deviation contract makes the answer (peak - anchor) rather than |peak - anchor|.
-        checkValue(src, "m_pelvisSwayBack", -28.601046538397142);
+        // An anchored Extremum over the backswing. Until 2026-09-04 this was the raw minimum sample
+        // (-28.6010); the span extremes are now the extremum of the 40 ms centred-window mean
+        // (series_reduce.h, design §5.2), which pulls a one-frame trough toward its neighbours —
+        // the direction every extremum measure is expected to move, by about one frame's noise.
+        checkValue(src, "m_pelvisSwayBack", -28.359885646456314);
         checkValue(src, "m_pelvisSwayImpact", 17.063654641156035);
         // Was `m_pelvisSwayFinish`, 20.78817002111798, until 2026-09-04. That measure read
         // pelvisSway at the FINISH, and pelvisSway is a P1-P7 quantity: past impact the pelvis has

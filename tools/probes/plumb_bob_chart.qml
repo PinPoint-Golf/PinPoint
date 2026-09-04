@@ -377,6 +377,10 @@ Item {
             }
             if (edges.length && edges[edges.length - 1].indexOf("..") < 0)
                 edges[edges.length - 1] += ".." + probe.ms(t[t.length - 1]) + "]"
+            // For a NARROWED metric the first and last of these are expected to be the
+            // out-of-domain regions themselves (see §5.1 domain marking below) — a leading run
+            // from the series' start and a trailing one to its end are the mask doing its job, not
+            // a gate misfiring. The runs in BETWEEN are the geometric gates.
             if (edges.length) probe.w("invalid runs        = " + edges.join(" "))
         }
 
@@ -411,6 +415,51 @@ Item {
         }
         probe.w("samples out of dom  = " + outHead + " before, " + outTail + " after"
                 + "   (" + (t.length - outHead - outTail) + " inside)")
+
+        // ── THE PRODUCER INVARIANT for a narrowed metric ─────────────────────────────────
+        //
+        // Phase 2 closes the out-of-domain leak at the SOURCE rather than in the reducers: for the
+        // ten metrics the manifest narrows, every sample outside the domain is written with
+        // valid = 0, so the shared reducers exclude it for the same reason they exclude any other
+        // bridged sample and no reducer needs a second notion of "outside". (The alternative,
+        // clamping the extremum's support to the caller's window, was reverted — a span-cached
+        // engine cannot agree with a clamped card.)
+        //
+        // So this is the line that says whether the producer did it. Two counts, and they mean
+        // different things: an out-of-domain sample still marked VALID is a §5.1 violation for this
+        // swing; an IN-domain sample marked invalid is not — that is a geometric gate firing where
+        // it should (a foreshortened hip line), which §5.1 also asks for.
+        //
+        // ⚠ THE BOUNDARY MUST BE SNAPPED THE SAME WAY THE CHART SNAPS IT. validFromUs/validToUs are
+        // the phase instant moved to the NEAREST sample (PpMetricChart._nearestSampleUs, ties to
+        // the earlier frame), which is the same nearestIndex the phase samples use. A producer that
+        // marked by the raw phase instant instead can leave the boundary sample invalid while the
+        // card's window still starts on it — and then EVERY narrowed card on EVERY swing wears a
+        // PARTIAL chip, because an invalid sample lies inside the window. The count below is 0/0
+        // when the two conventions agree.
+        if (dom && (dom.firstNarrowed || dom.lastNarrowed)) {
+            var haveMask = raw.valid !== undefined && raw.valid.length >= t.length
+            if (!haveMask) {
+                probe.w("§5.1 domain marking = ⛔ NO USABLE MASK on a NARROWED metric — the "
+                        + "producer has not marked the out-of-domain samples invalid (or the mask "
+                        + "is short and discarded). Every reducer will read them.")
+            } else {
+                var outStillValid = 0, inMarked = 0, edgeMarked = 0
+                for (var q = 0; q < t.length && q < raw.valid.length; ++q) {
+                    var inDom = (t[q] >= p.validFromUs && t[q] <= p.validToUs)
+                    if (!inDom && raw.valid[q] !== 0) outStillValid++
+                    if (inDom && raw.valid[q] === 0) inMarked++
+                    if ((t[q] === p.validFromUs || t[q] === p.validToUs) && raw.valid[q] === 0)
+                        edgeMarked++
+                }
+                probe.w("§5.1 domain marking = out-of-domain still valid: " + outStillValid
+                        + (outStillValid ? "  ⛔ §5.1 VIOLATION (these reach every reducer)" : "  ✓")
+                        + "   |  in-domain marked invalid: " + inMarked
+                        + " (a geometric gate, not a fault)"
+                        + (edgeMarked ? "   ⛔ A DOMAIN-EDGE SAMPLE IS MARKED INVALID — every "
+                                        + "narrowed card will wear a PARTIAL chip" : ""))
+            }
+        }
 
         // ── min / max inside vs outside the domain ───────────────────────────────────────
         function extremes(inside) {
@@ -454,6 +503,11 @@ Item {
                     + (withSigma ? "  peakSigma=" + probe.num(s.peakSigma)
                                    + "  rateSigma=" + probe.num(s.rateSigma) : ""))
         }
+        // ⚠ THE FULL ROW IS EXPECTED TO SAY partial=true ON A NARROWED METRIC once the producer
+        // marks the out-of-domain samples invalid: the unclamped view window really does contain
+        // samples that were not measured for THIS metric. It is the CLAMPED row below that the
+        // cards render, and that one must stay partial=false unless a geometric gate fired inside
+        // the domain.
         line("summary FULL       ", sm(ws, we), ws, we, false)
         // The clamp the cards actually apply (PpMetricChart._domWinStart/_domWinEnd).
         //

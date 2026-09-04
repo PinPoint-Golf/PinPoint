@@ -57,6 +57,26 @@
 // pair of ADJACENT segmented phases makes any phase-bounded window exact by aggregation, at a cost
 // linear in phases rather than quadratic.
 //
+// "EXACT BY AGGREGATION" RESTS ON ONE RULE, and it is the reducers' rule, not this module's:
+// A CANDIDATE'S SUPPORT IS QUERY-INDEPENDENT. reduceExtremum scores a sample over every VALID sample
+// within its window (widening unclamped until the sample floor is met) — the neighbourhood comes
+// from the CURVE, never from the search bounds. So the union of the spans' candidate sets is the
+// whole window's candidate set, every candidate scores the same in a span as in a whole-window
+// query, and min/max being idempotent makes the shared boundary sample harmless. That is why this
+// cache can answer a multi-span window at all, and why it answers what the review chart answers.
+//
+// The rule was briefly broken by clamping a candidate's support to [from, to], to stop an extremum
+// borrowing samples from outside a metric's domain. Measured on rich_7iron that cost 20 of 514
+// engine-vs-card agreements (worst 1.45 on clubheadSpeed P1→P10 max), and it has no per-span fix:
+// under a query-dependent support a sample 10 ms before a phase is scored over a truncated window
+// inside its span and a full one inside the whole query, so no cached span is reusable.
+//
+// THE DOMAIN IS A MASK, NOT A CLAMP — that is the fix, and it belongs to the producers. A metric
+// narrower than the swing marks the samples outside its Address→Impact domain `valid = 0` in
+// swing.json (design §5.1), and both consumers already honour that mask: an out-of-domain sample is
+// then neither a candidate nor part of anyone's support, at every window, without any reducer
+// needing to know where a domain ends. See the mask note in buildPhaseGrid below.
+//
 // ── Sampling convention ────────────────────────────────────────────────────────────────────────
 //
 // A SHORT WINDOWED MEDIAN about each phase timestamp — the same convention WristAngleSampler
@@ -90,7 +110,11 @@ namespace pinpoint::analysis {
 //    typically toward the mean by about one σ, and a v2 sidecar's size+mtime guard still matches the
 //    unchanged swing.json — so as with v1, the version bump is the ONLY thing that retires the
 //    stale numbers. `values` are untouched: the same ±15 ms median, now computed by reduceAt().
-inline constexpr int kPhaseGridSchemaVersion = 3;
+// 4: spans are CLOSED at both ends, a zero-width span is not stored at all, and the endpoint-median
+//    seed is gone from the aggregation (see PhaseGridSpan and reduceOverGrid). Together those three
+//    were making the engine disagree with the review chart on 36 of 170 extremum cases on one corpus
+//    swing, by up to 9.4° — and a cache is only worth having if it answers what the chart answers.
+inline constexpr int kPhaseGridSchemaVersion = 4;
 
 struct PhaseGridConfig {
     // ±15 ms about the phase instant, the WristAngleSampler convention.
@@ -103,6 +127,22 @@ struct PhaseGridConfig {
     int64_t extremumWindowUs = tuned::reduce::kExtremumWindowUs;
 };
 
+// Whether two configurations would grid the same swing to the same numbers.
+//
+// Every field that MOVES A NUMBER is compared — the two windows and the sample floor — because they
+// are what a sidecar's stored numbers were computed AT: a grid built at ±15 ms and served to a run
+// configured for ±8 ms is a wrong answer carrying a matching size+mtime guard, which is the one
+// failure mode a cache must not have. `minValidSamples` is in here rather than left out as "only a
+// gate": raising it makes phases DISAPPEAR from the grid, which changes the spans as well as the
+// values, and a cache holding the permissive answer would quietly re-admit every phase the stricter
+// run had refused.
+inline bool sameGridReduction(const PhaseGridConfig &a, const PhaseGridConfig &b)
+{
+    return a.windowHalfUs     == b.windowHalfUs
+        && a.extremumWindowUs == b.extremumWindowUs
+        && a.minValidSamples  == b.minValidSamples;
+}
+
 // One metric's value at one segmented phase.
 struct PhaseGridValue {
     Phase   phase = Phase::Address;
@@ -110,15 +150,27 @@ struct PhaseGridValue {
     double  value = 0.0;
 };
 
-// The extremes of the continuous curve BETWEEN two adjacent segmented phases. Half-open at the
-// start and closed at the end ((from, to]) so aggregating consecutive spans counts no sample twice;
-// the endpoint values themselves come from the windowed medians, not from here.
+// The extremes of the continuous curve BETWEEN two adjacent segmented phases, CLOSED AT BOTH ENDS
+// ([from, to]).
+//
+// It was half-open at the start until schema 4, to keep an aggregate from counting a sample twice.
+// That reasoning was wrong twice over. Min and max are idempotent, so counting a sample twice
+// changes no answer and half-openness bought nothing; and the review chart's own candidate set over
+// a phase window IS closed, so a sample sitting exactly on the opening instant was a peak candidate
+// for the card and not for the engine. On one corpus swing that alone put the two surfaces 9.4°
+// apart on shaftAngleVsHorizontal P1→P4. The cache exists so that a corridor can be authored by
+// looking at the chart; a boundary convention it does not share is a defect, not a detail.
+//
+// A ZERO-WIDTH SPAN IS NOT STORED. Two phases can share an instant — rich_7iron has Address and
+// Takeaway at the same t_us — and a span from an instant to itself is not a search window, it is one
+// sample wearing a window's clothes. Storing its value puts a nearly-raw reading into an aggregate
+// that is otherwise all windowed means. So `spans` holds at MOST values.size() − 1 entries, and a
+// span whose whole interval is bridged is absent for the same reason.
 //
 // "Extreme" means the extreme of the CENTRED-WINDOW MEAN, not of the raw samples (schema 3): the
 // candidates are the valid samples inside the span, but each one is scored by the mean of its own
-// ±extremumWindowUs/2 neighbourhood — which reaches OUTSIDE the span at the edges, deliberately,
-// because a sample's neighbourhood is a property of the curve and not of the phase boundary. So a
-// single wild sample can no longer be a peak, and a peak that is genuinely there for 40 ms still is.
+// ±extremumWindowUs/2 neighbourhood. So a single wild sample can no longer be a peak, and a peak
+// that is genuinely there for 40 ms still is.
 struct PhaseGridSpan {
     Phase  from = Phase::Address;
     Phase  to   = Phase::Address;
@@ -145,6 +197,10 @@ struct SwingPhaseGrid {
 
     std::vector<MetricPhaseGrid> metrics;
 
+    // The reduction these numbers were computed under. Carried so a sidecar can be REFUSED when the
+    // run asking for it is configured differently — see sameGridReduction().
+    PhaseGridConfig config;
+
     const MetricPhaseGrid *metric(const QString &key) const;
     bool                   isEmpty() const { return metrics.empty(); }
 };
@@ -161,6 +217,8 @@ struct SwingPhaseGrid {
 // invalid, so a swing without it grids identically to a swing carrying an all-ones mask — which is
 // what makes the mask additive. (It no longer means "identical to the previous release": schema 3
 // moved every span. `values` are still identical either way, and that is what the mask tests pin.)
+//
+// The grid remembers the `cfg` it was built with, because the sidecar guard compares it.
 SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig &cfg = {});
 
 // ── Reduction ───────────────────────────────────────────────────────────────
@@ -174,6 +232,15 @@ SwingPhaseGrid buildPhaseGrid(const QJsonObject &analysis, const PhaseGridConfig
 // absolute deviation cannot carry a `sense`, and every anchored Extremum in the shipped pack means
 // the signed reading — m_pelvisSwayBack is the most negative sway relative to address, not the
 // largest excursion in either direction.
+//
+// An Extremum is the aggregate of the SPANS the window covers and nothing else. It used to be seeded
+// with the two endpoint windowed medians as well, on the reasoning that a peak sitting on a phase is
+// still a peak — but a ±15 ms median and a 40 ms windowed mean are two different smoothing scales,
+// and mixing them in one min/max made the engine report numbers the chart cannot produce (36 of 170
+// extremum cases on one corpus swing). The endpoints lie inside the closed spans anyway, so nothing
+// is lost. The medians survive only as a LAST RESORT: when no span in the window answered at all —
+// every interval zero-width or wholly bridged — min/max of the two endpoint values still beats
+// darkening a measure whose value is sitting right there, and it is what the chart falls back to.
 std::optional<double> reduceOverGrid(const SwingPhaseGrid &grid, const Measure &m);
 
 // The same, for a bare metric key + reducer, so a caller with no Measure in hand (the sidecar
@@ -186,11 +253,17 @@ std::optional<double> reduceOverGrid(const SwingPhaseGrid &grid, const QString &
 // <swingDir>/swing_phasegrid.json — a few KB beside a 32 MB swing.json. Guarded on the source
 // file's size and mtime exactly as swing_summary.json is: a stale guard means rebuild, never a
 // silently wrong number. Always safe to delete.
+//
+// The guard also carries the REDUCTION the grid was built under (both windows and the sample floor),
+// because size and mtime cannot see it: sweep `extremumWindowUs` and every sidecar in the library
+// still matches its swing.json byte-for-byte while holding numbers from the previous window.
+// `loadPhaseGrid` therefore takes the configuration the caller intends to use and refuses a grid
+// that was not built that way.
 QString phaseGridPath(const QString &swingDir);
 
 QJsonObject    savePhaseGrid(const SwingPhaseGrid &grid, qint64 sourceSize, qint64 sourceMtimeMs);
 SwingPhaseGrid loadPhaseGrid(const QJsonObject &root, qint64 sourceSize, qint64 sourceMtimeMs,
-                             bool *guardOk = nullptr);
+                             bool *guardOk = nullptr, const PhaseGridConfig &cfg = {});
 
 // Read one swing's grid, preferring the sidecar and falling back to a full swing.json parse.
 //

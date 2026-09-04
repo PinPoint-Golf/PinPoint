@@ -426,10 +426,24 @@ int main()
                 if (m.key == QLatin1String(key)) return &m;
             return nullptr;
         };
+        // The gated tail is indices 22..25, and for a NARROWED channel the phase domain marks
+        // everything past the Impact sample (index 24) as well — index 25, which the gate has already
+        // zeroed, so the expectation is the same either way. The domain's HEAD is open, so nothing at
+        // the front is marked (applyPhaseDomainMask says why; §13 tests it on its own).
         const auto maskedTail = [](const MetricSeries *m) {
             if (m == nullptr || m->valid.size() != m->t_us.size()) return false;
             for (size_t i = 0; i < m->valid.size(); ++i)
                 if (m->valid[i] != (i >= 22 ? 0u : 1u)) return false;
+            return true;
+        };
+        // "Nothing was gated on this channel": EMPTY for a whole-swing metric, and for a narrowed one
+        // exactly the phase domain's tail — the single zero at index 25, past Impact on index 24.
+        const auto domainOnly = [](const MetricSeries *m) {
+            if (m == nullptr) return false;
+            if (!isAddressToImpactMetric(m->key)) return m->valid.empty();
+            if (m->valid.size() != m->t_us.size()) return false;
+            for (size_t i = 0; i < m->valid.size(); ++i)
+                if (m->valid[i] != (i > 24 ? 0u : 1u)) return false;
             return true;
         };
 
@@ -508,8 +522,7 @@ int main()
             // The elbows never turned, so their line was never gated.
             const MetricSeries *el = find(series, "elbowAlignment");
             CHECK("elbowAlignment is untouched — a different line, its own span",
-                  el && el->valid.empty()
-                     && el->phaseSamples.size() == expectedPhaseSamples(el->key));
+                  domainOnly(el) && el->phaseSamples.size() == expectedPhaseSamples(el->key));
 
             // The audited un-gated set: their divisors are address constants or Euclidean lengths,
             // which do not vanish as the body turns, so withholding them would withhold a real
@@ -520,7 +533,7 @@ int main()
                 const MetricSeries *m = find(series, key);
                 // Sample count per the metric's DOMAIN — three for the Address→Impact pair at the
                 // front of this list, four for the three that are read at the finish.
-                CHECK(key, m && m->valid.empty()
+                CHECK(key, m && domainOnly(m)
                              && m->phaseSamples.size() == expectedPhaseSamples(m->key));
             }
         }
@@ -530,9 +543,8 @@ int main()
             const auto series = rotate(false, true);
             CHECK("spineSideBend goes with the HIP line too", maskedTail(find(series, "spineSideBend")));
             const MetricSeries *sp = find(series, "shoulderPlaneAngle");
-            CHECK("…while the shoulder line, which never turned, is unmasked",
-                  sp && sp->valid.empty()
-                     && sp->phaseSamples.size() == expectedPhaseSamples(sp->key));
+            CHECK("…while the shoulder line, which never turned, carries no gate zeros",
+                  domainOnly(sp) && sp->phaseSamples.size() == expectedPhaseSamples(sp->key));
         }
 
         // (c) The gate that never fires changes NOTHING. This is the promise the corpus gate is
@@ -542,9 +554,13 @@ int main()
             const auto series = rotate(false, false);
             bool untouched = series.size() == 9;
             for (const MetricSeries &m : series)
-                untouched = untouched && m.valid.empty()
+                untouched = untouched && domainOnly(&m)
                             && m.phaseSamples.size() == expectedPhaseSamples(m.key);
-            CHECK("no gated frame ⇒ every mask EMPTY and every phase sample its domain allows",
+            // ⚠ "EMPTY" is now the promise for a WHOLE-SWING channel only. A narrowed one carries
+            // its post-Impact zeros even on a swing where no frame was ever gated, which is a real
+            // content change and is what the phase 2 corpus gate accounts for — the four channels
+            // that predate this work are among them.
+            CHECK("no gated frame ⇒ no gate zeros anywhere, and every phase sample its domain allows",
                   untouched);
         }
     }
@@ -615,15 +631,23 @@ int main()
             const MetricSeries *el = find(series, "elbowAlignment");
             CHECK("elbowAlignment emitted", el != nullptr);
             if (el) {
+                // elbowAlignment is an Address→Impact channel: the phase domain marks everything
+                // past the Impact sample (index 35), the gate accounts for 10..19, and the domain's
+                // head is open so 0 and 1 are measurements.
                 bool exact = el->valid.size() == 50;
-                for (size_t i = 0; i < el->valid.size(); ++i)
-                    exact = exact && (el->valid[i] == ((i >= 10 && i <= 19) ? 0u : 1u));
+                for (size_t i = 0; i < el->valid.size(); ++i) {
+                    const uint8_t want = (i > 35 || (i >= 10 && i <= 19)) ? 0u : 1u;
+                    exact = exact && (el->valid[i] == want);
+                }
                 CHECK("ALL TEN gated frames are 0 — no budget excuses refused geometry", exact);
-                CHECK("the same-length CONFIDENCE hole stays valid, bridged as it always was",
-                      el->valid.size() == 50 && el->valid[30] == 1u && el->valid[35] == 1u
-                          && el->valid[39] == 1u);
-                CHECK("the mask starts and ends VALID, so none of it came from the extent rule",
-                      el->valid.size() == 50 && el->valid.front() == 1u && el->valid.back() == 1u);
+                CHECK("the same-length CONFIDENCE hole stays valid inside the domain, bridged as it "
+                      "always was (36..39 are 0 for the DOMAIN's tail, not for the hole)",
+                      el->valid.size() == 50 && el->valid[30] == 1u && el->valid[34] == 1u
+                          && el->valid[35] == 1u);
+                CHECK("the tail rule is INCLUSIVE at Impact and the head is open, so nothing here "
+                      "came from the extent rule",
+                      el->valid.size() == 50 && el->valid.front() == 1u && el->valid[9] == 1u
+                          && el->valid[20] == 1u && el->valid[35] == 1u);
                 bool top = false, impact = false;
                 for (const PhaseSample &s : el->phaseSamples) {
                     if (s.phase == Phase::Top)    top = true;
@@ -636,8 +660,12 @@ int main()
             // The shoulder line was never refused on this track, and its only hole is the confidence
             // one, inside the budget. Nothing gated, nothing over budget, so: no mask at all.
             const MetricSeries *sp = find(series, "shoulderPlaneAngle");
-            CHECK("a channel with nothing gated and no over-budget hole carries NO mask",
-                  sp && sp->valid.empty());
+            bool spInDomain = sp && sp->valid.size() == 50 && sp->valid[36] == 0u;
+            if (sp)
+                for (size_t i = 0; i <= 35; ++i)
+                    spInDomain = spInDomain && sp->valid[i] == 1u;
+            CHECK("a channel with nothing gated and no over-budget hole has no 0 in its domain",
+                  spInDomain);
         }
     }
 
@@ -669,6 +697,85 @@ int main()
               !hasSeries(series, "spineSideBend"));
         CHECK("…while the shoulder line, which HAS its reference, is produced",
               hasSeries(series, "shoulderPlaneAngle"));
+    }
+
+    // ── 13. THE PHASE DOMAIN: outside it, the sample is not a measurement ──────────────────────
+    //
+    // Design §5.1's table narrows five of these nine to ADDRESS→IMPACT: secondaryAxisTilt,
+    // spineSideBend, thoraxLateralDrift, shoulderPlaneAngle and elbowAlignment. Past impact the
+    // thorax has turned toward the target, so the frontal projection of a lateral quantity or a line
+    // angle is measuring rotation, not the quantity. The producers already refused to SAMPLE those
+    // channels at the Finish (kP1toP7Samples, §3); this is the other half of the same statement —
+    // every grid sample PAST IMPACT is marked invalid, so no reducer can read one either.
+    //
+    // ⚠ THE TAIL ONLY: the pre-Address head stays valid, because the chart does not clip the start
+    // side (a domain whose first phase is Address is the DEFAULT first, so the card's window still
+    // starts at the series' first sample, and marking the head made every clamped card `partial`) and
+    // because a still golfer referenced to address is a real reading of address posture — the
+    // still-address gate window is measured on exactly those samples.
+    //
+    // ⚠ It cannot be done in the reducers: series_reduce.h's extremum deliberately does not clip its
+    // support to the query, because the diagnostics span cache and the whole-window card agree only
+    // while a sample's windowed mean is query-independent (W2: 20 disagreements in 514 measures with
+    // the support clipped, 0 without). Marking the samples closes the leak once, for every consumer.
+    {
+        // Nothing gated anywhere — a held address — so the only zeros there can be are the domain's,
+        // over a grid that runs past impact, which is every real swing (the window is padded).
+        std::vector<Upper> poses(12, addressPose());        // 0 .. 110000 at 100 fps
+        const UpperBodyResult r = trackUpperBody(trackOf(poses), kW, kH, true, 20000);
+        // Address on index 2, Impact on index 10, Finish on 11 (phasesAt adds it at impact + 10 ms).
+        const auto series = buildUpperBodySeries(r, phasesAt(20000, 60000, 100000));
+        const auto bare   = buildUpperBodySeries(r, {});    // no ladder ⇒ no domain, same values
+
+        const auto find = [](const std::vector<MetricSeries> &all,
+                             const char *key) -> const MetricSeries * {
+            for (const MetricSeries &m : all)
+                if (m.key == QLatin1String(key)) return &m;
+            return nullptr;
+        };
+
+        bool narrowedShape = !series.empty(), wholeSwingEmpty = !series.empty();
+        for (const MetricSeries &m : series) {
+            if (isAddressToImpactMetric(m.key)) {
+                narrowedShape = narrowedShape && m.valid.size() == m.t_us.size();
+                for (size_t i = 0; i < m.valid.size(); ++i)
+                    narrowedShape = narrowedShape && (m.valid[i] == (i > 10 ? 0u : 1u));
+            } else {
+                wholeSwingEmpty = wholeSwingEmpty && m.valid.empty();
+            }
+        }
+        CHECK("every narrowed channel is 0 after Impact and 1 up to and including it — the "
+              "pre-Address head stays VALID",
+              narrowedShape);
+        CHECK("every whole-swing channel carries NO mask at all — trailElbowHeight, leadHandWidth, "
+              "leadUpperArmToChest, leadArmToTorso",
+              wholeSwingEmpty);
+
+        const MetricSeries *sp = find(series, "shoulderPlaneAngle");
+        CHECK("the Impact sample itself is VALID — 1 at it, 0 after it, so a P7 reading survives",
+              sp && sp->valid.size() == 12 && sp->valid[10] == 1u && sp->valid[11] == 0u
+                  && hasPhaseSample(*sp, Phase::Impact));
+
+        // THE VALUES DO NOT MOVE: the curve is still continuous and still drawn (dashed outside the
+        // domain) and still hovers. Only what may be REDUCED changed.
+        const MetricSeries *spBare = find(bare, "shoulderPlaneAngle");
+        bool sameValues = sp && spBare && sp->value.size() == spBare->value.size();
+        if (sameValues)
+            for (size_t i = 0; i < sp->value.size(); ++i)
+                sameValues = sameValues && sp->value[i] == spBare->value[i];
+        CHECK("value[] is untouched — absence lives in the mask, never in the curve", sameValues);
+
+        // AN UNSEGMENTED IMPACT IS UNBOUNDED: no instant, no tail to mark, and a guess would withdraw
+        // real measurements. With the head open that leaves NO mask at all. (applyPhaseDomainMask's
+        // own cases are pinned in lower_body_metrics_test §6g, where the helper lives next door.)
+        const std::vector<PhaseEvent> noImpact{ { Phase::Address, 20000, 1.f, SegmentRole::Unknown },
+                                                { Phase::Top,     60000, 1.f, SegmentRole::Unknown } };
+        // Held in a local: `find` returns a pointer INTO the vector, and a temporary dies at the
+        // end of the full expression (this assertion first failed on exactly that dangling read).
+        const auto noImpSeries = buildUpperBodySeries(r, noImpact);
+        const MetricSeries *spNoImp = find(noImpSeries, "shoulderPlaneAngle");
+        CHECK("no Impact in the ladder ⇒ no marking at all, `valid` stays EMPTY",
+              spNoImp && spNoImp->valid.empty());
     }
 
     std::printf(g_fail == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", g_fail);

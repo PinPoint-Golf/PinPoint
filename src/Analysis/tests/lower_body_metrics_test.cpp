@@ -539,6 +539,10 @@ int main()
             // the renderer and says which of itself is a measurement.
             CHECK("a validity mask is present and parallel to t_us",
                   tilt->valid.size() == tilt->t_us.size());
+            // Two rules land on the same tail here: the gate refuses 22..25, and the phase domain
+            // marks everything past the Impact sample (index 24) — so 25 is 0 twice over and the
+            // expectation is unchanged from before the domain existed. The domain's HEAD is open, so
+            // indices 0 and 1 stay valid (§6g).
             bool maskExact = tilt->valid.size() == 26;
             for (size_t i = 0; i < tilt->valid.size(); ++i)
                 maskExact = maskExact && (tilt->valid[i] == (i >= 22 ? 0u : 1u));
@@ -563,9 +567,15 @@ int main()
         // The ungated channels are untouched: sway, lift and knee drift are POSITIONS, which the same
         // turn distorts by projection but does not divide by a vanishing span. That is a phase-domain
         // question answered one layer up, not a validity question answered here.
+        // (pelvisSway carries a mask all the same — the phase domain's ONE zero at index 25, past the
+        // Impact sample. What it must NOT carry is a zero anywhere the hip line was refused.)
         const MetricSeries *sway = findSeries(series, "pelvisSway");
-        CHECK("pelvisSway is not gated by the hip line",
-              sway && sway->valid.empty() && hasPhase(*sway, Phase::Impact));
+        bool swayUngated = sway && sway->valid.size() == 26 && sway->valid[25] == 0u;
+        if (sway)
+            for (size_t i = 0; i <= 24; ++i)
+                swayUngated = swayUngated && sway->valid[i] == 1u;
+        CHECK("pelvisSway is not gated by the hip line — only its post-Impact tail is marked",
+              swayUngated && hasPhase(*sway, Phase::Impact));
 
         // The invariant every consumer relies on, asserted over the whole emission.
         bool noSampleOnInvalid = true;
@@ -628,24 +638,36 @@ int main()
         const MetricSeries *tilt = findSeries(series, "hipLineTilt");
         CHECK("hipLineTilt emitted", tilt != nullptr);
         if (tilt) {
+            // Two rules: the gate accounts for 10..19, and the phase domain marks everything PAST
+            // the Impact sample (index 35). The head is open, so 0 and 1 are measurements.
             bool exact = tilt->valid.size() == 50;
-            for (size_t i = 0; i < tilt->valid.size(); ++i)
-                exact = exact && (tilt->valid[i] == ((i >= 10 && i <= 19) ? 0u : 1u));
+            for (size_t i = 0; i < tilt->valid.size(); ++i) {
+                const uint8_t want = (i > 35 || (i >= 10 && i <= 19)) ? 0u : 1u;
+                exact = exact && (tilt->valid[i] == want);
+            }
             CHECK("ALL TEN gated frames are 0 — no budget excuses refused geometry", exact);
-            CHECK("the same-length CONFIDENCE hole stays valid, bridged as it always was",
-                  tilt->valid.size() == 50 && tilt->valid[30] == 1u && tilt->valid[35] == 1u
-                      && tilt->valid[39] == 1u);
-            CHECK("the mask starts and ends VALID, so none of it came from the extent rule",
-                  tilt->valid.size() == 50 && tilt->valid.front() == 1u && tilt->valid.back() == 1u);
+            CHECK("the same-length CONFIDENCE hole stays valid inside the domain, bridged as it "
+                  "always was (36..39 are 0 for the DOMAIN's tail, not for the hole)",
+                  tilt->valid.size() == 50 && tilt->valid[30] == 1u && tilt->valid[34] == 1u
+                      && tilt->valid[35] == 1u);
+            CHECK("the tail rule is INCLUSIVE at Impact and the HEAD is open, so nothing here came "
+                  "from the extent rule",
+                  tilt->valid.size() == 50 && tilt->valid.front() == 1u && tilt->valid[9] == 1u
+                      && tilt->valid[20] == 1u && tilt->valid[35] == 1u);
             CHECK("a phase instant inside the GATED run emits nothing", !hasPhase(*tilt, Phase::Top));
             CHECK("…while one inside the confidence hole still does", hasPhase(*tilt, Phase::Impact));
         }
 
-        // pelvisSway has no geometric gate at all, so its only hole is the confidence one — inside
-        // the budget, therefore EMPTY. Nothing was gated, nothing exceeded the budget, no mask.
+        // pelvisSway has no geometric gate at all, so nothing inside its phase domain is 0: the
+        // confidence hole sits inside the bridge budget and is a hold, not a fabrication. Its only
+        // zeros are the post-Impact tail.
         const MetricSeries *sway = findSeries(series, "pelvisSway");
-        CHECK("an ungated channel with a bridged hole carries NO mask at all",
-              sway && sway->valid.empty() && hasPhase(*sway, Phase::Impact));
+        bool swayInDomain = sway && sway->valid.size() == 50 && sway->valid[36] == 0u;
+        if (sway)
+            for (size_t i = 0; i <= 35; ++i)
+                swayInDomain = swayInDomain && sway->valid[i] == 1u;
+        CHECK("an ungated channel with a bridged hole has no 0 anywhere in its domain",
+              swayInDomain && hasPhase(*sway, Phase::Impact));
     }
 
     // ── 6d3) channel.maxBridgeUs < 0 is the OFF-SWITCH ─────────────────────
@@ -701,16 +723,20 @@ int main()
         PoseTrack2D pose; pose.frames = frames;
         LowerBodyConfig cfg; cfg.addrWindowUs = 30000;
         const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt, cfg);
-        const auto phases = ladder({ { Phase::Address, 2 * dt },
-                                     { Phase::Top,     8 * dt },
-                                     { Phase::Impact, 11 * dt } });
+        // ⚠ IMPACT LANDS ON THE LAST GRID SAMPLE HERE, which is what lets this section still make
+        // the promise it exists to make: the phase domain's tail rule has nothing past Impact to mark,
+        // the head is open, so no mask at all — byte-identical serialisation. What the domain does
+        // when the grid runs PAST impact is §6g's job.
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      8 * dt },
+                                     { Phase::Impact,  11 * dt } });
         const auto series = buildLowerBodySeries(res, phases);
 
         CHECK("the hip line is never gated by a pure tilt",
               res.hipTilt.t_us.size() == res.states.size());
         bool allEmpty = !series.empty();
         for (const MetricSeries &m : series) allEmpty = allEmpty && m.valid.empty();
-        CHECK("every series leaves `valid` EMPTY", allEmpty);
+        CHECK("every series leaves `valid` EMPTY — never an all-ones array", allEmpty);
 
         const MetricSeries *tilt = findSeries(series, "hipLineTilt");
         CHECK("…and the tilt still reads its three ladder phases",
@@ -820,6 +846,166 @@ int main()
             const std::vector<uint8_t> dh = channelValidityMask(dense, denseHole, 60000);
             CHECK("a 160 ms run in the DENSE zone is still marked (60 ms floor decides)",
                   dh.size() == dense.size() && dh[20] == 0u && dh[9] == 1u && dh[39] == 1u);
+        }
+    }
+
+    // ── 6g) THE PHASE DOMAIN: past impact, the sample is not a measurement ─
+    //
+    // Design §5.1's domain table. pelvisSway, pelvisLift, leadKneeDrift, plumbBobDistance and
+    // hipLineTilt are ADDRESS→IMPACT quantities: past impact the pelvis has turned toward the target,
+    // so the frontal-plane projection of a lateral quantity is measuring rotation — the +35 % sway
+    // step after impact in the design's screenshot is exactly that, and it is not noise. The quantity
+    // did not exist there, so the sample is marked invalid and no reducer may read it.
+    //
+    // ⚠ THE TAIL ONLY. The pre-Address head stays VALID, which the 5-swing gate forced and which is
+    // right twice over: the chart does not clip the start side (a domain whose first phase is Address
+    // is the DEFAULT first phase, so `firstNarrowed` is false and the card's window still starts at
+    // the series' first sample — marking the head put the card's own start edge inside a masked run
+    // and every clamped card came back `partial`), and a still golfer referenced to the address frames
+    // is a real reading of address posture, which is the only evidence the still-address gate window
+    // [Address − 300 ms, Address] has.
+    //
+    // ⚠ WHY IN THE PRODUCER AND NOT IN A REDUCER. series_reduce.h's extremum deliberately does NOT
+    // clip its support to the window it was asked about, because the diagnostics engine caches an
+    // extreme per (lo, hi] span while the card reduces a whole window, and the two agree only while a
+    // sample's windowed mean is the same number whoever asked (W2 measured 20 disagreements in 514
+    // measures with the support clipped, 0 without). So a reducer cannot close a domain leak without
+    // breaking cache agreement. Marking the samples closes it once, for every consumer and every
+    // query, because they stop being measurements at all.
+    {
+        std::printf("=== 6g) the post-Impact phase domain ===\n");
+        // A pure tilt, so NOTHING is gated and the only zeros there can be are the domain's, over a
+        // grid that runs past impact — which is every real swing: the window is padded to the finish.
+        std::vector<PoseFrame2D> frames;
+        for (int k = 0; k < 6; ++k) frames.push_back(makeLower(k * dt, addressPose()));
+        for (int j = 1; j <= 6; ++j) {
+            Lower p = addressPose();
+            const double f = double(j) / 6.0;
+            p.lHip = QPointF(p.lHip.x(), p.lHip.y() - 0.004 * f);
+            p.rHip = QPointF(p.rHip.x(), p.rHip.y() - 0.016 * f);
+            frames.push_back(makeLower((5 + j) * dt, p));
+        }
+        PoseTrack2D pose; pose.frames = frames;
+        LowerBodyConfig cfg; cfg.addrWindowUs = 30000;
+        const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt, cfg);
+
+        // Grid 0..11; Impact on index 9, so 10 and 11 are past the domain and 0..9 are not.
+        const auto full = ladder({ { Phase::Address,  2 * dt },
+                                   { Phase::Top,      6 * dt },
+                                   { Phase::Impact,   9 * dt },
+                                   { Phase::Finish,  11 * dt } });
+        const auto series = buildLowerBodySeries(res, full);
+
+        const MetricSeries *sway = findSeries(series, "pelvisSway");
+        CHECK("pelvisSway emitted", sway != nullptr);
+        if (sway) {
+            bool shape = sway->valid.size() == 12;
+            for (size_t i = 0; i < sway->valid.size(); ++i)
+                shape = shape && (sway->valid[i] == (i > 9 ? 0u : 1u));
+            CHECK("0 after the Impact sample, 1 everywhere up to and including it", shape);
+            // THE HEAD IS OPEN. These are readings of address posture, and the still-address gate
+            // window is measured on them.
+            CHECK("the pre-Address samples stay VALID — the chart never clips that side",
+                  sway->valid.size() == 12 && sway->valid[0] == 1u && sway->valid[1] == 1u);
+            // INCLUSIVE at Impact, and it matters: the Impact reading is the one every
+            // Address→Impact corridor is keyed on, and nearestIndex is the same snap the chart's
+            // phase dots use, so the boundary sample the user sees is the boundary sample kept.
+            CHECK("the Impact sample itself is VALID — 1 at it, 0 after it",
+                  sway->valid.size() == 12 && sway->valid[9] == 1u && sway->valid[10] == 0u);
+            CHECK("…and so a P7 reading is still emitted", hasPhase(*sway, Phase::Impact));
+        }
+
+        // THE VALUES DO NOT MOVE. The curve stays continuous and is still drawn (dashed, outside the
+        // domain) and still hovers — only what may be REDUCED changed.
+        const auto bare = buildLowerBodySeries(res, {});          // no ladder ⇒ no domain
+        const MetricSeries *swayBare = findSeries(bare, "pelvisSway");
+        bool sameValues = sway && swayBare && sway->value.size() == swayBare->value.size();
+        if (sameValues)
+            for (size_t i = 0; i < sway->value.size(); ++i)
+                sameValues = sameValues && sway->value[i] == swayBare->value[i];
+        CHECK("value[] is untouched — absence lives in the mask, never in the curve", sameValues);
+
+        // A WHOLE-SWING channel is not narrowed at all: comOverLeadFoot is READ at the finish and is
+        // a distance along the stance line, which survives the turn (design §5.1's table).
+        const MetricSeries *com = findSeries(series, "comOverLeadFoot");
+        const MetricSeries *fa  = findSeries(series, "feetAlignment");
+        CHECK("comOverLeadFoot and feetAlignment carry NO mask — their domain is the whole swing",
+              com && com->valid.empty() && fa && fa->valid.empty());
+        CHECK("…and comOverLeadFoot still samples the FINISH", com && hasPhase(*com, Phase::Finish));
+
+        // AN UNSEGMENTED IMPACT IS UNBOUNDED: there is no instant to mark a tail from, and marking one
+        // from a guess would withdraw real measurements. With the head open, that leaves NO mask.
+        const auto noImpact = buildLowerBodySeries(res, ladder({ { Phase::Address, 2 * dt },
+                                                                 { Phase::Top,     6 * dt } }));
+        const MetricSeries *sNoImp = findSeries(noImpact, "pelvisSway");
+        CHECK("no Impact in the ladder ⇒ no marking at all, `valid` stays EMPTY",
+              sNoImp && sNoImp->valid.empty());
+
+        // And the Address end is not a bound in the first place, so a ladder without it marks exactly
+        // the same tail as the full one.
+        const auto noAddress = buildLowerBodySeries(res, ladder({ { Phase::Top,    6 * dt },
+                                                                  { Phase::Impact, 9 * dt } }));
+        const MetricSeries *sNoAddr = findSeries(noAddress, "pelvisSway");
+        bool tailOnly = sNoAddr && sNoAddr->valid.size() == 12;
+        if (sNoAddr)
+            for (size_t i = 0; i < sNoAddr->valid.size(); ++i)
+                tailOnly = tailOnly && (sNoAddr->valid[i] == (i > 9 ? 0u : 1u));
+        CHECK("no Address ⇒ the same tail, because Address was never a bound", tailOnly);
+
+        const auto neither = buildLowerBodySeries(res, ladder({ { Phase::Top, 6 * dt } }));
+        const MetricSeries *sNeither = findSeries(neither, "pelvisSway");
+        CHECK("no Impact and no Address ⇒ the series is left exactly as it was",
+              sNeither && sNeither->valid.empty());
+
+        // ── applyPhaseDomainMask on its own ────────────────────────────────
+        //
+        // Two properties the producers cannot reach today and that a future caller will: an
+        // out-of-domain LABELLED sample has to go with the samples (measure_sample.cpp falls back to
+        // phaseSamples where the curve has nothing to say, so a Finish reading left behind here would
+        // be graded against a corridor by the very path this mask exists to starve), and a domain
+        // that covers the whole grid must leave the mask EMPTY rather than all-ones.
+        {
+            const auto make = [&] {
+                MetricSeries m;
+                m.key  = QStringLiteral("probe");
+                m.t_us = { 0, 10000, 20000, 30000, 40000 };
+                m.value = { 1.0, 2.0, 3.0, 4.0, 5.0 };
+                m.phaseSamples = { { Phase::Address, 10000, 2.0, QString() },
+                                   { Phase::Impact,  30000, 4.0, QString() },
+                                   { Phase::Finish,  40000, 5.0, QString() } };
+                return m;
+            };
+            const auto ld = ladder({ { Phase::Address, 10000 }, { Phase::Impact, 30000 } });
+
+            // The DEFAULT form — the one both producers call: tail bounded, head open.
+            MetricSeries tail = make();
+            applyPhaseDomainMask(tail, ld);
+            CHECK("the default form marks only the tail and keeps the Impact sample",
+                  tail.valid.size() == 5 && tail.valid[0] == 1u && tail.valid[1] == 1u
+                      && tail.valid[3] == 1u && tail.valid[4] == 0u);
+            CHECK("a LABELLED sample past Impact is dropped, the in-domain ones kept",
+                  tail.phaseSamples.size() == 2 && !hasPhase(tail, Phase::Finish)
+                      && hasPhase(tail, Phase::Impact) && hasPhase(tail, Phase::Address));
+
+            // The two-sided form, which no producer uses today — kept because the head bound is a
+            // legitimate request for a metric whose domain genuinely starts later than the window.
+            MetricSeries both = make();
+            applyPhaseDomainMask(both, ld, Phase::Address);
+            CHECK("an explicit first phase marks the head as well",
+                  both.valid.size() == 5 && both.valid[0] == 0u && both.valid[1] == 1u
+                      && both.valid[4] == 0u);
+
+            MetricSeries covered = make();
+            applyPhaseDomainMask(covered, ladder({ { Phase::Impact, 40000 } }));
+            CHECK("a tail that lands on the last sample leaves `valid` EMPTY, never all-ones",
+                  covered.valid.empty() && covered.phaseSamples.size() == 3);
+
+            MetricSeries backwards = make();
+            applyPhaseDomainMask(backwards, ladder({ { Phase::Address, 30000 },
+                                                     { Phase::Impact,  10000 } }),
+                                 Phase::Address);
+            CHECK("a ladder with Impact BEFORE Address is refused, not obeyed",
+                  backwards.valid.empty() && backwards.phaseSamples.size() == 3);
         }
     }
 

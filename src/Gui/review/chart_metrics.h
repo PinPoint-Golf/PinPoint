@@ -59,13 +59,32 @@ public:
 
     // Per-metric summary over [startUs, endUs]:
     //   { start, end, min, max, peak, range, delta, rate, tPeakUs, partial,
-    //     peakSigma, rateSigma, rateOk, tRateUs }
+    //     peakSigma, rateSigma, edgeOk, rateOk, tRateUs }
     // start/end = the ±15 ms windowed MEDIAN at each edge; min/max = the extremum of the 40 ms
     // centred-window MEAN inside the window; peak = whichever of those has the larger magnitude,
     // at tPeakUs, ± peakSigma; range = max-min; delta = end-start; rate = the steepest
     // least-squares slope over any ≥50 ms window, SIGNED, per 100 ms, at tRateUs, ± rateSigma,
     // and only when `rateOk` (see below). `tUs`/`value` are the parallel arrays from
     // analysisDetail.series[i] (tUs ascending).
+    //
+    // TWO KEYS SAY WHETHER THERE IS ANYTHING TO SHOW, and a display must consult them before it
+    // prints anything: `edgeOk` false ⇒ the series carries no valid sample at all, so start, end,
+    // min, max, peak, range and delta are zeros from nothing; `rateOk` false ⇒ no window qualified
+    // for a slope. Both are the same principle as `partial`'s, one step stronger: partial qualifies
+    // a number, these two say there is no number.
+    //
+    // ⚠ range AND delta DO NOT SHARE EVIDENCE. range = max − min, a span of 40 ms windowed MEANS
+    // taken at the samples (ANCHORS) inside the window; delta = end − start, a difference of ±15 ms
+    // MEDIANS taken at its two EDGES. Both supports may reach outside the window — neither is
+    // clamped to it — so the difference is not the support but what each is anchored on: a window
+    // with few anchors in it has little to span while its edges can still have moved. They agree on
+    // any window more than a few samples wide, and on a window narrower than the sample spacing
+    // they can openly contradict — RANGE 0.2 beside Δ 4, when the edge medians moved and nothing inside the window
+    // had a span. That is left as it is on purpose: `range = max(range, |delta|)` would make range a
+    // blend of two reducers (so it would no longer be the number the diagnostics engine's Extremum
+    // measures compare against, design §7 item 5) and would hide the one signal a reader gets that
+    // the window is too narrow for the curve in it. A caller that wants them consistent should
+    // widen the window, not launder the number.
     //
     // ⚠ EVERY ONE OF THOSE REDUCTIONS IS src/Analysis/series_reduce.h's, NOT THIS CLASS'S — the
     // diagnostics engine's buildPhaseGrid calls the same four functions with the same tuned
@@ -99,6 +118,22 @@ public:
     //   no sample to scan at all). The card renders it as a "PARTIAL" chip; it never changes a
     //   value.
     //
+    //   ⚠ BOTH RULES REQUIRE A HONOURED MASK, so `partial` is unreachable on a series that
+    //   declares nothing — exactly as it was before Phase 2. The fallback ALSO fires with no mask,
+    //   whenever a window edge lands more than 15 ms from any sample, and on a real timeline that
+    //   is ordinary rather than exotic (a fifth of a series' span can be that far from a sample,
+    //   with gaps to 80 ms). A coarse series is not an incomplete one: it was measured everywhere
+    //   it claims to have been. The chip's claim is "the producer BRIDGED part of this window", and
+    //   the mask is the only thing that ever says so; a series with nothing readable at all is
+    //   `edgeOk` false, not `partial` true.
+    //
+    //   `edgeOk` (bool) — false when the series carries NO valid sample: every sample bridged, or
+    //   an empty curve. There is then nothing for the window edges to interpolate between, and
+    //   start/end/min/max/peak/range/delta are all 0.0 — a "PEAK 0, Δ 0, RANGE 0" card that reads
+    //   as a still, well-behaved curve. The tiles print "—" instead, the same way PK RATE does on
+    //   `rateOk` false. The zeros are still returned so a caller mid-migration degrades rather
+    //   than crashes; a caller that displays them has been told not to.
+    //
     // ⚠ THE RATE AND PEAK DEFINITIONS CHANGED IN PHASE 2 (design §5.2), and they changed the
     // numbers on every card, on every swing, whether or not anything is masked:
     //
@@ -119,9 +154,11 @@ public:
     //   hides the per-100 ms unit with it. A fabricated 0 would read as a still, well-behaved
     //   curve, which is the exact class of confident absurdity this design exists to remove.
     //
-    // `peakSigma` / `rateSigma` are the σ of the winning window (the sample sd of its samples
-    // about their mean; the standard error of the fitted slope), for the "± σ" the summary card
-    // carries beside those two tiles — design §5.3.
+    // `peakSigma` / `rateSigma` are the σ of the winning window, for the "± σ" the summary card
+    // carries beside those two tiles — design §5.3. Both are the NOISE, never the motion:
+    // peakSigma is the standard error of the window's mean about a LOCAL STRAIGHT LINE through it
+    // (so a clean ramp reports 0 rather than reporting its own slope as uncertainty), rateSigma
+    // the standard error of the fitted slope (so an exact fit reports 0).
     Q_INVOKABLE QVariantMap summaryMasked(const QVariantList &tUs, const QVariantList &value,
                                           const QVariantList &valid,
                                           qint64 startUs, qint64 endUs) const;

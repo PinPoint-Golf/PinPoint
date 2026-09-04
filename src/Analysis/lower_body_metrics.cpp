@@ -320,8 +320,12 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
 
     // `gated` = the instants THIS channel's geometry was refused at (ascending, empty for a channel
     // with no gate). Distinct from the instants it merely lacks — see LowerBodyResult::gatedHipLine.
+    // `p1toP7Domain` = this channel is an ADDRESS→IMPACT quantity (design §5.1's domain table), so
+    // everything PAST IMPACT is marked invalid rather than reduced. The pre-Address head stays valid
+    // — a still golfer referenced to address is a real reading of address posture, and it is the only
+    // evidence the still-address gate window has. See applyPhaseDomainMask for the whole argument.
     const auto pushSeries = [&](const LowerBodyChannel &ch, const QString &key, const QString &label,
-                                const QString &unit,
+                                const QString &unit, bool p1toP7Domain = false,
                                 const std::vector<Phase> &at = { Phase::Address, Phase::Top,
                                                                  Phase::Impact },
                                 const std::vector<int64_t> &gated = kNoneGated) {
@@ -355,6 +359,17 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
         if (res.maxBridgeUs >= 0)
             m.valid = channelValidityMask(grid, ch.t_us, res.maxBridgeUs, res.bridgeSpacingFactor,
                                           gated);
+
+        // THE PHASE DOMAIN'S TAIL, on the same mask and for the same reason: past impact the pelvis
+        // has turned, so the frontal projection of a lateral quantity is rotation and not the
+        // quantity. applyPhaseDomainMask carries the argument, the reason it cannot live in a reducer,
+        // and why the HEAD is left open.
+        //
+        // Behind the SAME off-switch as the bridge mask deliberately: channel.maxBridgeUs < 0 means
+        // "emit no validity mask at all" for a parity run, and a knob that restored half of it would
+        // not restore the old bytes, which is the only thing it is for.
+        if (res.maxBridgeUs >= 0 && p1toP7Domain)
+            applyPhaseDomainMask(m, phases);
         // Address / Top / Impact by default, the same three every other frontal-plane channel
         // samples. Top is P4 — the reading the knee-drift and hip-tilt corridors are both keyed on.
         // The caller may ask for more: comOverLeadFoot is read at the FINISH, which nothing sampled
@@ -406,20 +421,23 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
 
     const QString pct = QStringLiteral("% stance width");
     pushSeries(res.kneeDrift,  QStringLiteral("leadKneeDrift"),
-               QStringLiteral("Lead knee drift"), pct);
+               QStringLiteral("Lead knee drift"), pct, /*p1toP7Domain=*/true);
     pushSeries(res.pelvisSway, QStringLiteral("pelvisSway"),
-               QStringLiteral("Pelvis sway"), pct);
+               QStringLiteral("Pelvis sway"), pct, /*p1toP7Domain=*/true);
     pushSeries(res.pelvisLift, QStringLiteral("pelvisLift"),
-               QStringLiteral("Pelvis lift"), pct);
+               QStringLiteral("Pelvis lift"), pct, /*p1toP7Domain=*/true);
     pushSeries(res.hipTilt,    QStringLiteral("hipLineTilt"),
-               QStringLiteral("Hip line tilt"), QStringLiteral("°"), kP1toP7, res.gatedHipLine);
+               QStringLiteral("Hip line tilt"), QStringLiteral("°"), /*p1toP7Domain=*/true,
+               kP1toP7, res.gatedHipLine);
     pushSeries(res.feetAlign,  QStringLiteral("feetAlignment"),
                QStringLiteral("Feet alignment"), QStringLiteral("°"));
+    // Whole-swing, NOT narrowed: comOverLeadFoot is READ at the finish and is a distance along the
+    // stance line, which survives the turn (design §5.1's table says so explicitly).
     pushSeries(res.comOverLead, QStringLiteral("comOverLeadFoot"),
-               QStringLiteral("Balance over the lead foot"), pct,
+               QStringLiteral("Balance over the lead foot"), pct, /*p1toP7Domain=*/false,
                { Phase::Address, Phase::Top, Phase::Impact, Phase::Finish });
     pushSeries(res.plumbBob,   QStringLiteral("plumbBobDistance"),
-               QStringLiteral("Plumb bob"), QStringLiteral("in"), kP1toP7);
+               QStringLiteral("Plumb bob"), QStringLiteral("in"), /*p1toP7Domain=*/true, kP1toP7);
     return out;
 }
 

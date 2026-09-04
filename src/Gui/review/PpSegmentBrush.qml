@@ -166,10 +166,24 @@ Item {
             // silently draws a DashLine solid and the distinction would vanish.
             preferredRendererType: spark.modelData.dashed ? Shape.GeometryRenderer
                                                           : Shape.CurveRenderer
+            // ⚠ CLAMPED TO THE STRIP, and the clamp is load-bearing since Phase 2. `lo`/`hi` are
+            // ChartMetrics' min/max, which are now the extremes of the 40 ms WINDOWED MEAN — by
+            // construction strictly inside the raw range they used to be. The polyline still draws
+            // the RAW samples, so an excursion sharper than 40 ms maps outside [lo, hi]: on
+            // rich_7iron shoulderPlaneAngle reached 11.9 % of the strip height above the band and
+            // hipLineTilt 24 % below it, drawing over the phase tags underneath.
+            //
+            // Clamping rather than rescaling to the raw extremes on purpose: the outlier-resistant
+            // scale is the whole point of the choice made at :119-123 — scaled to include a bridged
+            // outlier the sparkline collapses to a flat line with one spike, which is the wrong
+            // picture for someone choosing a window from this shape. A clipped peak reads as "it
+            // goes off the top here", which is true; a flattened curve reads as "nothing happens
+            // here", which is not.
             function ys(v) {
                 var lo = spark.modelData.lo, hi = spark.modelData.hi
-                return (hi > lo) ? root._plotT + root._plotH - (v - lo) / (hi - lo) * root._plotH
-                                 : root._plotT + root._plotH / 2
+                var y = (hi > lo) ? root._plotT + root._plotH - (v - lo) / (hi - lo) * root._plotH
+                                  : root._plotT + root._plotH / 2
+                return Math.max(root._plotT, Math.min(root._plotB, y))
             }
             ShapePath {
                 strokeColor: spark.modelData.color
