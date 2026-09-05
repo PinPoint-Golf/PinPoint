@@ -91,7 +91,7 @@ inline constexpr int kLegFirstKp = 11;   // left_hip
 inline constexpr int kLegLastKp  = 16;   // right_ankle
 inline constexpr bool isLegKeypoint(int k) { return k >= kLegFirstKp && k <= kLegLastKp; }
 
-// ── phase 5: the MOTION-ADAPTIVE window (dark) ───────────────────────────────
+// ── phase 5: the MOTION-ADAPTIVE window (PROMOTED 2026-09-05) ────────────────
 // Why a per-frame window and not another static scale: phase 4.2 measured the
 // static one and it failed on its own terms (the 2026-09-05 Log entry in
 // metric_presentation_honesty_impl_plan.md). A global legsJerkScale of 0.1 buys the
@@ -142,9 +142,11 @@ inline constexpr AdaptGroup adaptGroupFromName(const char *s)
 }
 
 struct AdaptConfig {
-    // "off" ⇒ no scale vector is ever built and predict() is never handed anything
-    // but 1.0, so the output is byte-identical to the pre-phase-5 tree BY
-    // CONSTRUCTION, not by an arithmetic identity.
+    // PROMOTED 2026-09-05: the shipped default is "accel" (the C15 gate row is in the
+    // constants header). "off" remains exact rather than merely cheap — with it no scale
+    // vector is ever built and predict() is never handed anything but 1.0, so the output
+    // is byte-identical to the pre-phase-5 tree BY CONSTRUCTION, not by an arithmetic
+    // identity, which is what a parity run against this feature has to lean on.
     AdaptMode  mode  = adaptModeFromName(pinpoint::tuned::pose::smoother::adapt::kMode);
     // Which keypoints adapt. "legs" = 11–16 (the hip/knee/ankle group phase 4 built),
     // "body" = 0–16. The wholebody TAIL (feet/face/hands, 17+) never adapts: the hands
@@ -152,8 +154,8 @@ struct AdaptConfig {
     // static scales, neither of which this design has measured.
     AdaptGroup group = adaptGroupFromName(pinpoint::tuned::pose::smoother::adapt::kGroup);
 
-    // Clamp floor on the q scale. 0.05 ⇒ window ×1.648 (33 → 54 ms at 150 fps) and
-    // stationary residual σ ×0.779 — see the exponent warning above.
+    // Clamp floor on the q scale. 0.01 (the swept default) ⇒ window ×2.154 (33 → 71 ms at
+    // 150 fps) and stationary residual σ ×0.681 — see the exponent warning above.
     double minScale   = pinpoint::tuned::pose::smoother::adapt::kMinScale;
     // Acceleration that maps to scale 1.0 (today's window), px/s² AT A REFERENCE
     // FRAME WIDTH of adapt::kARefFrameWidthPx. |a| is a pixel quantity, so the run
@@ -256,17 +258,20 @@ struct PoseSmootherConfig {
     double legsSigmaScale = pinpoint::tuned::pose::smoother::kLegsSigmaScale;
     double legsJerkScale  = pinpoint::tuned::pose::smoother::kLegsJerkScale;
 
-    // ── motion-adaptive window (phase 5, DARK — see AdaptConfig above) ───────
+    // ── motion-adaptive window (phase 5, PROMOTED — see AdaptConfig above) ───
     // Composes with the static scales rather than replacing them: pass 1 of the
     // accel policy runs the group's static scales, and the per-frame q scale is a
-    // multiplier ON TOP of that q. mode "off" is the shipped default.
+    // multiplier ON TOP of that q. Since 2026-09-05 the shipped default is
+    // mode "accel" over the legs group; mode "off" is the parity switch.
     AdaptConfig adapt{};
 
-    // SwingLab dark keys — the ONLY smoother parameters registered for a sweep.
+    // SwingLab keys — the ONLY smoother parameters registered for a sweep.
     // Every other field above is frozen and deliberately unreachable from an
     // override map: they were validated together (window vs 3σ-gate robustness)
     // and a sweep that moved one of them alone would break that balance without
-    // saying so. Empty map ⇒ the frozen defaults, byte-identical.
+    // saying so. An empty map ⇒ the frozen defaults, which since 2026-09-05 include
+    // the PROMOTED adaptive window (adapt.mode "accel"); the pre-phase-5 output is
+    // `adapt.mode = Off`, not the empty map.
     static PoseSmootherConfig fromOverrides(const QVariantMap &ov)
     {
         PoseSmootherConfig c;

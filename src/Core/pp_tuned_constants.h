@@ -353,19 +353,37 @@ inline constexpr double kLegsJerkScale  = 1.0;   // poseSmooth.legsJerkScale  �
 // (the scale is on q = σ_jerk², so the window law's exponents halve) live in
 // src/Analysis/pose_smoother.h; the two policies live in the .cpp.
 //
-// ⚠ kMode SHIPS "off" AND THAT IS DELIBERATE — with mode off no scale vector is
-// built at all, so every keypoint of every frame is byte-identical to the
-// pre-phase-5 tree by construction (not by an arithmetic identity), and no persisted
-// value[] moves. Promotion is a separate, gated decision (the C15 criteria) exactly
-// as phase 4.3 was, and for the same reason: it is the only part of this design that
-// moves value[], and the P4 corridor content was seeded on the current smoothing.
+// ⚠ PROMOTED 2026-09-05 — kMode SHIPS "accel". THIS MOVES PERSISTED value[], the only
+// part of this design that does, and it is promoted on the C15 gate: 17 settings ×
+// 11 swings against a control, of which 6 passed every criterion. The winning row
+// (accel, legs, aRef 4000, expo 8, minScale 0.01, leadMs 20):
+//   * ΔP4  median 0.12 σ / max 0.34 σ      (criterion: median < 1 σ, max < 2 σ)
+//   * ΔP7  median 0.10 σ / max 0.38 σ      (hipLineTilt P7 moved 0.00 σ)
+//   * P1–P7 excursion ratio 0.997–1.004    (criterion: ±3 %)
+//   * σ ratio 0.89–0.99 inside the domain  (criterion: < 1)
+//   * still-address jitter ratio: sway 0.71, hipLineTilt 0.71, plumbBob 0.52
+//     — a 35.3 % jitter gain, against the criterion's 20 % reduction
+//   * 0 lost samples, 0 divergence-guard fallbacks
+// The `innov` alternative scored a comparable 36.8 % but lost on MARGIN, and the
+// record should say why: pelvisLift P7 moved up to 1.50 σ, its excursion ratios ran
+// 0.975–0.99 (outside the ±3 % band's spirit at the low end) and its σ shrank 10–21 %
+// across the domain — i.e. it bought jitter by moving the readings — and it has no
+// divergence guard at all (one forward pass, no reference run to compare against).
+//
+// The gate ran on the 11-swing subset; **a full-corpus confirmation is a follow-up**.
+// mode "off" still exists and is still exact: with it no scale vector is built at all,
+// so the output is byte-identical to the pre-phase-5 tree by construction, which is
+// how the parity test pins it.
 namespace adapt {
-inline constexpr const char *kMode  = "off";    // poseSmooth.adapt.mode  — off | accel | innov
+inline constexpr const char *kMode  = "accel";  // poseSmooth.adapt.mode  — off | accel | innov
 inline constexpr const char *kGroup = "legs";   // poseSmooth.adapt.group — legs (11–16) | body (0–16)
 
-// Floor on the q scale: 0.05 ⇒ window ×1.648 (33 → 54 ms at 150 fps) and stationary
-// residual σ ×0.779 (q exponents: window ∝ s^(−1/6), residual σ ∝ s^(+1/12)).
-inline constexpr double kMinScale = 0.05;
+// Floor on the q scale: 0.01 ⇒ window ×2.154 (33 → 71 ms at 150 fps) and stationary
+// residual σ ×0.681 (q exponents: window ∝ s^(−1/6), residual σ ∝ s^(+1/12)) — i.e.
+// the 80–100 ms hip window §5.4 asked for, but only where the hip is actually still.
+// Swept: 0.01 beat 0.05 and 0.0025 (the latter is where the divergence guard starts
+// firing — σ_jerk 10× below the collapse knee).
+inline constexpr double kMinScale = 0.01;
 
 // |a| that maps to scale 1.0 (today's window), px/s² AT THE REFERENCE FORMAT
 // (kARefFrameWidthPx × kARefFrameHeightPx).
@@ -415,11 +433,17 @@ inline constexpr double kARefPxS2 = 4000.0;
 inline constexpr double kARefFrameWidthPx  = 1280.0;
 inline constexpr double kARefFrameHeightPx = 1024.0;
 
-// Contrast: s = clamp((|a|/aRef)^expo, minScale, 1.0). 1.0 is the linear reading the
-// measurements above are quoted for; the C15 sweep runs 1 and 2 (2 pushes the quiet
-// address further down without moving the P6/P7 clamp, at the cost of a sharper
-// transition the lead filter then has to cover).
-inline constexpr double kExpo = 1.0;
+// Contrast: s = clamp((|a|/aRef)^expo, minScale, 1.0). SWEPT TO 8.0, which is far from
+// the linear reading the |a| table above is quoted for and is the whole reason the
+// winning row moves P4/P7 so little: at expo 8 the scale is a near-switch — it reaches
+// the floor below minScale^(1/expo) = 0.562·aRef (2249 px/s², just above the 2172
+// still-address p95, so a typical address frame is well onto the floor and only the
+// noisiest few per cent of address frames sit above it) and is clamped to 1.0 at aRef
+// itself — so the address hold gets the long window while
+// EVERY sample from mid-backswing through impact keeps today's window exactly. A lower
+// expo spreads the transition across P4–P6, which is what moved samples in the losing
+// rows. The cost is a sharper edge, which is what leadMs covers.
+inline constexpr double kExpo = 8.0;
 
 // Symmetric ±kLeadMs running MAX over the scale vector, so the window is already
 // short BEFORE the acceleration arrives and stays short just after it — a causal

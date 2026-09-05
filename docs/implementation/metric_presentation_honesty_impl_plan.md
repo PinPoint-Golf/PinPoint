@@ -230,20 +230,20 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
 
 ---
 
-## Phase 5 — Motion-adaptive smoother window `[~]`
+## Phase 5 — Motion-adaptive smoother window `[x]`
 
 Follows from Phase 4's finding. Contract: `metric_presentation_honesty_phase5_contracts.md`.
 Run unattended per Mark's instruction (5 Sept): the C15 gate decides promotion.
 
-- [ ] **5.0** `tools/metrics/hip_accel_reference.py`: hip-centre acceleration on the smoothed track
+- [x] **5.0** `tools/metrics/hip_accel_reference.py`: hip-centre acceleration on the smoothed track
       per swing window (still address / backswing / downswing / post-impact) → `aRefPxS2`.
-- [ ] **5.1** The hook: `Kf3::predict(dt, qScale)`, per-frame qScale into `smoothKeypoint`, rts
+- [x] **5.1** The hook: `Kf3::predict(dt, qScale)`, per-frame qScale into `smoothKeypoint`, rts
       returns the smoothed acceleration. Byte-identical when off.
-- [ ] **5.2** Two policies behind `poseSmooth.adapt.*` (mode off|accel|innov, group legs|body,
+- [x] **5.2** Two policies behind `poseSmooth.adapt.*` (mode off|accel|innov, group legs|body,
       minScale, aRefPxS2, expo, leadFrames, innovRef, innovRun), tests per C14.
-- [ ] **5.3** Sweep tooling: `sweep_adapt.sh` + `sweep_summary.py --gate` printing C15.
-- [ ] **5.4** Bake-off on the 11-swing subset with a control; parity at off.
-- [ ] **5.5** Promote the winner for `legs` if the gate passes; else nothing promoted, reason
+- [x] **5.3** Sweep tooling: `sweep_adapt.sh` + `sweep_summary.py --gate` printing C15.
+- [x] **5.4** Bake-off on the 11-swing subset with a control; parity at off.
+- [x] **5.5** Promote the winner for `legs` if the gate passes; else nothing promoted, reason
       recorded. Design §5.4 updated either way.
 
 
@@ -517,3 +517,31 @@ reduction, and the raw samples stay visible as faint dots behind the line.
   still-address jitter ratio 0.83 (expo 2) / 0.78 (expo 3) — plumb bob 0.65, sway 0.80, hip
   tilt 0.88, so C4 (each ≤ 0.80) fails on hip tilt. Cause: at expo 3 the address sits at s ≈
   0.16 (a ~45–50 ms window); a steeper expo (5, 8) is the lever. Full sweep cut 3 running.
+
+- **2026-09-05 (Phase 5 bake-off, gate decided)** — Full sweep, 17 settings × 11 swings against a
+  control (`docs/validation/data/adapt_sweep/`): 6 pass C2–C6. Ranked by still-address jitter
+  gain: innov_r2_m0.01 36.8 %, **accel_a4000_e8_m0.01 35.3 %**, accel_a4000_e5_m0.01 33.2 %,
+  innov_r2_m0.05 30.9 %, accel_a5000_e5_m0.05 29.0 %, accel_a4000_e8_m0.05 27.1 %. Every
+  innov cell above innovRef 2 fails C2 (P7 max 3.3 σ); every accel cell passes C2/C3/C5/C6 and
+  the low-expo ones miss only C4 on hip tilt. **Promoted: accel, aRef 4000, expo 8, minScale
+  0.01, legs** — worst P4/P7 move 0.34/0.38 σ (hip tilt P7 0.00), excursions 0.997–1.004, σ
+  ratio 0.89–0.99, 0 lost samples, 0 fallbacks, jitter ratios sway 0.71 / hip tilt 0.71 / plumb
+  bob 0.52 / knee drift 0.53 / lift 0.58. innov_r2_m0.01 led on gain by 1.5 points but with
+  pelvisLift P7 max 1.50 σ, excursions 0.975–0.99 and σ shrinking 10–21 % domain-wide, and it
+  has no divergence guard — accel wins on margin (recorded as a judgement within the gate, not
+  a rule change). Dark mechanism committed 25588a5 before the sweep.
+
+- **2026-09-05 (Phase 5 CLOSED — promoted)** — Defaults flipped to accel / aRef 4000 / expo 8 /
+  minScale 0.01 / leadMs 20 for the legs group (three literals in pp_tuned_constants.h; the
+  parity switch is now `poseSmooth.adapt.mode=off`, not an empty override). 10 suites green.
+  The subset run at the promoted defaults is BYTE-IDENTICAL to the swept winning cell (11/11),
+  so what ships is exactly what was gated. Probe on the promoted 08-18 swing_0001: still-address
+  PK RATE sway 1.40 → 0.97, hip tilt 1.17 → 0.85, plumb bob 0.33 → 0.11 per 100 ms; peakSigma
+  at address 0.06 → 0.02; the clamped P1–P7 peaks unchanged to two decimals (sway 21.25, hip
+  tilt 15.60, plumb bob −2.75). **Dense-sampling lever (pose.densePreMs 1500/2500) measured
+  NOTHING on the Mac** — jitter, σ and runtime identical — because swinglab_run serves the pose
+  from the pose2 cache and a stride change never re-poses; it needs a cache-bypassing run
+  (GOLFSIMPC or a cache-off flag) and is a follow-up. Carry-forward: full-corpus confirmation of
+  the promotion (July sessions: the address must NOT be smoothed harder where the golfer moves —
+  the gate predicts that, the run should confirm it); per-joint aRef for the ankle if an
+  ankle-derived series ever fails the gate; a ms-based lead is already in.

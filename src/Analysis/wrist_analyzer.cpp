@@ -403,15 +403,15 @@ struct PoseSmoothStage : AnalysisStage {
         const pinpoint::FormatDescriptor &fd = ctx.window->formatOf(ctx.job.cameraSources.front());
         if (const auto *cfmt = std::get_if<pinpoint::CameraFormat>(&fd.format);
             cfmt && cfmt->width > 0 && cfmt->height > 0) {
-            // Smoother-window dark keys (metric_presentation_honesty.md §5.4):
-            // the phase-4 legs group (poseSmooth.legsSigmaScale /
-            // poseSmooth.legsJerkScale) and the phase-5 motion-adaptive window
-            // (poseSmooth.adapt.mode / .group / .minScale / .aRefPxS2 / .expo /
-            // .leadFrames / .innovRef / .innovRun). fromOverrides applies exactly
-            // those keys and nothing else; the legs scales ship at 1.0 and adapt.mode
-            // ships "off", so with no override the config is the frozen one, no scale
-            // vector is built at all, and every keypoint is byte-identical to the
-            // pre-phase-4 tree (×1.0 is exact in IEEE-754).
+            // Smoother-window keys (metric_presentation_honesty.md §5.4): the phase-4
+            // legs group (poseSmooth.legsSigmaScale / poseSmooth.legsJerkScale, both
+            // still 1.0 — NOT promoted) and the phase-5 motion-adaptive window
+            // (poseSmooth.adapt.mode / .group / .minScale / .aRefPxS2 / .expo / .leadMs /
+            // .innovRef / .innovRun). fromOverrides applies exactly those keys and nothing
+            // else. ⚠ adapt.mode ships "accel" since 2026-09-05 (promoted on the C15 gate),
+            // so the legs keypoints 11–16 DO get a per-frame window here and the hip-derived
+            // series move; `poseSmooth.adapt.mode=off` is the parity switch that reproduces
+            // the pre-phase-5 output exactly (no scale vector is built at all).
             const PoseSmootherConfig smCfg =
                 PoseSmootherConfig::fromOverrides(ctx.job.tuningOverrides);
             PoseSmootherOutput so = smoothPoseTrack(ctx.detail->pose2d.frames,

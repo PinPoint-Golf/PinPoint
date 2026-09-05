@@ -284,6 +284,23 @@ This is a measurement change, not a presentation one, and it is last on purpose:
 Not proposed: a shoulder/thorax scale. The shoulders move fast through transition and the
 wrist-tuned window is nearer right for them; measure before assuming.
 
+**Phase 5 (2026-09-05): the motion-adaptive window, promoted.** The global legs scale failed
+the gate (a 70 ms window moved the impact samples 3–4 σ). The window is now chosen per frame
+for the hip, knee and ankle keypoints: pass one is today's smoother; the smoothed acceleration
+|a| of each keypoint sets a per-step process-noise scale `s = clamp((|a| / aRef)^expo,
+minScale, 1)` with aRef = 4000 px/s² at 1280×1024 (chosen from the impact side of the whole
+corpus so that P4 through P7 stay at today's window on 80 of 83 swings), expo = 8 (a near-step
+between quiet and moving), minScale = 0.01 (a 71 ms window where the joint is still), and a
+20 ms symmetric lead; pass two runs the smoother with that scale. A coasted step never takes
+the reduced noise, and pass two falls back to pass one on any change to its accept or smoothed
+decisions, counted in swing.json. The rival single-pass innovation-driven rule passed the gate
+too, with a slightly larger jitter gain but with an impact sample moving 1.5 σ, excursions at
+the boundary, σ shrinking across the whole domain and no divergence guard; the acceleration
+rule won on margin. Gate on the 11-swing subset: still-address jitter −29 % (sway), −29 % (hip
+tilt), −48 % (plumb bob); top and impact samples moved ≤ 0.38 σ; excursions within 0.5 %; no
+sample lost; no fallback. Sessions where the golfer moves at address read as motion and are
+not smoothed harder there, which is the intended behaviour.
+
 ## 6. What this deliberately does not do
 
 - No display-only smoothing in QML (principle 1).

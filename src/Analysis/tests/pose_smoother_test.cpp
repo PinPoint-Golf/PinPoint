@@ -8,8 +8,11 @@
 // the window the derivation block's law predicts, and that a real hip excursion
 // survives it (metric_presentation_honesty.md §5.4).
 //
-// Sections 10–17 cover the phase-5 MOTION-ADAPTIVE window (poseSmooth.adapt.*): that
-// mode "off" is inert byte for byte, that the accel policy floors the window while the
+// Sections 10–19 cover the phase-5 MOTION-ADAPTIVE window (poseSmooth.adapt.*), PROMOTED
+// 2026-09-05 (mode "accel" over the legs group, aRef 4000, expo 8, minScale 0.01,
+// leadMs 20 — the C15 gate row is in 10a and in pp_tuned_constants.h): that the shipped
+// defaults are that winning row, that mode "off" is still inert byte for byte and is
+// therefore the parity switch, that the accel policy floors the window while the
 // joint is quiet and returns it to today's while the joint accelerates without moving
 // the excursion or the onset sample, that it responds in the right direction on a track
 // with the real pose cadence (11c — which prints the |a| floor it presents to aRef but
@@ -632,6 +635,10 @@ int main()
     // 33 ms window. It ships DARK (1.0/1.0) and these cases pin all four halves of
     // that claim: the default is dark, ×1.0 is byte-identical, the scale reaches
     // 11–16 and NOTHING else, and the dark keys arrive from an override map.
+    // NB every run in this section shares whatever the shipped phase-5 window does (it is
+    // ON for kp 11–16 since 2026-09-05), so these equalities stay exact — they compare the
+    // STATIC scale against itself. Section 9 switches the window off explicitly, because a
+    // law measurement cannot have two multipliers on q at once.
     std::printf("=== smoothPoseTrack: legs group (11-16) scales ===\n");
     {
         // (a) the shipped default is the dark one, and an explicit 1.0/1.0 run is
@@ -700,7 +707,15 @@ int main()
     {
         constexpr int KPHIP = 11;                        // left hip
         const double predicted = std::pow(0.1, 1.0 / 6.0);   // 0.681
-        PoseSmootherConfig slow; slow.legsJerkScale = 0.1;
+        // ⚠ BOTH configs switch the phase-5 window OFF. kp 11 is in the legs group, and
+        // since 2026-09-05 the shipped default runs the per-frame adaptive window over it —
+        // which is a SECOND multiplier on q and would make this section measure the two
+        // features convolved. This section is the phase-4 STATIC scale's law; section 11(b)
+        // is the phase-5 one.
+        PoseSmootherConfig fast;                             // the base run, window off
+        fast.adapt.mode = AdaptMode::Off;
+        PoseSmootherConfig slow = fast;
+        slow.legsJerkScale = 0.1;
 
         // (b1) STATIONARY hip, deterministic pseudo-noise sd 3 px at 150 fps.
         {
@@ -725,7 +740,7 @@ int main()
                 }
                 return n ? std::sqrt(s / n) : 0.0;
             };
-            const double sdBase = residSd(smoothPoseTrack(in, W, H));
+            const double sdBase = residSd(smoothPoseTrack(in, W, H, fast));
             const double sdSlow = residSd(smoothPoseTrack(in, W, H, slow));
             const double ratio  = sdBase > 0.0 ? sdSlow / sdBase : 1.0;
             // ⚠ The band has to be tight enough to tell the two EXPONENT FAMILIES apart.
@@ -766,7 +781,7 @@ int main()
                 return n ? 2.0 * acc / n : 0.0;
             };
             const double aRaw  = amplitude(in);
-            const double aBase = amplitude(smoothPoseTrack(in, W, H).smoothed);
+            const double aBase = amplitude(smoothPoseTrack(in, W, H, fast).smoothed);
             const double aSlow = amplitude(smoothPoseTrack(in, W, H, slow).smoothed);
             std::printf("       0.5Hz 40px hip: raw=%.2fpx  base=%.2fpx  scale0.1=%.2fpx\n",
                         aRaw, aBase, aSlow);
@@ -786,32 +801,62 @@ int main()
         check(legWindowMsForJerkScale(1.0) == 33.0, "scale 1.0 is the measured 33 ms baseline");
     }
 
-    // ── 10. phase 5: adapt mode "off" is inert (the byte-identical promise) ───
-    // The promise is BY CONSTRUCTION, not by an arithmetic identity: with mode off no
-    // scale vector is built anywhere and predict() is never handed anything but its
-    // 1.0 default. These cases pin that the shipped defaults are the dark ones and
-    // that every OTHER adapt field is unreachable while the mode is off — including
-    // the test hook, which must emit nothing.
-    std::printf("=== smoothPoseTrack: adapt mode off is inert ===\n");
+    // ── 10a. the shipped defaults ARE the swept winner (promoted 2026-09-05) ───
+    // Phase 5 was promoted on the C15 gate — 17 settings × 11 swings against a control,
+    // 6 passing every criterion, and this row winning on margin: ΔP4 0.12/0.34 σ,
+    // ΔP7 0.10/0.38 σ (hipLineTilt P7 0.00), excursion 0.997–1.004, σ ratio 0.89–0.99,
+    // still-address jitter ×0.71/0.71/0.52 (35.3 % gain), 0 lost samples, 0 fallbacks.
+    // If a future change moves any of these numbers, THIS is the check that must be
+    // updated deliberately, with a gate row beside it.
+    std::printf("=== smoothPoseTrack: the shipped adapt defaults are the swept winner ===\n");
     {
         PoseSmootherConfig def;
-        check(def.adapt.mode == AdaptMode::Off, "shipped adapt.mode is Off (DARK)");
+        check(def.adapt.mode == AdaptMode::Accel, "shipped adapt.mode is accel (PROMOTED)");
         check(def.adapt.group == AdaptGroup::Legs, "shipped adapt.group is legs (kp 11-16)");
-        check(def.adapt.minScale == 0.05 && def.adapt.aRefPxS2 == 4000.0
-                  && def.adapt.expo == 1.0 && def.adapt.leadMs == 20.0
+        check(def.adapt.minScale == 0.01 && def.adapt.aRefPxS2 == 4000.0
+                  && def.adapt.expo == 8.0 && def.adapt.leadMs == 20.0
                   && def.adapt.innovRef == 4.0 && def.adapt.innovRun == 3,
-              "shipped adapt numbers are the frozen constants (0.05 / 4000 / 1 / 20ms / 4 / 3)");
-        check(!def.adapt.emitScalesForTest, "the C14 test hook ships off");
-        check(!def.adapt.appliesTo(11) && !def.adapt.appliesTo(0),
-              "mode off reaches no keypoint at all");
+              "shipped adapt numbers are the winning row (0.01 / 4000 / 8 / 20ms / 4 / 3)");
+        check(!def.adapt.emitScalesForTest, "the C14 test hook still ships off");
+        // The group is what the gate was run on: the six legs keypoints and nothing else.
+        check(def.adapt.appliesTo(11) && def.adapt.appliesTo(16),
+              "the shipped default reaches the legs group it was gated on");
+        check(!def.adapt.appliesTo(10) && !def.adapt.appliesTo(0) && !def.adapt.appliesTo(17),
+              "and reaches neither the upper body nor the wholebody tail");
+        // expo 8 is a near-switch, and that is why the gate row moves P4/P7 so little: the
+        // floor is reached only below ≈0.66·aRef and 1.0 is reached at aRef itself.
+        const double aRef = def.adapt.aRefPxS2;
+        check(std::pow(0.55, def.adapt.expo) < def.adapt.minScale
+                  && std::pow(1.00, def.adapt.expo) >= 1.0,
+              "expo 8 floors below ~0.56x aRef and clamps at aRef (a near-switch, not a ramp)");
+        check(std::pow(2172.0 / aRef, def.adapt.expo) < def.adapt.minScale,
+              "the corpus still-address p95 (2172) lands on the floor");
+        check(std::pow(5232.0 / aRef, def.adapt.expo) >= 1.0,
+              "and the corpus p05 of min(|a| P6, P7) (5232) is clamped to today's window");
+    }
 
+    // ── 10b. mode "off" is still exact — the parity switch ─────────────────────
+    // The promise is BY CONSTRUCTION, not by an arithmetic identity: with mode off no
+    // scale vector is built anywhere and predict() is never handed anything but its 1.0
+    // default. The reference config is HAND-BUILT (mode = Off) because the shipped
+    // default is no longer off, and this is the switch a parity run against phase 5 uses.
+    std::printf("=== smoothPoseTrack: adapt mode off is inert (the parity switch) ===\n");
+    {
         Lcg rng(0x5CA1E5EDu);
         const auto times = uniformTimes(150.0, 1.0);
         const auto in    = buildLegsTrack(times, rng);
-        const auto base  = smoothPoseTrack(in, W, H);
+        PoseSmootherConfig offRef;                  // the pre-phase-5 tree, by construction
+        offRef.adapt.mode = AdaptMode::Off;
+        const auto base = smoothPoseTrack(in, W, H, offRef);
         check(base.adaptScale.empty() && base.adaptAccel.empty(),
               "mode off builds no scale vector and no |a| vector");
         check(base.adaptFallbacks == 0, "mode off can have nothing to fall back (count 0)");
+        // And it really is a different output from the shipped default — otherwise this
+        // whole section would be vacuous and the promotion would have moved nothing.
+        check(!sameWhere(base, smoothPoseTrack(in, W, H), [](int k) { return isLegKeypoint(k); }),
+              "the shipped default really does move the legs keypoints (off is not the default)");
+        check(sameWhere(base, smoothPoseTrack(in, W, H), [](int k) { return !isLegKeypoint(k); }),
+              "and moves nothing outside the group");
 
         for (const AdaptGroup g : { AdaptGroup::Legs, AdaptGroup::Body }) {
             PoseSmootherConfig off;                 // every adapt field wild, mode still off
@@ -832,8 +877,10 @@ int main()
 
     // ── 11. accel policy: the window floors when quiet, returns when it moves ──
     // (a) on a NOISELESS track, where the policy's input is the truth. This is the
-    // discrimination test, and it runs on the SHIPPED defaults (aRef 8000 at 1280 wide,
-    // expo 1, minScale 0.05, lead 3): quiet ⇒ the clamp floor, accelerating ⇒ 1.0.
+    // discrimination test and it runs on the SHIPPED (promoted) defaults — aRef 4000 at the
+    // 1280×1024 reference, expo 8, minScale 0.01, leadMs 20: quiet ⇒ the clamp floor,
+    // accelerating ⇒ 1.0. At expo 8 that transition is a near-switch, which is the property
+    // the gate row's tiny ΔP4/ΔP7 rests on.
     std::printf("=== smoothPoseTrack: adapt accel, noiseless discrimination ===\n");
     {
         Lcg noRng(1);
@@ -843,7 +890,9 @@ int main()
         cfg.adapt.mode = AdaptMode::Accel;
         cfg.adapt.emitScalesForTest = true;
         const auto res = smoothPoseTrack(in, int(WA), int(HA), cfg);
-        const auto off = smoothPoseTrack(in, int(WA), int(HA));
+        PoseSmootherConfig offCfg;                  // the control is HAND-BUILT: the shipped
+        offCfg.adapt.mode = AdaptMode::Off;         // default is the adaptive window now
+        const auto off = smoothPoseTrack(in, int(WA), int(HA), offCfg);
 
         check(res.adaptScale.size() == std::size_t(kWholeBodyJoints)
                   && res.adaptScale[KPA].size() == in.size(),
@@ -931,6 +980,11 @@ int main()
         // below so this can never silently become a test of the guard again.
         PoseSmootherConfig lawBase;
         lawBase.gateSig = 6.0;
+        lawBase.adapt.mode = AdaptMode::Off;   // the control is the pre-phase-5 filter
+        // The law fixture PINS its own minScale rather than inheriting the shipped one, so
+        // the arithmetic below (and the 2 % excursion claim, which is derived for it) does
+        // not move when a future sweep moves the default.
+        const double lawMinScale = 0.05;
         const auto off = smoothPoseTrack(in, int(WA), int(HA), lawBase);   // the control
 
         // (i) THE WINDOW LAW, and its exponents. A q scale s is a sigma_jerk scale of
@@ -943,6 +997,7 @@ int main()
         PoseSmootherConfig flrCfg = lawBase;
         flrCfg.adapt.mode = AdaptMode::Accel;
         flrCfg.adapt.aRefPxS2 = 1e9;
+        flrCfg.adapt.minScale = lawMinScale;
         flrCfg.adapt.emitScalesForTest = true;
         const auto flr = smoothPoseTrack(in, int(WA), int(HA), flrCfg);
         bool allFloor = true;
@@ -952,8 +1007,8 @@ int main()
         check(flr.adaptFallbacks == 0, "the widened gate keeps the law fixture non-divergent");
         check(allFloor, "an unreachable aRef pins every predicted step at minScale");
 
-        const double predicted   = std::pow(0.05, 1.0 / 12.0);   // 0.779 — the q family
-        const double wrongFamily = std::pow(0.05, 1.0 /  6.0);   // 0.607 — the sigma_jerk one
+        const double predicted   = std::pow(lawMinScale, 1.0 / 12.0);   // 0.779 — the q family
+        const double wrongFamily = std::pow(lawMinScale, 1.0 /  6.0);   // 0.607 — sigma_jerk
         const double sdOff = adResidSd(off, kAdQuietLo, kAdQuietHi);
         const double sdFlr = adResidSd(flr, kAdQuietLo, kAdQuietHi);
         const double ratio = (sdOff > 0.0) ? sdFlr / sdOff : 1.0;
@@ -971,7 +1026,7 @@ int main()
 
         // (ii) the excursion survives — including in the worst case (pinned at the
         // floor for the whole track), which is the 0.9 % loss the fixture note derives.
-        PoseSmootherConfig accCfg = lawBase;
+        PoseSmootherConfig accCfg = lawBase;      // the shipped policy, gate widened only
         accCfg.adapt.mode = AdaptMode::Accel;
         accCfg.adapt.emitScalesForTest = true;
         const auto acc = smoothPoseTrack(in, int(WA), int(HA), accCfg);
@@ -1095,10 +1150,13 @@ int main()
         Lcg rng(0xA5A5F00Du);                       // the same track as section 11(b)
         const auto times = uniformTimes(150.0, kAdQuietS + kAdMotionS + kAdTailS);
         const auto in    = buildKpTrackWH(KPA, times, adTruthX, kAdY, 3.0, rng, WA, HA);
-        const auto off   = smoothPoseTrack(in, int(WA), int(HA));
+        PoseSmootherConfig offCfg;                 // hand-built control (the default is accel)
+        offCfg.adapt.mode = AdaptMode::Off;
+        const auto off   = smoothPoseTrack(in, int(WA), int(HA), offCfg);
 
         PoseSmootherConfig iv;
         iv.adapt.mode = AdaptMode::Innov;
+        iv.adapt.minScale = 0.05;                  // pinned: the law arithmetic below is for it
         iv.adapt.emitScalesForTest = true;
         const auto res = smoothPoseTrack(in, int(WA), int(HA), iv);
         const std::vector<double> &s = res.adaptScale[KPA];
@@ -1174,6 +1232,7 @@ int main()
         // false — which is exactly how it failed before.
         PoseSmootherConfig off_ = { };
         off_.gateSig = 6.0;
+        off_.adapt.mode = AdaptMode::Off;   // hand-built control (the default is accel now)
         const auto off   = smoothPoseTrack(in, W, H, off_);
         PoseSmootherConfig legs = off_;
         legs.adapt.mode = AdaptMode::Accel;
@@ -1249,7 +1308,7 @@ int main()
         m3[QStringLiteral("poseSmooth.adapt.group")] = QStringLiteral("torso");
         const PoseSmootherConfig c3 = PoseSmootherConfig::fromOverrides(m3);
         check(c3.adapt.mode == AdaptMode::Off && c3.adapt.group == AdaptGroup::Legs,
-              "an unrecognised mode/group reads as the dark default (a typo'd sweep line is a control)");
+              "an unrecognised mode/group reads as off/legs (a typo'd sweep line is a CONTROL run)");
         // Range guards (F7): the two keys where an out-of-range value would be silently
         // WRONG rather than merely odd. minScale > 1 would make the "adaptive" window
         // SHORTER than today's everywhere, < 0 would invert the clamp, and an unbounded
@@ -1389,6 +1448,11 @@ int main()
         base.adapt.mode = AdaptMode::Accel;
         base.adapt.aRefPxS2 = 1e5;       // nothing clamps, so the scale IS |a|/aRefEff
         base.adapt.minScale = 0.0;
+        base.adapt.expo     = 1.0;       // LINEAR, so a threshold ratio reads as a scale
+                                         // ratio: at the shipped expo 8 the same format
+                                         // change would show as that ratio to the 8th
+                                         // power (0.75^8 = 0.10), which measures pow(),
+                                         // not the format rule.
         base.adapt.leadMs   = 0.0;       // per-frame, no max filter
         base.adapt.emitScalesForTest = true;
         const auto r1 = smoothPoseTrack(in, int(WA), int(HA), base);
@@ -1477,6 +1541,7 @@ int main()
         iv.adapt.innovRef = 1e9;                    // same: pinned at the floor
         PoseSmootherConfig ofc;
         ofc.gateSig = 6.0;
+        ofc.adapt.mode = AdaptMode::Off;    // hand-built control (the default is accel now)
         const auto acc = smoothPoseTrack(in, int(WA), int(HA), fl);
         const auto ivr = smoothPoseTrack(in, int(WA), int(HA), iv);
         const auto off = smoothPoseTrack(in, int(WA), int(HA), ofc);
@@ -1571,7 +1636,9 @@ int main()
             if (f >= int(in.size())) break;
             in[std::size_t(f)].kp[KPA].setX(in[std::size_t(f)].kp[KPA].x() + (3.0 + 0.35 * j) / WA);
         }
-        const auto off = smoothPoseTrack(in, int(WA), int(HA));
+        PoseSmootherConfig offCfg;          // the UNADAPTED reference, hand-built
+        offCfg.adapt.mode = AdaptMode::Off;
+        const auto off = smoothPoseTrack(in, int(WA), int(HA), offCfg);
 
         PoseSmootherConfig div;
         div.adapt.mode = AdaptMode::Accel;

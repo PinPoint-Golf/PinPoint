@@ -711,7 +711,7 @@ moves persisted `value[]`, and the P4 corridor content was seeded on the current
 systematic shift at P4 puts [`norm_shapes.md`](../design/norm_shapes.md) in scope rather than being
 absorbed silently.
 
-### 2.19 `poseSmooth.adapt.*` — the motion-adaptive smoother window (2026-09-05)
+### 2.19 `poseSmooth.adapt.*` — the motion-adaptive smoother window (**PROMOTED** 2026-09-05)
 
 Eight keys from phase 5 of [`metric_presentation_honesty.md`](../design/metric_presentation_honesty.md)
 §5.4, on the same offline RTS smoother as §2.18. They exist because **§2.18's static scale was
@@ -721,13 +721,37 @@ impact, a ≈70 ms window blends the post-impact rotation into the impact frame,
 seeded at P7. A window that is long while the joint is quiet and back to today's while it accelerates
 is the honest version of the same idea.
 
+**PROMOTED 2026-09-05 on the 11-swing subset — this moves persisted `value[]`.** The C15 gate ran 17
+settings × 11 swings against a control; 6 passed every criterion; the shipped row is
+`accel` / `legs` / `aRefPxS2 4000` / `expo 8` / `minScale 0.01` / `leadMs 20`:
+
+| criterion | threshold | this row |
+|---|---|---|
+| (2) ΔP4 vs control | median < 1 σ, max < 2 σ | **0.12 / 0.34 σ** |
+| (2) ΔP7 vs control | median < 1 σ, max < 2 σ | **0.10 / 0.38 σ** (`hipLineTilt` P7 **0.00**) |
+| (3) P1–P7 excursion ratio | ±3 % | **0.997–1.004** |
+| (4) still-address p95 jitter | ≥ 20 % reduction on the three named series | **×0.71 sway, ×0.71 hipLineTilt, ×0.52 plumbBob** (35.3 % gain) |
+| (5) σ ratio inside the domain | < 1 | **0.89–0.99** |
+| samples lost / guard fallbacks | 0 | **0 / 0** |
+
+`innov` scored a comparable 36.8 % jitter gain and **lost on margin**, which the record should keep:
+`pelvisLift` P7 moved up to **1.50 σ**, its excursion ratios ran **0.975–0.99**, and its σ shrank
+**10–21 %** across the domain — it bought jitter by moving the readings — and it has **no divergence
+guard** (one forward pass, no reference to compare against). ⚠ **The gate was the 11-swing subset; a
+full-corpus confirmation is a follow-up.**
+
+⚠ **The parity switch is `poseSmooth.adapt.mode=off`**, not an empty override map: with the window off
+no scale vector is built at all, so the output is byte-identical to the pre-phase-5 tree by
+construction. That is what a parity run against this feature has to use, and a test pins it with a
+hand-built config.
+
 | key | default | meaning |
 |---|---|---|
-| `poseSmooth.adapt.mode` | `"off"` | `off` \| `accel` \| `innov` — the policy. Unrecognised reads as `off`. |
+| `poseSmooth.adapt.mode` | `"accel"` | `off` \| `accel` \| `innov` — the policy. **Promoted to `accel`**; unrecognised reads as `off`, i.e. a typo'd sweep line runs as a *control*. |
 | `poseSmooth.adapt.group` | `"legs"` | `legs` = kp 11–16, `body` = kp 0–16. The wholebody tail (17+) **never** adapts. Unrecognised reads as `legs`. |
-| `poseSmooth.adapt.minScale` | `0.05` | clamp floor on the scale. **Clamped to [0, 1]** on read: > 1 would mean a *shorter* window than today's everywhere, which is a different experiment. |
+| `poseSmooth.adapt.minScale` | `0.01` | clamp floor on the scale (swept; ⇒ window ×2.154, 33 → 71 ms at 150 fps). **Clamped to [0, 1]** on read: > 1 would mean a *shorter* window than today's everywhere, which is a different experiment. |
 | `poseSmooth.adapt.aRefPxS2` | `4000.0` | \|a\| that maps to scale 1.0, **px/s² at the 1280×1024 reference format** |
-| `poseSmooth.adapt.expo` | `1.0` | contrast: `s = (\|a\|/aRef)^expo`. Unbounded on purpose (the sweep runs 1 and 2). |
+| `poseSmooth.adapt.expo` | `8.0` | contrast: `s = (\|a\|/aRef)^expo`. Swept to 8, which makes it a **near-switch** — floor below `minScale^(1/expo)` = 0.562·aRef (2249 px/s², just above the 2172 still-address p95), clamped to 1.0 at aRef. That sharpness is why the winning row moves P4/P7 so little; a lower expo spreads the transition across P4–P6, which is what moved samples in the losing rows. Unbounded on purpose. |
 | `poseSmooth.adapt.leadMs` | `20.0` | symmetric ±max filter on the scale vector, **as a duration** — see the cadence note |
 | `poseSmooth.adapt.innovRef` | `4.0` | innov policy divisor on the normalised innovation |
 | `poseSmooth.adapt.innovRun` | `3` | innov policy window, in **accepted** steps. **Capped to [1, 32]** on read. |
@@ -742,10 +766,12 @@ adapt field set to a wild value).
 
 ⚠ **The scale is on q, so the window law's exponents halve.** §2.18's scales multiply σ_jerk (window
 ∝ σ_jerk^(−1/3), stationary residual σ ∝ σ_jerk^(+1/6)). A q scale `s` is a σ_jerk scale of `√s`, so
-in q terms **window ∝ s^(−1/6)** and **residual σ ∝ s^(+1/12)**: `minScale = 0.05` is a window ×1.648
-(33 → 54 ms at 150 fps) and a stationary residual σ ×0.779 — *not* the ×2.71 / ×0.61 that the same
-number means as a `legsJerkScale`. The test asserts the 0.779 within 25 %. Do not read the two
-families of numbers off one table.
+in q terms **window ∝ s^(−1/6)** and **residual σ ∝ s^(+1/12)**. So the shipped `minScale = 0.01` is a
+window **×2.154** (33 → **71 ms** at 150 fps) and a stationary residual σ **×0.681** — the 80–100 ms hip
+window §5.4 asked for, but only where the hip is actually still — and *not* the ×4.64 / ×0.46 that the
+same number would mean as a `legsJerkScale`. (The law fixture pins its own `minScale = 0.05` ⇒ 0.779 so
+the assertion does not move when a sweep moves the default; it holds it to ±10 % **and** requires it to
+be nearer the q reading than the σ_jerk one.) Do not read the two families of numbers off one table.
 
 **`aRefPxS2` is a per-FORMAT number, scaled by the GEOMETRIC MEAN of the two axes.** \|a\| is a pixel
 quantity, so the same hip motion filmed smaller reads fewer px/s² and a fixed threshold would score it
@@ -816,7 +842,7 @@ reference pass by design (one forward pass is its whole virtue), so it is **not*
 known gap, and a reason to prefer `accel` if both pass the gate.
 
 ⚠ **The guard as specified is sensitive, and that is a live question for promotion.** It falls back on
-**any** change to `accepted[]`, and a reduced q tightens the 3σ radius by ≈10 % at `minScale = 0.05` —
+**any** change to `accepted[]`, and a reduced q tightens the 3σ radius by ≈10 % at a `minScale` of 0.05 —
 enough that on a 3 px white synthetic still track one borderline sample in ~750 flips its accept flag and
 the whole keypoint is handed back unadapted. Three test fixtures therefore widen `gateSig` to 6 so they
 measure what they claim to (the window law, group selection, the no-measurement rule) rather than the
@@ -874,8 +900,9 @@ there. Matching the corpus would need a spectrally smoother error model (integra
 which nothing in this repo measures, and inventing one to make a test pass would prove nothing. So
 `pose_smoother_test.cpp` §11c asserts only the **ordering** (a still stretch is smoothed harder than a
 moving one; the moving stretch returns to 1.0) and **prints the |a| floor beside the corpus number**;
-**whether the policy engages at the shipped aRef is decided by the bake-off on real swings**
-(`tools/metrics/adapt_settings.jsonl` + the C15 gate criteria), not by a fixture.
+**whether the policy engages at the shipped aRef was decided by the bake-off on real swings**
+(`tools/metrics/adapt_settings.jsonl` + the C15 gate criteria), not by a fixture — and it does: the
+promoted row's still-address jitter falls 29–48 % on the three hip series.
 
 ⚠ **The floor is a real operating limit, not just a fixture artefact.** The corpus's still-address p95
 (1652 / 2172 px/s²) sits below aRef 4000, so on real swings the address hold does engage — but a noisier joint, a coarser posing grid, a wider format or (above all) whiter keypoint error
@@ -893,12 +920,13 @@ so the deliberately Qt-free lowest layer still compiles. One `constexpr` parser 
 reads both these defaults and a sweep's override string, so an unrecognised value means the same thing
 in both places — `off` / `legs`, i.e. a typo'd sweep line runs as a control.
 
-**Promotion is gated exactly as phase 4.3 was** — the C15 criteria (parity, ΔP4/ΔP7 in units of the
-result's own σ, P1–P7 excursion ratio, still-address jitter reduction, σ ratio), with a **control run**
-beside every before/after because pose is non-deterministic. It is the only part of this design that
-moves persisted `value[]`, and the P4 corridor content was seeded on the current smoothing, so a
-systematic shift at P4 puts [`norm_shapes.md`](../design/norm_shapes.md) in scope rather than being
-absorbed silently.
+**Promotion happened exactly as phase 4.3's would have** — the C15 criteria (parity, ΔP4/ΔP7 in units of
+the result's own σ, P1–P7 excursion ratio, still-address jitter reduction, σ ratio), each judged against
+a **control run** because pose is non-deterministic. It is the only part of this design that moves
+persisted `value[]`. The measured ΔP4 (median 0.12 σ, max 0.34 σ) is what keeps
+[`norm_shapes.md`](../design/norm_shapes.md) out of scope — the P4 corridor content was seeded on the
+old smoothing, and a systematic shift there would have put it in scope rather than being absorbed
+silently. Re-check that if the full-corpus confirmation moves P4 further.
 
 ## 3. The frozen-defaults header — the single freeze edit-point
 
