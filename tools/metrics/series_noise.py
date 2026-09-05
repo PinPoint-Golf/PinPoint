@@ -121,9 +121,28 @@ COLUMNS = [
     "span_min_at_phase_which",     # which ladder position that was
     "span_min_any",                # min span ratio over every pose frame
     "span_at_phase",               # "p1=1.00;p2=0.83;..." ratio at each P1-P7 instant
+    # Phase 5 (motion-adaptive smoother window) gate criterion 4: still-address jitter, in the
+    # metric's own unit, over the SAME [Address-300ms, Address] window pk_rate_address uses. The
+    # body is not moving there, so every wiggle is noise; unlike pk_rate_address (one worst pair
+    # divided by one frame interval) these are distribution statistics over the window, which is
+    # what a "20% jitter reduction" claim needs. Appended, so every existing column keeps its
+    # position for the Phase 0/4 CSVs already on disk.
+    "jitter_address",              # median |dv| frame to frame inside the address window
+    "jitter_address_p95",          # 95th percentile of the same
+    # Phase 5 gate criterion 6 (fragmentation): the jitter and sigma criteria REWARD a series that
+    # quietly lost samples - a keypoint whose smoother segment collapses at a low minScale emits
+    # fewer valid samples, and a shorter, sparser curve is smoother by construction. These two
+    # columns are what makes that visible: n_samples is the curve length, n_valid the number of
+    # samples the producer actually stands behind (`valid` mask; == n_samples when there is no
+    # mask, which is how a pre-Phase-1 document reads).
+    "n_valid",
+    "n_samples",
 ]
 
-SPAN_COLUMNS = COLUMNS[COLUMNS.index("span_frac_p1p7_below_gate"):]
+# The five foreshortening columns (body-line rows only). Sliced by name at both ends so appending
+# further columns after them cannot silently widen this set.
+SPAN_COLUMNS = COLUMNS[COLUMNS.index("span_frac_p1p7_below_gate"):
+                       COLUMNS.index("span_at_phase") + 1]
 
 # Which body line each key's span columns describe. Only these two rows carry them.
 SPAN_KEY_FOR_ROW = {"hipLineTilt": "hips", "shoulderPlaneAngle": "shoulders"}
@@ -183,6 +202,23 @@ def peak_rate(t_us, value, lo=None, hi=None):
         if best is None or r > best:
             best = r
     return best
+
+
+def window_deltas(t_us, value, lo, hi):
+    """The adjacent-sample |dv| inside [lo, hi], in the metric's own unit.
+
+    Same pair rule as peak_rate (BOTH endpoints inside the window) so jitter_address and
+    pk_rate_address describe the same set of steps. No dt normalisation: inside a 300ms window the
+    frame interval is effectively constant, and the criterion is a RATIO against a control run of
+    the same swings, which cancels it.
+    """
+    out = []
+    for i in range(1, len(t_us)):
+        t0, t1 = t_us[i - 1], t_us[i]
+        if t0 < lo or t1 < lo or t0 > hi or t1 > hi:
+            continue
+        out.append(abs(value[i] - value[i - 1]))
+    return out
 
 
 def nearest_index(sorted_t, target):
@@ -424,6 +460,19 @@ def analyse_swing(path, root, keys):
             "phase_samples": ";".join(ps),
         })
 
+        addr_jit = (window_deltas(t_us, value, addr_t - ADDRESS_WINDOW_US, addr_t)
+                    if addr_t is not None else [])
+        row["jitter_address"] = fmt(median(addr_jit), 4)
+        row["jitter_address_p95"] = fmt(percentile(addr_jit, 0.95), 4)
+
+        # `valid` is truncated to n like the value/t_us pair, so a mask longer than the series (a
+        # schema slip) cannot inflate the count. Anything other than an explicit 0 counts as valid,
+        # matching the producers' own "0 means do not draw this sample" contract.
+        mask = m.get("valid")
+        row["n_samples"] = n
+        row["n_valid"] = (sum(1 for v in mask[:n] if v != 0)
+                          if isinstance(mask, list) else n)
+
         which = SPAN_KEY_FOR_ROW.get(key)
         st = spans.get(which) if which else None
         if st:
@@ -455,7 +504,7 @@ def print_summary(rows, absent_counts, keys, swings, out=sys.stderr):
         xs = [_num(r[col]) for r in rows if r["key"] == key]
         return median([x for x in xs if x is not None])
 
-    hdr = (f"{'key':<20} {'n':>4} {'absent':>6} {'p95 jit':>9} {'PK all':>9} "
+    hdr = (f"{'key':<20} {'n':>4} {'absent':>6} {'p95 jit':>9} {'p95 addr':>9} {'PK all':>9} "
            f"{'PK addr':>9} {'PK dom':>9} {'<gate@P':>8}")
     print(f"\n{len(swings)} swing.json read", file=out)
     print(hdr, file=out)
@@ -468,6 +517,7 @@ def print_summary(rows, absent_counts, keys, swings, out=sys.stderr):
         has_span = any(r["span_min_at_phase"] for r in krows)
         print(f"{key:<20} {len(krows):>4} {absent_counts.get(key, 0):>6} "
               f"{fmt(med_of(key, 'jitter_p95'), 3):>9} "
+              f"{fmt(med_of(key, 'jitter_address_p95'), 3):>9} "
               f"{fmt(med_of(key, 'pk_rate_all'), 1):>9} "
               f"{fmt(med_of(key, 'pk_rate_address'), 1):>9} "
               f"{fmt(med_of(key, 'pk_rate_domain'), 1):>9} "

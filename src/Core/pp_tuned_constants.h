@@ -342,6 +342,109 @@ inline constexpr bool   kFilterCurve     = false;   // pose.wristAngles.filterCu
 namespace smoother {
 inline constexpr double kLegsSigmaScale = 1.0;   // poseSmooth.legsSigmaScale — × measSigBasePx/measSigSlopePx, kp 11–16
 inline constexpr double kLegsJerkScale  = 1.0;   // poseSmooth.legsJerkScale  — × sigmaJerk, kp 11–16
+
+// --- Phase 5: the MOTION-ADAPTIVE window (poseSmooth.adapt.*) ------------------
+// Phase 4.2 measured the static legs scale and it failed on its own terms: at
+// legsJerkScale 0.1 the hip jitter falls exactly as the window law predicts, but the
+// P7 (impact) samples move 3–4 σ, because the hips move fast through impact and a
+// ≈70 ms window blends the post-impact rotation into the impact frame — and the
+// corridors are seeded at P7. Hence a per-frame window: long while the joint is
+// quiet, today's window while it accelerates. Mechanism and the exponent warning
+// (the scale is on q = σ_jerk², so the window law's exponents halve) live in
+// src/Analysis/pose_smoother.h; the two policies live in the .cpp.
+//
+// ⚠ kMode SHIPS "off" AND THAT IS DELIBERATE — with mode off no scale vector is
+// built at all, so every keypoint of every frame is byte-identical to the
+// pre-phase-5 tree by construction (not by an arithmetic identity), and no persisted
+// value[] moves. Promotion is a separate, gated decision (the C15 criteria) exactly
+// as phase 4.3 was, and for the same reason: it is the only part of this design that
+// moves value[], and the P4 corridor content was seeded on the current smoothing.
+namespace adapt {
+inline constexpr const char *kMode  = "off";    // poseSmooth.adapt.mode  — off | accel | innov
+inline constexpr const char *kGroup = "legs";   // poseSmooth.adapt.group — legs (11–16) | body (0–16)
+
+// Floor on the q scale: 0.05 ⇒ window ×1.648 (33 → 54 ms at 150 fps) and stationary
+// residual σ ×0.779 (q exponents: window ∝ s^(−1/6), residual σ ∝ s^(+1/12)).
+inline constexpr double kMinScale = 0.05;
+
+// |a| that maps to scale 1.0 (today's window), px/s² AT THE REFERENCE FORMAT
+// (kARefFrameWidthPx × kARefFrameHeightPx).
+//
+// ⚠ CHOSEN FROM THE IMPACT SIDE, NOT THE ADDRESS SIDE. The requirement is s == 1
+// through P6–P7 on EVERY session — that is the phase-4.2 failure this design exists to
+// avoid (a longer window at impact moved the P7 samples 3–4 σ). The address end is a
+// bonus, and on a session where the golfer actually moves at address the policy
+// correctly does NOT engage there.
+//
+// MEASURED, corpus-wide (83 swings, hip centre, normalised to this reference format —
+// tools/metrics/hip_accel_reference.py):
+//   * min(|a| at P6, |a| at P7): p05 5232, p25 7355, median 9978 px/s². 4000 therefore
+//     holds s == 1 through P6–P7 on 80 of 83 swings.
+//   * P4 median 4378, so the top of the backswing saturates too.
+//   * 08-18 subset still-address p95 2172 ⇒ s = 0.54 at expo 1 (0.29 at expo 2, 0.16 at
+//     expo 3): the address hold sits well down the curve without the impact end moving.
+//   * the July sessions' addresses are NOT still (P1 p95 up to 21 k) and read as motion —
+//     the policy declining to engage there is the correct answer, not a miss.
+// Raising this re-creates the phase-4 failure at the one instant that matters (at 20000,
+// P7 sat at s ≈ 0.69), so do not move it without re-measuring the P6/P7 ladder.
+//
+// ⚠ NOT one number for every joint: the LEAD ANKLE's ladder runs at about half the hips'
+// level (P7 median 6912), so at a group-wide 4000 the ankle is un-saturated at P6/P7 on
+// ≈23 % of swings. If an ankle-derived series fails the C15 gate the fix is a PER-JOINT
+// aRef, not a lower group value — lowering the group number to suit the ankle would drag
+// the hips' impact window back into the phase-4 failure.
+inline constexpr double kARefPxS2 = 4000.0;
+
+// The FORMAT kARefPxS2 is quoted at. |a| is a PIXEL quantity, so the same hip motion
+// filmed smaller reads fewer px/s² and would be scored as "quiet"; the run therefore
+// scales aRefPxS2 by the GEOMETRIC MEAN of the two axes,
+//     sqrt(frameW·frameH / (kARefFrameWidthPx·kARefFrameHeightPx)).
+// 1280×1024 is the format the number above was measured on.
+//
+// ⚠ Why the geometric mean and not frameW alone: the corpus is NOT one format —
+// the June/July sessions are 720×1024 and the 08-18 ones 1280×1024, i.e. the SAME
+// height. A width-only rule would leave a vertical motion (pelvis lift) reading
+// unchanged while its threshold moved 44 %; the geometric mean splits that error
+// between the axes (×0.75 for a horizontal motion, ×1.33 for a vertical one on that
+// format pair, against ×1.0 / ×1.78 for the width rule).
+// ⚠ RESIDUAL, documented not fixed: |a| is a single isotropic magnitude and this is
+// a single isotropic threshold, so a non-square pixel-scale change cannot be undone
+// exactly by either rule. The honest fix is per-axis scaling (two thresholds, or |a|
+// normalised per axis before the hypot) and it needs a design decision, not a
+// constant — pose_smoother_test.cpp section 17 measures what the mean actually does.
+inline constexpr double kARefFrameWidthPx  = 1280.0;
+inline constexpr double kARefFrameHeightPx = 1024.0;
+
+// Contrast: s = clamp((|a|/aRef)^expo, minScale, 1.0). 1.0 is the linear reading the
+// measurements above are quoted for; the C15 sweep runs 1 and 2 (2 pushes the quiet
+// address further down without moving the P6/P7 clamp, at the cost of a sharper
+// transition the lead filter then has to cover).
+inline constexpr double kExpo = 1.0;
+
+// Symmetric ±kLeadMs running MAX over the scale vector, so the window is already
+// short BEFORE the acceleration arrives and stays short just after it — a causal
+// (lead-only) filter would smooth the first frames of every impact with the long
+// address window, which is precisely the sample the corridors read. 20 ms ≈ half the
+// base window, and 3 frames at 150 fps.
+//
+// ⚠ A DURATION, NOT A FRAME COUNT, and that is the whole point: PoseRunner's grid is
+// non-uniform (≈27 ms at the address, 6.7 ms in the dense zone), so ±3 FRAMES would
+// have meant ±81 ms out at the address and ±20 ms through impact — the lead would have
+// been widest exactly where it is least needed. The flip side, stated so nobody
+// rediscovers it as a bug: at a 27 ms grid ±20 ms reaches NO neighbour, so the max
+// filter is a no-op in the coarse address region and only bites in the dense zone.
+inline constexpr double kLeadMs = 20.0;
+
+// innov policy: s = clamp(max over the last kInnovRun ACCEPTED steps of (innov²/S) /
+// kInnovRef, minScale, 1.0). innov²/S is the 3σ gate's own statistic, so 4.0 is "2σ
+// of innovation ⇒ back to today's window". ⚠ For a CONSISTENT filter this statistic
+// is χ²(1)-distributed (mean 1) whatever the joint is doing, so at dense sampling it
+// is dominated by measurement noise rather than by motion — see the policy comment in
+// pose_smoother.cpp. It is registered as the cheap single-pass alternative for the
+// C15 sweep to reject or keep on evidence, not as the recommended policy.
+inline constexpr double kInnovRef = 4.0;
+inline constexpr int    kInnovRun = 3;
+} // namespace adapt
 } // namespace smoother
 } // namespace pose
 

@@ -1,0 +1,22 @@
+# Phase 5 bake-off grid, cut 3 (5 Sept) after the 3-cell probe at aRef 4000: expo 2/3 at minScale 0.05 pass
+# C2/C3/C5/C6 with P4/P7 moving <= 0.21 sigma and 0 fallbacks, but the still-address gain is 17-22 % because
+# the address:impact |a| ratio (~0.5) only reaches s = 0.16 at expo 3 (a 45-50 ms window). A steeper expo
+# pushes the address toward minScale while P4-P7 (>= aRef) stay clamped at 1. aRef in px/s^2 at 1280x1024.
+{"name":"control"}
+{"name":"accel_a4000_e1_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":1,"poseSmooth.adapt.minScale":0.05}
+{"name":"accel_a4000_e2_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":2,"poseSmooth.adapt.minScale":0.05}
+{"name":"accel_a4000_e3_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":3,"poseSmooth.adapt.minScale":0.05}
+{"name":"accel_a4000_e5_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":5,"poseSmooth.adapt.minScale":0.05}
+{"name":"accel_a4000_e8_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":8,"poseSmooth.adapt.minScale":0.05}
+{"name":"accel_a4000_e3_m0.01","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":3,"poseSmooth.adapt.minScale":0.01}
+{"name":"accel_a4000_e5_m0.01","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":5,"poseSmooth.adapt.minScale":0.01}
+{"name":"accel_a4000_e8_m0.01","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":4000,"poseSmooth.adapt.expo":8,"poseSmooth.adapt.minScale":0.01}
+{"name":"accel_a5000_e3_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":5000,"poseSmooth.adapt.expo":3,"poseSmooth.adapt.minScale":0.05}
+{"name":"accel_a5000_e5_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":5000,"poseSmooth.adapt.expo":5,"poseSmooth.adapt.minScale":0.05}
+{"name":"accel_a3000_e3_m0.05","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":3000,"poseSmooth.adapt.expo":3,"poseSmooth.adapt.minScale":0.05}
+{"name":"innov_r2_m0.05","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.innovRef":2,"poseSmooth.adapt.minScale":0.05}
+{"name":"innov_r2_m0.01","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.innovRef":2,"poseSmooth.adapt.minScale":0.01}
+{"name":"innov_r4_m0.05","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.innovRef":4,"poseSmooth.adapt.minScale":0.05}
+{"name":"innov_r4_m0.01","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.innovRef":4,"poseSmooth.adapt.minScale":0.01}
+{"name":"innov_r8_m0.05","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.innovRef":8,"poseSmooth.adapt.minScale":0.05}
+{"name":"innov_r8_m0.01","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.innovRef":8,"poseSmooth.adapt.minScale":0.01}

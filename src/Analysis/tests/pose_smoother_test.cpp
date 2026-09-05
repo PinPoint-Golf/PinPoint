@@ -8,6 +8,19 @@
 // the window the derivation block's law predicts, and that a real hip excursion
 // survives it (metric_presentation_honesty.md §5.4).
 //
+// Sections 10–17 cover the phase-5 MOTION-ADAPTIVE window (poseSmooth.adapt.*): that
+// mode "off" is inert byte for byte, that the accel policy floors the window while the
+// joint is quiet and returns it to today's while the joint accelerates without moving
+// the excursion or the onset sample, that it responds in the right direction on a track
+// with the real pose cadence (11c — which prints the |a| floor it presents to aRef but
+// deliberately does NOT gate engagement; read its fixture note before changing any noise
+// in this file), that the innov policy is wired to its knob (and
+// what it cannot do — see the note in section 12), that the group selects 11–16 or
+// 0–16 and never the tail, that every key round-trips and is range-guarded, that the lead
+// is a DURATION and is local to an
+// acceleration edge, that a segment break widens the window instead of inheriting the
+// address one, and that aRefPxS2's per-frame-width scaling holds.
+//
 //   cmake --build build/analyzer-tests --target pose_smoother_test
 //   ctest --test-dir build/analyzer-tests -R pose_smoother --output-on-failure
 
@@ -15,6 +28,7 @@
 
 #include <QVariantMap>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -118,6 +132,16 @@ static std::vector<PoseFrame2D> buildLegsTrack(const std::vector<double> &times,
     return f;
 }
 
+// ⚠ QPointF::operator== is FUZZY (qFuzzyCompare, ≈1e-12 relative), so it would accept a
+// keypoint that moved in the last few bits — which is exactly what a "byte-identical"
+// claim has to reject. Every equality below goes through this instead: the two doubles
+// compared with ==. (Bitwise, not near: the only NaN in this file would itself be a bug,
+// and no fixture produces one.)
+static bool exactEq(const QPointF &a, const QPointF &b)
+{
+    return a.x() == b.x() && a.y() == b.y();
+}
+
 // Byte-equality of two smoother outputs over the keypoints `keep` selects.
 template <typename Pred>
 static bool sameWhere(const PoseSmootherOutput &a, const PoseSmootherOutput &b, Pred keep)
@@ -127,7 +151,7 @@ static bool sameWhere(const PoseSmootherOutput &a, const PoseSmootherOutput &b, 
         if (a.smoothed[i].t_us != b.smoothed[i].t_us) return false;
         for (int k = 0; k < kWholeBodyJoints; ++k) {
             if (!keep(k)) continue;
-            if (!(a.smoothed[i].kp[k]   == b.smoothed[i].kp[k]
+            if (!(exactEq(a.smoothed[i].kp[k], b.smoothed[i].kp[k])
                && a.smoothed[i].conf[k] == b.smoothed[i].conf[k]
                && a.aux[i].tier[k]      == b.aux[i].tier[k]
                && a.aux[i].sigma[k]     == b.aux[i].sigma[k])) return false;
@@ -168,6 +192,230 @@ static Resid residual(const Arc &a, const std::vector<PoseFrame2D> &out)
 static Resid residualRaw(const Arc &a, const std::vector<PoseFrame2D> &in)
 {
     return residual(a, in);   // raw frames carry the same KP-vs-truth geometry
+}
+
+// ── phase-5 (motion-adaptive window) fixtures ────────────────────────────────
+// The frame size is a PARAMETER here, unlike the sections above: adapt.aRefPxS2 is
+// quoted in px/s² at a reference frame WIDTH (1280 px), so a fixture that hard-codes
+// 1920 would silently be testing a 1.5× threshold. 1280×1024 is the corpus subset's
+// format, i.e. the format the shipped aRef was measured on.
+static constexpr double WA = 1280.0, HA = 1024.0;
+static constexpr int    KPA = 11;                    // left hip — inside the legs group
+
+template <typename Fn>
+static std::vector<PoseFrame2D> buildKpTrackWH(int k, const std::vector<double> &times,
+                                               Fn truthX, double ty, double noisePx, Lcg &rng,
+                                               double w, double h,
+                                               double holeLo = 1e30, double holeHi = 1e30)
+{
+    std::vector<PoseFrame2D> f(times.size());
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        const double t = times[i];
+        const double px = truthX(t) + (noisePx > 0.0 ? noisePx * rng.gauss() : 0.0);
+        const double py = ty        + (noisePx > 0.0 ? noisePx * rng.gauss() : 0.0);
+        f[i].t_us    = int64_t(std::llround(t * 1e6));
+        f[i].kp[k]   = QPointF(px / w, py / h);
+        f[i].conf[k] = (t >= holeLo && t < holeHi) ? 0.05f : 0.8f;
+    }
+    return f;
+}
+
+// The adapt track: 1.0 s still, 1.0 s of a 40 px (half peak-to-peak) 4 Hz RAISED
+// COSINE, 0.5 s still — 375 frames at 150 fps. Velocity is continuous at both ends
+// (the raised cosine starts and ends at rest) and the motion is exactly four whole
+// periods, so the amplitude can be read by projection and the boundary is a clean
+// ACCELERATION step rather than a velocity step.
+//
+// ⚠ WHY 4 Hz AND NOT THE 0.5 Hz A P1→P4 SWAY LOOKS LIKE. The accel policy reads the
+// smoothed ACCELERATION, and a 40 px 0.5 Hz excursion peaks at 40·(2π·0.5)² = 395
+// px/s² — two orders below the corpus's measured hip accelerations (P6 11136, P7 13877
+// px/s² at 1280 wide) and far below the smoother's own acceleration-estimate noise on a
+// noisy stationary point. No setting of any policy could tell that motion from an
+// address hold, so a 0.5 Hz fixture cannot test discrimination at all. 4 Hz puts the
+// peak at 40·(2π·4)² = 25265 px/s², i.e. the P7 order, and is still deep inside the
+// filter's passband: even pinned at the minScale floor (q ×0.05 ⇒ cutoff ×0.05^(1/6) =
+// ×0.607) the predicted amplitude loss is (25.13/55.5)⁶ = 0.9 %, so ONE fixture can
+// carry both "the window returns to 1.0 while it accelerates" and "the excursion
+// survives" — which is the whole point of the policy.
+static constexpr double kAdQuietS = 1.0, kAdMotionS = 1.0, kAdTailS = 0.5;
+static constexpr double kAdAmpPx  = 40.0, kAdHz = 4.0;
+static constexpr double kAdX0 = 900.0, kAdY = 600.0;
+static constexpr int    kAdQuietLo = 40, kAdQuietHi = 120;   // still-interior frames (of 0..149)
+static constexpr int    kAdMotionLo = 150, kAdMotionHi = 300;
+static double adOmega() { return 2.0 * kPi * kAdHz; }
+static double adPeakAccel() { return kAdAmpPx * adOmega() * adOmega(); }   // 25265 px/s²
+static double adTruthX(double t)
+{
+    if (t < kAdQuietS) return kAdX0;
+    const double tp = t - kAdQuietS;
+    if (tp >= kAdMotionS) return kAdX0;                  // four whole periods ⇒ back at rest
+    return kAdX0 + kAdAmpPx * (1.0 - std::cos(adOmega() * tp));
+}
+static double adTruthAccel(double t)
+{
+    if (t < kAdQuietS) return 0.0;
+    const double tp = t - kAdQuietS;
+    if (tp >= kAdMotionS) return 0.0;
+    return adPeakAccel() * std::cos(adOmega() * tp);
+}
+
+// Excursion amplitude by projection onto the truth's own −cos shape over exactly four
+// whole periods (unbiased in noise, which a peak-to-peak read is not).
+static double adAmplitude(const std::vector<PoseFrame2D> &fr)
+{
+    double acc = 0.0; int n = 0;
+    for (const auto &f : fr) {
+        const double t = double(f.t_us) * 1e-6;
+        if (t < kAdQuietS || t >= kAdQuietS + kAdMotionS) continue;
+        const double tp = t - kAdQuietS;
+        acc += (f.kp[KPA].x() * WA - (kAdX0 + kAdAmpPx)) * (-std::cos(adOmega() * tp));
+        ++n;
+    }
+    return n ? 2.0 * acc / n : 0.0;
+}
+
+// Residual sd (px, both axes) of the still stretch — the noise-averaging measure the
+// window law predicts.
+static double adResidSd(const PoseSmootherOutput &o, int lo, int hi)
+{
+    double s = 0.0; int n = 0;
+    for (int i = lo; i < hi && i < int(o.smoothed.size()); ++i) {
+        const double dx = o.smoothed[std::size_t(i)].kp[KPA].x() * WA - kAdX0;
+        const double dy = o.smoothed[std::size_t(i)].kp[KPA].y() * HA - kAdY;
+        s += dx * dx + dy * dy; n += 2;
+    }
+    return n ? std::sqrt(s / n) : 0.0;
+}
+
+static double medianOf(std::vector<double> v)
+{
+    if (v.empty()) return 0.0;
+    std::sort(v.begin(), v.end());
+    return v[v.size() / 2];
+}
+
+// ── the REALISTIC still/motion fixture (section 11c) ─────────────────────────
+// Two things about real pose data set the floor the accel policy has to clear, and a
+// uniform 150 fps track with white noise gets both wrong.
+//
+// (1) CADENCE. PoseRunner does not pose the address hold densely: the address region
+// sits on the coarse/sparse grid (the corpus's measured dt there is ≈27 ms) and the
+// dense ≈6.7 ms zone only opens ≈500 ms before impact (pose_runner.h's stride set —
+// addressStride 15 / coarseStride 12 for the padded address, the sparse stride for the
+// rest). |a| is a second-derivative statistic, so the grid it is read on matters — and
+// the lead is `leadMs`, a DURATION, precisely because of this grid: ±3 FRAMES would have
+// been ±81 ms out at the address and ±20 ms in the dense zone — widest where the lead is
+// least needed. The flip side is that at a 27 ms grid a 20 ms lead reaches NO neighbour,
+// so out at the address the max filter is a no-op and the still scale is the raw
+// per-frame reading; a densely posed address instead takes the max over several
+// independent samples of the noise floor and therefore reads LOUDER.
+//
+// (2) NOISE COLOUR, which is the bigger lever by far. |a| in a still stretch is driven
+// by the HIGH-FREQUENCY part of the keypoint error: for the filter's spectral
+// equivalent, sigma_a = 0.447·omega_c²·sigma_p with omega_c = (q/(sigma_m²·dt))^(1/6),
+// so error energy near omega_c (≈70–90 rad/s here, i.e. ≈11–14 ms) is what shows up as
+// apparent acceleration, and energy well below it is tracked as real motion and shows up
+// barely at all. Independent per-frame (WHITE) noise is the worst case: it puts full
+// power at omega_c. Real detector error is mostly a slow drift with the pose/appearance,
+// so the corpus's measured still-address hip |a| p95 is only 1652 px/s² at 1280 wide
+// (docs/validation/data/hip_accel_reference_subset.csv) even though the smoothed track's
+// positional residual is over a px. A uniform-150 fps white 3 px fixture reads high enough
+// that the policy never engages on it at all (measured: still scale median 1.000).
+//
+// So this fixture carries the real cadence and 2 px of keypoint error split into two
+// colours: 0.5 px white + 1.94 px AR(1) drift with tau = 60 ms (2.0 px total). MEASURED on
+// it: still |a| median 3113, p95 7546 px/s² — better than white, still ≈4.6× the corpus's
+// 1652, because an AR(1) drift has a 1/omega² tail and so is NOT quiet at omega_c (that
+// 1.94 px drift carries ≈9× the 0.5 px white component's power there). A fixture that
+// matched the corpus would need a spectrally smoother error model, which nothing in this
+// repo measures — so this fixture pins the DIRECTION of the policy and the bake-off on real
+// swings decides engagement. Read section 11c before changing any noise here.
+static std::vector<double> realCadenceTimes(double coarseUntil, double total,
+                                            double coarseDt = 0.027, double denseDt = 1.0 / 150.0)
+{
+    std::vector<double> t;
+    for (int i = 0; i * coarseDt < coarseUntil; ++i) t.push_back(i * coarseDt);
+    for (int j = 0; coarseUntil + j * denseDt < total; ++j) t.push_back(coarseUntil + j * denseDt);
+    return t;
+}
+
+// White + AR(1) drift, the two colours of a real keypoint error, per axis. Started in
+// its stationary distribution so the first frames are not special.
+struct DriftNoise {
+    double sdWhite, sdDrift, tauS;
+    double dx = 0.0, dy = 0.0;
+    void seed(Lcg &rng) { dx = sdDrift * rng.gauss(); dy = sdDrift * rng.gauss(); }
+    void step(double dt, Lcg &rng)
+    {
+        const double phi = std::exp(-std::max(dt, 0.0) / tauS);
+        const double sw  = sdDrift * std::sqrt(std::max(0.0, 1.0 - phi * phi));
+        dx = phi * dx + sw * rng.gauss();
+        dy = phi * dy + sw * rng.gauss();
+    }
+};
+
+static std::vector<PoseFrame2D> buildRealisticTrack(const std::vector<double> &times, Lcg &rng)
+{
+    DriftNoise n{ 0.5, 1.94, 0.060 };
+    n.seed(rng);
+    std::vector<PoseFrame2D> f(times.size());
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        if (i) n.step(times[i] - times[i - 1], rng);
+        const double px = adTruthX(times[i]) + n.dx + 0.5 * rng.gauss();
+        const double py = kAdY               + n.dy + 0.5 * rng.gauss();
+        f[i].t_us      = int64_t(std::llround(times[i] * 1e6));
+        f[i].kp[KPA]   = QPointF(px / WA, py / HA);
+        f[i].conf[KPA] = 0.8f;
+    }
+    return f;
+}
+
+// The same raised-cosine excursion carried on the OTHER axis (x constant), for the
+// anisotropy case in section 17: a format change that is not a similarity transform
+// scales the two axes differently, and one isotropic threshold cannot undo both.
+static std::vector<PoseFrame2D> buildYMotionTrack(const std::vector<double> &times,
+                                                  double w, double h)
+{
+    std::vector<PoseFrame2D> f(times.size());
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        f[i].t_us      = int64_t(std::llround(times[i] * 1e6));
+        // adTruthX carries the motion; here it drives y, and x is the constant.
+        f[i].kp[KPA]   = QPointF(kAdX0 / w, (kAdY - kAdX0 + adTruthX(times[i])) / h);
+        f[i].conf[KPA] = 0.8f;
+    }
+    return f;
+}
+
+static double percentileOf(std::vector<double> v, double p)
+{
+    if (v.empty()) return 0.0;
+    std::sort(v.begin(), v.end());
+    const std::size_t idx = std::min(v.size() - 1,
+                                     std::size_t(p * double(v.size() - 1) + 0.5));
+    return v[idx];
+}
+
+// A single ACCELERATION PULSE (noiseless), for the lead-locality test: 0.40 s
+// still, 0.15 s at +12000 px/s², 0.25 s at constant velocity, 0.15 s at −12000, then
+// still. |a| is therefore two clean plateaus with four transitions, which is what makes
+// "the lead filter changes nothing except near an acceleration edge" checkable — a
+// sustained oscillation has an edge every few frames and the claim would be empty.
+// 12000 px/s² is s = 1.5 at the shipped aRef, so each plateau clamps to 1.0 with margin.
+static constexpr double kPulseA  = 12000.0;
+static constexpr double kPulseE0 = 0.40, kPulseE1 = 0.55, kPulseE2 = 0.80, kPulseE3 = 0.95;
+static double pulseTruthX(double t)
+{
+    const double t1 = kPulseE1 - kPulseE0, t2 = kPulseE2 - kPulseE1, t3 = kPulseE3 - kPulseE2;
+    const double v  = kPulseA * t1;                      // 1800 px/s
+    const double d1 = 0.5 * kPulseA * t1 * t1;           // 135 px
+    const double d2 = v * t2;                            // 450 px
+    const double d3 = v * t3 - 0.5 * kPulseA * t3 * t3;  // 135 px
+    if (t <= kPulseE0) return 200.0;
+    if (t <= kPulseE1) { const double u = t - kPulseE0; return 200.0 + 0.5 * kPulseA * u * u; }
+    if (t <= kPulseE2) return 200.0 + d1 + v * (t - kPulseE1);
+    if (t <= kPulseE3) { const double u = t - kPulseE2;
+                         return 200.0 + d1 + d2 + v * u - 0.5 * kPulseA * u * u; }
+    return 200.0 + d1 + d2 + d3;                         // 920 px, at rest
 }
 
 int main()
@@ -231,7 +479,7 @@ int main()
         bool same = a.smoothed.size() == b.smoothed.size() && a.aux.size() == b.aux.size();
         for (std::size_t i = 0; same && i < a.smoothed.size(); ++i) {
             for (int k = 0; k < kWholeBodyJoints && same; ++k) {
-                same = a.smoothed[i].kp[k] == b.smoothed[i].kp[k]
+                same = exactEq(a.smoothed[i].kp[k], b.smoothed[i].kp[k])
                     && a.smoothed[i].conf[k] == b.smoothed[i].conf[k]
                     && a.aux[i].tier[k] == b.aux[i].tier[k]
                     && a.aux[i].sigma[k] == b.aux[i].sigma[k];
@@ -298,7 +546,7 @@ int main()
         bool off = true, passthrough = true, zeroConf = true, zeroSig = true;
         for (int i = 0; i < 30; ++i) {
             off         &= res.aux[i].tier[KP]   == uint8_t(PoseTier::Off);
-            passthrough &= res.smoothed[i].kp[KP] == in[i].kp[KP];
+            passthrough &= exactEq(res.smoothed[i].kp[KP], in[i].kp[KP]);
             zeroConf    &= res.smoothed[i].conf[KP]  == 0.0f;
             zeroSig     &= res.aux[i].sigma[KP]      == 0.0f;
         }
@@ -346,7 +594,7 @@ int main()
 
         bool bodySame = resBody.smoothed.size() == resWhole.smoothed.size();
         for (std::size_t i = 0; bodySame && i < resBody.smoothed.size(); ++i)
-            bodySame = resBody.smoothed[i].kp[KP]   == resWhole.smoothed[i].kp[KP]
+            bodySame = exactEq(resBody.smoothed[i].kp[KP], resWhole.smoothed[i].kp[KP])
                     && resBody.smoothed[i].conf[KP] == resWhole.smoothed[i].conf[KP]
                     && resBody.aux[i].tier[KP]      == resWhole.aux[i].tier[KP]
                     && resBody.aux[i].sigma[KP]     == resWhole.aux[i].sigma[KP];
@@ -369,7 +617,7 @@ int main()
         bool bodyFrozen = true, handMoved = false;
         for (std::size_t i = 0; i < resWhole.smoothed.size(); ++i) {
             bodyFrozen = bodyFrozen
-                      && resWhole.smoothed[i].kp[KP]  == resScaled.smoothed[i].kp[KP]
+                      && exactEq(resWhole.smoothed[i].kp[KP], resScaled.smoothed[i].kp[KP])
                       && resWhole.aux[i].sigma[KP]    == resScaled.aux[i].sigma[KP];
             handMoved  = handMoved
                       || resWhole.aux[i].sigma[KPHAND] != resScaled.aux[i].sigma[KPHAND];
@@ -418,7 +666,7 @@ int main()
             bool moved = false;
             for (std::size_t i = 0; i < base.aux.size() && !moved; ++i)
                 moved = base.aux[i].sigma[k] != scaled.aux[i].sigma[k]
-                     || base.smoothed[i].kp[k] != scaled.smoothed[i].kp[k];
+                     || !exactEq(base.smoothed[i].kp[k], scaled.smoothed[i].kp[k]);
             everyLegMoved = everyLegMoved && moved;
         }
         check(everyLegMoved, "every legs keypoint 11-16 responds to the scale");
@@ -462,7 +710,7 @@ int main()
                                                600.0, 3.0, r1);
             const auto inChk = buildOneKpTrack(KPHIP, times, [](double) { return 900.0; },
                                                600.0, 3.0, r2);
-            check(in.size() == inChk.size() && in[7].kp[KPHIP] == inChk[7].kp[KPHIP],
+            check(in.size() == inChk.size() && exactEq(in[7].kp[KPHIP], inChk[7].kp[KPHIP]),
                   "the stationary-hip fixture is deterministic");
 
             auto residSd = [&](const PoseSmootherOutput &o) {
@@ -480,13 +728,22 @@ int main()
             const double sdBase = residSd(smoothPoseTrack(in, W, H));
             const double sdSlow = residSd(smoothPoseTrack(in, W, H, slow));
             const double ratio  = sdBase > 0.0 ? sdSlow / sdBase : 1.0;
+            // ⚠ The band has to be tight enough to tell the two EXPONENT FAMILIES apart.
+            // legsJerkScale multiplies sigma_jerk, so the residual law is s^(1/6) = 0.681;
+            // the same number read as a q scale (phase 5's multiplier) would be s^(1/12) =
+            // 0.825. A +-25% band admits both, which would let a future refactor move the
+            // scale onto q without a single test noticing. +-10% admits only one, and the
+            // second check states the discrimination directly.
+            const double wrongFamily = std::pow(0.1, 1.0 / 12.0);   // 0.825, the q reading
             std::printf("       stationary hip: sd base=%.3fpx  scale0.1=%.3fpx  ratio=%.3f"
-                        " (predicted %.3f; window %.0fms -> %.0fms)\n",
-                        sdBase, sdSlow, ratio, predicted,
+                        " (sigma_jerk law %.3f, q law %.3f; window %.0fms -> %.0fms)\n",
+                        sdBase, sdSlow, ratio, predicted, wrongFamily,
                         legWindowMsForJerkScale(1.0), legWindowMsForJerkScale(0.1));
             check(ratio < 1.0, "legsJerkScale 0.1 reduces the stationary-hip residual sd");
-            check(ratio > 0.75 * predicted && ratio < 1.25 * predicted,
-                  "the reduction matches the s^(1/6) window law within 25%");
+            check(ratio > 0.90 * predicted && ratio < 1.10 * predicted,
+                  "the reduction matches the sigma_jerk-family law s^(1/6) within 10%");
+            check(std::abs(ratio - predicted) < std::abs(ratio - wrongFamily),
+                  "and is nearer the sigma_jerk law than the q-scale law (right family)");
         }
 
         // (b2) a REAL hip excursion must survive it: 0.5 Hz, 40 px amplitude — the
@@ -527,6 +784,850 @@ int main()
         check(w05 > 80.0 && w05 < 100.0, "jerk scale 0.05 predicts the design's 80-100 ms window");
         check(w10 > 60.0 && w10 < 80.0,  "jerk scale 0.1 predicts ~71 ms (short of the target)");
         check(legWindowMsForJerkScale(1.0) == 33.0, "scale 1.0 is the measured 33 ms baseline");
+    }
+
+    // ── 10. phase 5: adapt mode "off" is inert (the byte-identical promise) ───
+    // The promise is BY CONSTRUCTION, not by an arithmetic identity: with mode off no
+    // scale vector is built anywhere and predict() is never handed anything but its
+    // 1.0 default. These cases pin that the shipped defaults are the dark ones and
+    // that every OTHER adapt field is unreachable while the mode is off — including
+    // the test hook, which must emit nothing.
+    std::printf("=== smoothPoseTrack: adapt mode off is inert ===\n");
+    {
+        PoseSmootherConfig def;
+        check(def.adapt.mode == AdaptMode::Off, "shipped adapt.mode is Off (DARK)");
+        check(def.adapt.group == AdaptGroup::Legs, "shipped adapt.group is legs (kp 11-16)");
+        check(def.adapt.minScale == 0.05 && def.adapt.aRefPxS2 == 4000.0
+                  && def.adapt.expo == 1.0 && def.adapt.leadMs == 20.0
+                  && def.adapt.innovRef == 4.0 && def.adapt.innovRun == 3,
+              "shipped adapt numbers are the frozen constants (0.05 / 4000 / 1 / 20ms / 4 / 3)");
+        check(!def.adapt.emitScalesForTest, "the C14 test hook ships off");
+        check(!def.adapt.appliesTo(11) && !def.adapt.appliesTo(0),
+              "mode off reaches no keypoint at all");
+
+        Lcg rng(0x5CA1E5EDu);
+        const auto times = uniformTimes(150.0, 1.0);
+        const auto in    = buildLegsTrack(times, rng);
+        const auto base  = smoothPoseTrack(in, W, H);
+        check(base.adaptScale.empty() && base.adaptAccel.empty(),
+              "mode off builds no scale vector and no |a| vector");
+        check(base.adaptFallbacks == 0, "mode off can have nothing to fall back (count 0)");
+
+        for (const AdaptGroup g : { AdaptGroup::Legs, AdaptGroup::Body }) {
+            PoseSmootherConfig off;                 // every adapt field wild, mode still off
+            off.adapt.mode = AdaptMode::Off;
+            off.adapt.group = g;
+            off.adapt.minScale = 0.5;  off.adapt.aRefPxS2 = 1.0;  off.adapt.expo = 2.0;
+            off.adapt.leadMs = 90.0;   off.adapt.innovRef = 0.1;  off.adapt.innovRun = 1;
+            off.adapt.emitScalesForTest = true;
+            const auto res = smoothPoseTrack(in, W, H, off);
+            check(sameWhere(base, res, [](int) { return true; }),
+                  g == AdaptGroup::Legs
+                      ? "mode off + wild adapt fields (legs): byte-identical on every kp/conf/tier/sigma"
+                      : "mode off + wild adapt fields (body): byte-identical on every kp/conf/tier/sigma");
+            check(res.adaptScale.empty() && res.adaptAccel.empty() && res.adaptFallbacks == 0,
+                  "mode off emits no scale/|a| vector even with the hook on, and no fallbacks");
+        }
+    }
+
+    // ── 11. accel policy: the window floors when quiet, returns when it moves ──
+    // (a) on a NOISELESS track, where the policy's input is the truth. This is the
+    // discrimination test, and it runs on the SHIPPED defaults (aRef 8000 at 1280 wide,
+    // expo 1, minScale 0.05, lead 3): quiet ⇒ the clamp floor, accelerating ⇒ 1.0.
+    std::printf("=== smoothPoseTrack: adapt accel, noiseless discrimination ===\n");
+    {
+        Lcg noRng(1);
+        const auto times = uniformTimes(150.0, kAdQuietS + kAdMotionS + kAdTailS);
+        const auto in    = buildKpTrackWH(KPA, times, adTruthX, kAdY, 0.0, noRng, WA, HA);
+        PoseSmootherConfig cfg;
+        cfg.adapt.mode = AdaptMode::Accel;
+        cfg.adapt.emitScalesForTest = true;
+        const auto res = smoothPoseTrack(in, int(WA), int(HA), cfg);
+        const auto off = smoothPoseTrack(in, int(WA), int(HA));
+
+        check(res.adaptScale.size() == std::size_t(kWholeBodyJoints)
+                  && res.adaptScale[KPA].size() == in.size(),
+              "the hook emits one scale per frame for the adapting keypoint");
+        check(res.adaptScale[9].empty() && res.adaptScale[17].empty(),
+              "a keypoint outside the group keeps an EMPTY scale row");
+        const std::vector<double> &s = res.adaptScale[KPA];
+        check(s[0] == 1.0, "a segment's init frame never predicts, so it carries 1.0");
+
+        bool quietFloor = true, tailFloor = true;
+        for (int i = kAdQuietLo; i < kAdQuietHi; ++i)
+            quietFloor = quietFloor && s[std::size_t(i)] == cfg.adapt.minScale;
+        for (int i = 340; i < 370; ++i)
+            tailFloor = tailFloor && s[std::size_t(i)] == cfg.adapt.minScale;
+        check(quietFloor, "the still stretch sits exactly on minScale (the long window)");
+        check(tailFloor, "and returns to it after the motion");
+
+        // Every high-acceleration frame is back at today's window. aRefEff = 4000 at the
+        // 1280×1024 reference and the peak is 25265, so the clamp is reached from
+        // |cos| ≥ 0.16; the assertion uses 0.4 to leave the estimator room at the crossings.
+        bool motionOne = true; int nHigh = 0;
+        for (int i = kAdMotionLo; i < kAdMotionHi; ++i) {
+            const double t = double(in[std::size_t(i)].t_us) * 1e-6;
+            if (std::abs(adTruthAccel(t)) < 0.4 * adPeakAccel()) continue;
+            motionOne = motionOne && s[std::size_t(i)] == 1.0;
+            ++nHigh;
+        }
+        check(nHigh > 60, "the fixture has plenty of high-acceleration frames");
+        check(motionOne, "every high-acceleration frame runs at 1.0 (today's window at impact)");
+
+        // The lead is symmetric, so the window is already short BEFORE the step. 20 ms is
+        // 3 frames on this uniform 150 fps fixture (a DURATION — see leadMs).
+        check(s[std::size_t(kAdMotionLo - 3)] > cfg.adapt.minScale,
+              "the scale is already above the floor 20 ms (3 frames) before the acceleration");
+
+        // F9's first-class |a| hook: one value per frame, the policy's actual input, and
+        // NOTHING dropped — the init frame carries a real |a| too (it is inside the
+        // segment's RTS), it is only its SCALE that is 1.0 because it never predicted.
+        check(res.adaptAccel.size() == std::size_t(kWholeBodyJoints)
+                  && res.adaptAccel[KPA].size() == in.size(),
+              "the |a| hook emits one value per frame for the adapting keypoint");
+        check(res.adaptAccel[9].empty(), "and an empty row for a keypoint outside the group");
+        int nAccelPos = 0;
+        for (const double v : res.adaptAccel[KPA]) if (v > 0.0) ++nAccelPos;
+        check(nAccelPos > 100, "the motion frames carry a real |a| (no sentinel, no dropping)");
+        // On a NOISELESS still stretch the RTS acceleration is ~0 — the posterior equals the
+        // prediction there, so the backward pass has nothing to correct except what bleeds
+        // back from the motion (a contraction per step, so it is denormal by here). Not
+        // asserted as exactly 0.0 for that reason. It is also why 0 cannot double as "no
+        // value": the vector is one entry per frame, and only a NON-ADAPTING keypoint's row
+        // is empty.
+        check(res.adaptAccel[KPA][80] < 1.0, "a noiseless still frame reads |a| ~ 0, not a sentinel");
+        check(res.adaptAccel[KPA][std::size_t(kAdMotionLo + 4)] > 8000.0,
+              "|a| through the motion is the P6/P7 order the policy is thresholded against");
+
+        // And the onset sample must not have moved: this is the P7 failure of phase 4.2
+        // stated as a test — the sample the corridors read must survive the policy.
+        const double dOn = std::abs(res.smoothed[kAdMotionLo].kp[KPA].x()
+                                    - off.smoothed[kAdMotionLo].kp[KPA].x()) * WA;
+        const double sigOn = double(res.aux[kAdMotionLo].sigma[KPA]);
+        std::printf("       onset frame: |delta| vs mode off = %.3fpx, reported sigma = %.3fpx\n",
+                    dOn, sigOn);
+        check(sigOn > 0.0 && dOn < sigOn,
+              "the motion-onset sample moves less than its own reported sigma vs mode off");
+    }
+
+    // (b) on a NOISY track: the window law, the excursion, and an honest note about
+    // what the policy can see in noise.
+    std::printf("=== smoothPoseTrack: adapt accel, window law and excursion (noisy) ===\n");
+    {
+        Lcg rng(0xA5A5F00Du);
+        const auto times = uniformTimes(150.0, kAdQuietS + kAdMotionS + kAdTailS);
+        const auto in    = buildKpTrackWH(KPA, times, adTruthX, kAdY, 3.0, rng, WA, HA);
+
+        // ⚠ EVERY RUN IN THIS SECTION WIDENS THE GATE TO 6σ, and that is load-bearing.
+        // The law is about NOISE AVERAGING; the 3σ gate is tested in sections 1–8 and the
+        // divergence guard in section 19. At minScale 0.05 the reduced q shrinks Pp, which
+        // shrinks S, which tightens the 3σ radius by ≈10 % — enough that on a 3 px white
+        // track one borderline sample of the ~750 flips its accept flag, the divergence
+        // guard (correctly, by its own rule) rejects the whole keypoint, and the "adaptive"
+        // run comes back as the control: sd ratio exactly 1.000, which is what this section
+        // measured before the gate was widened. At 6σ nothing is rejected in either pass on
+        // 3 px noise (the largest |innov| over 750 samples is ≈3.5σ_meas), so accepted[] is
+        // all-ones in both and the guard cannot fire. The fallback counts are asserted 0
+        // below so this can never silently become a test of the guard again.
+        PoseSmootherConfig lawBase;
+        lawBase.gateSig = 6.0;
+        const auto off = smoothPoseTrack(in, int(WA), int(HA), lawBase);   // the control
+
+        // (i) THE WINDOW LAW, and its exponents. A q scale s is a sigma_jerk scale of
+        // sqrt(s), so the phase-4 law (window ∝ sigma_jerk^(−1/3), stationary residual
+        // sigma ∝ sigma_jerk^(+1/6)) reads window ∝ s^(−1/6) and residual sigma ∝
+        // s^(+1/12) in q terms: minScale 0.05 ⇒ window x1.648 (33 → 54 ms at 150 fps)
+        // and residual sigma x0.05^(1/12) = x0.779. Measured with an UNREACHABLE aRef so
+        // every step is pinned at the floor — this checks the LAW, not the policy's
+        // ability to see this fixture's noise (which (iii) reports instead).
+        PoseSmootherConfig flrCfg = lawBase;
+        flrCfg.adapt.mode = AdaptMode::Accel;
+        flrCfg.adapt.aRefPxS2 = 1e9;
+        flrCfg.adapt.emitScalesForTest = true;
+        const auto flr = smoothPoseTrack(in, int(WA), int(HA), flrCfg);
+        bool allFloor = true;
+        for (std::size_t i = 1; i < flr.adaptScale[KPA].size(); ++i)
+            allFloor = allFloor && flr.adaptScale[KPA][i] == flrCfg.adapt.minScale;
+        std::printf("       adaptFallbacks: floored run=%d\n", flr.adaptFallbacks);
+        check(flr.adaptFallbacks == 0, "the widened gate keeps the law fixture non-divergent");
+        check(allFloor, "an unreachable aRef pins every predicted step at minScale");
+
+        const double predicted   = std::pow(0.05, 1.0 / 12.0);   // 0.779 — the q family
+        const double wrongFamily = std::pow(0.05, 1.0 /  6.0);   // 0.607 — the sigma_jerk one
+        const double sdOff = adResidSd(off, kAdQuietLo, kAdQuietHi);
+        const double sdFlr = adResidSd(flr, kAdQuietLo, kAdQuietHi);
+        const double ratio = (sdOff > 0.0) ? sdFlr / sdOff : 1.0;
+        std::printf("       still-stretch sd: off=%.3fpx  minScale=%.3fpx  ratio=%.3f"
+                    " (q law %.3f, sigma_jerk law %.3f)\n",
+                    sdOff, sdFlr, ratio, predicted, wrongFamily);
+        check(ratio < 1.0, "the adaptive floor reduces the still-stretch residual sd");
+        // ±10%, not ±25%: the two exponent families for minScale 0.05 are 0.779 (q, which
+        // is what predict() scales) and 0.607 (sigma_jerk). A wide band admits both, so it
+        // would not notice a refactor that moved the multiplier onto sigma_jerk.
+        check(ratio > 0.90 * predicted && ratio < 1.10 * predicted,
+              "the reduction matches the q-family window law s^(1/12) within 10%");
+        check(std::abs(ratio - predicted) < std::abs(ratio - wrongFamily),
+              "and is nearer the q law than the sigma_jerk law (right family)");
+
+        // (ii) the excursion survives — including in the worst case (pinned at the
+        // floor for the whole track), which is the 0.9 % loss the fixture note derives.
+        PoseSmootherConfig accCfg = lawBase;
+        accCfg.adapt.mode = AdaptMode::Accel;
+        accCfg.adapt.emitScalesForTest = true;
+        const auto acc = smoothPoseTrack(in, int(WA), int(HA), accCfg);
+        std::printf("       adaptFallbacks: shipped-defaults run=%d\n", acc.adaptFallbacks);
+        check(acc.adaptFallbacks == 0, "and keeps the excursion fixture non-divergent too");
+        const double aRaw = adAmplitude(in), aOff = adAmplitude(off.smoothed);
+        const double aAcc = adAmplitude(acc.smoothed), aFlr = adAmplitude(flr.smoothed);
+        std::printf("       4Hz 40px excursion: raw=%.2f  off=%.2f  accel=%.2f  minScale=%.2f\n",
+                    aRaw, aOff, aAcc, aFlr);
+        check(std::abs(aRaw / kAdAmpPx - 1.0) < 0.05, "the fixture really carries a 40 px amplitude");
+        check(std::abs(aAcc / kAdAmpPx - 1.0) < 0.02, "accel keeps the excursion within 2% of 40 px");
+        check(std::abs(aAcc / std::max(aOff, 1e-9) - 1.0) < 0.02,
+              "and within 2% of the mode-off amplitude");
+        check(std::abs(aFlr / kAdAmpPx - 1.0) < 0.02,
+              "even pinned at minScale the excursion survives (0.9% predicted loss)");
+
+        // (iii) Whether the policy ENGAGES is not asked of this fixture, and cannot be:
+        // uniform 150 fps with WHITE 3 px noise is the worst case for a second-derivative
+        // statistic (full noise power at the filter's own cutoff), so its still-stretch
+        // |a| sits near or above aRef and the scale stays near 1.0 throughout. Measured
+        // on this fixture: still scale median 1.000 (min 0.718). Section 11(c) asks that
+        // question on a fixture with the real cadence and the real noise COLOUR, and
+        // prints the |a| floor against aRef so the log shows why.
+    }
+
+    // ── 11c. the policy's DIRECTION on a realistic track, and the floor on record ─
+    // The question phase 5 lives or dies on — at the shipped aRef (4000 px/s² at the
+    // 1280×1024 reference, chosen from the P6/P7 side on 83 corpus swings) is a still
+    // address below the knee? — is NOT settled here, and cannot be: see the fixture note
+    // above and the ⚠ block at the assertions.
+    // This section runs the real ≈27 ms address cadence with the dense zone opening 500 ms
+    // before the motion, asserts the ORDERING (still smoothed harder than moving, moving
+    // back at 1.0), and prints the pass-1 |a| median/p95 beside the scale medians so the
+    // floor this fixture presents to aRef is always on the record next to the corpus's
+    // measured 1652 px/s² p95. Engagement is the bake-off's call, on real swings.
+    std::printf("=== smoothPoseTrack: adapt accel engagement on a realistic track ===\n");
+    {
+        const double total = kAdQuietS + kAdMotionS + kAdTailS;
+        const auto times = realCadenceTimes(kAdQuietS - 0.5, total);   // dense from 500 ms before
+        Lcg rng(0xC0FFEE11u);
+        const auto in = buildRealisticTrack(times, rng);
+
+        PoseSmootherConfig cfg;                    // the SHIPPED adapt defaults
+        cfg.adapt.mode = AdaptMode::Accel;
+        cfg.adapt.emitScalesForTest = true;
+        const auto res = smoothPoseTrack(in, int(WA), int(HA), cfg);
+        const std::vector<double> &s    = res.adaptScale[KPA];
+        const std::vector<double> &aMag = res.adaptAccel[KPA];   // F9: first-class, not derived
+        const double aRefEff = cfg.adapt.aRefPxS2 * std::sqrt((WA * HA) / (1280.0 * 1024.0));
+
+        // The still stretch: everything at least 300 ms before the motion starts, minus
+        // the first 250 ms (the loose init priors), so BOTH cadences are represented — the
+        // coarse address grid and the dense zone that opens 500 ms before the motion.
+        std::vector<double> stillScale, stillAccel, moveScale;
+        int nCoarse = 0, nDense = 0;
+        for (std::size_t i = 0; i < in.size(); ++i) {
+            const double t = double(in[i].t_us) * 1e-6;
+            if (t > 0.25 && t < kAdQuietS - 0.30) {
+                stillScale.push_back(s[i]);
+                stillAccel.push_back(aMag[i]);
+                if (t < kAdQuietS - 0.5) ++nCoarse; else ++nDense;
+            } else if (t >= kAdQuietS && t < kAdQuietS + kAdMotionS
+                       && std::abs(adTruthAccel(t)) >= 0.9 * adPeakAccel()) {
+                moveScale.push_back(s[i]);
+            }
+        }
+        check(stillAccel.size() == stillScale.size(),
+              "the |a| hook drops nothing: one value per still frame (F9)");
+        const double aMed = medianOf(stillAccel), aP95 = percentileOf(stillAccel, 0.95);
+        const double sMed = medianOf(stillScale),  mMed = medianOf(moveScale);
+        // The statistic that survives this fixture's floor being 2–4× the corpus's: the
+        // FRACTION of frames the policy actually lengthens. A median saturates at 1.0 as
+        // soon as more than half the still frames clear aRef, which on a fixture this
+        // noisy says nothing about the policy.
+        auto fracBelowOne = [](const std::vector<double> &v) {
+            if (v.empty()) return 0.0;
+            int n = 0; for (const double x : v) if (x < 1.0) ++n;
+            return double(n) / double(v.size());
+        };
+        const double fStill = fracBelowOne(stillScale), fMove = fracBelowOne(moveScale);
+        std::printf("       still |a|: median=%.0f p95=%.0f px/s2   aRefEff=%.0f"
+                    "   (corpus 08-18 still-address p95 = 2172)\n", aMed, aP95, aRefEff);
+        std::printf("       scale: still median=%.3f frac<1=%.2f (n=%zu: %d coarse + %d dense)"
+                    "   moving median=%.3f frac<1=%.2f\n",
+                    sMed, fStill, stillScale.size(), nCoarse, nDense, mMed, fMove);
+        check(nCoarse > 5 && nDense > 15, "the fixture really carries both cadences");
+        check(mMed == 1.0, "the moving stretch is back at today's window (scale 1.0)");
+        // ⚠ THESE TWO ARE ORDERING CHECKS, NOT AN ENGAGEMENT GATE, AND THAT IS DELIBERATE.
+        // Measured on this fixture: still |a| median 3113, p95 7546 px/s² — against the
+        // shipped aRefEff of 4000 that reads as MOTION, where the corpus's own 08-18
+        // still-address p95 is 2172 (s = 0.54). (At the earlier aRef 8000 and a ±3-FRAME
+        // lead the same fixture read a still scale median of 0.585.) The gap is COLOUR, not
+        // cadence: |a| is driven by error energy at the filter's cutoff (≈91 rad/s in the
+        // dense zone), and an AR(1) drift has a 1/omega² tail, so even this fixture's 1.94 px
+        // tau = 60 ms drift carries ≈9× the 0.5 px white component's power THERE. Matching
+        // the corpus would need a spectrally smoother error model (integrated or
+        // band-limited, not AR(1)), which nothing in this repo measures — so a synthetic
+        // track cannot decide engagement and this test does not pretend to.
+        // WHETHER THE POLICY ENGAGES AT THE SHIPPED aRef IS DECIDED BY THE BAKE-OFF ON REAL SWINGS
+        // (tools/metrics/adapt_settings.jsonl + the C15 gate criteria). Asserted here: only
+        // that the policy responds to motion in the right DIRECTION on a track with the real
+        // cadence. The printed lines above put the floor on the record either way.
+        check(fStill > 0.0, "the policy does something at all on a realistic still stretch");
+        check(fStill > fMove, "and it lengthens the window in the still stretch, never in the moving one");
+        check(sMed <= mMed, "the still stretch is never smoothed LESS than the moving one");
+    }
+
+    // ── 12. innov policy: wired to its knob, and honest about its limit ────────
+    // ⚠ The tolerances here are WIDER than the accel ones and that is a finding, not a
+    // convenience. innov²/S is the gate's own statistic, and for a CONSISTENT filter it
+    // is chi²(1)-distributed with mean 1 WHATEVER the joint is doing; the part of a real
+    // trajectory a constant-acceleration predictor cannot see over one dense step is
+    // ~jerk·dt³/6 = 0.03 px for this 4 Hz 40 px fixture at 150 fps, against sigma_m =
+    // 3.2 px. So at dense sampling the statistic is dominated by measurement noise, the
+    // shipped innovRef of 4.0 sits at the 2-sigma point of that noise (~5 % of steps),
+    // and the policy reads as a randomly modulated window rather than a motion-driven
+    // one. What CAN be pinned exactly is that the statistic is wired to the knob, that
+    // the run restarts per segment, and that the law holds when the knob pins the floor.
+    std::printf("=== smoothPoseTrack: adapt innov ===\n");
+    {
+        Lcg rng(0xA5A5F00Du);                       // the same track as section 11(b)
+        const auto times = uniformTimes(150.0, kAdQuietS + kAdMotionS + kAdTailS);
+        const auto in    = buildKpTrackWH(KPA, times, adTruthX, kAdY, 3.0, rng, WA, HA);
+        const auto off   = smoothPoseTrack(in, int(WA), int(HA));
+
+        PoseSmootherConfig iv;
+        iv.adapt.mode = AdaptMode::Innov;
+        iv.adapt.emitScalesForTest = true;
+        const auto res = smoothPoseTrack(in, int(WA), int(HA), iv);
+        const std::vector<double> &s = res.adaptScale[KPA];
+        bool bounded = true, headOnes = true, someBelow = false, someOne = false;
+        for (const double v : s) {
+            bounded   = bounded && v >= iv.adapt.minScale && v <= 1.0;
+            someBelow = someBelow || v < 1.0;
+            someOne   = someOne   || v == 1.0;
+        }
+        for (int i = 0; i <= iv.adapt.innovRun; ++i)
+            headOnes = headOnes && s[std::size_t(i)] == 1.0;
+        check(bounded, "the innov scale never leaves [minScale, 1]");
+        check(headOnes, "the init frame + the first innovRun accepted steps run at 1.0");
+        check(someBelow && someOne, "the scale really tracks the statistic (it moves both ways)");
+        check(std::abs(adAmplitude(res.smoothed) / kAdAmpPx - 1.0) < 0.02,
+              "innov keeps the excursion within 2% of 40 px");
+
+        // innovRef unreachable ⇒ pinned at the floor once the run fills ⇒ the same
+        // window law as the accel floor run. This is the law check for this policy.
+        PoseSmootherConfig pin = iv;
+        pin.adapt.innovRef = 1e9;
+        const auto pinned = smoothPoseTrack(in, int(WA), int(HA), pin);
+        bool pinFloor = true;
+        for (std::size_t i = std::size_t(pin.adapt.innovRun) + 1;
+             i < pinned.adaptScale[KPA].size(); ++i)
+            pinFloor = pinFloor && pinned.adaptScale[KPA][i] == pin.adapt.minScale;
+        check(pinFloor, "an unreachable innovRef pins every later step at minScale");
+        const double predicted = std::pow(0.05, 1.0 / 12.0);
+        const double sdOff = adResidSd(off, kAdQuietLo, kAdQuietHi);
+        const double sdPin = adResidSd(pinned, kAdQuietLo, kAdQuietHi);
+        const double ratioPin = (sdOff > 0.0) ? sdPin / sdOff : 1.0;
+        check(ratioPin > 0.75 * predicted && ratioPin < 1.25 * predicted,
+              "pinned at the floor, innov reduces the still-stretch sd by the same law");
+
+        // innovRef ~0 ⇒ saturated at 1.0 everywhere ⇒ byte-identical to mode off. This
+        // is the byte-identity argument itself under test: a scale of exactly 1.0 leaves
+        // m_q x 1.0 == m_q, so the whole filter arithmetic is untouched.
+        PoseSmootherConfig sat = iv;
+        sat.adapt.innovRef = 1e-9;
+        const auto satRes = smoothPoseTrack(in, int(WA), int(HA), sat);
+        bool allOne = true;
+        for (const double v : satRes.adaptScale[KPA]) allOne = allOne && v == 1.0;
+        check(allOne, "an innovRef at zero keeps every step at 1.0");
+        check(sameWhere(off, satRes, [](int) { return true; }),
+              "and a scale of exactly 1.0 reproduces the mode-off output byte for byte");
+
+        // What the shipped innovRef 4.0 actually buys on this track — recorded, and
+        // bounded only by what is physically guaranteed (scale >= minScale ⇒ the ratio
+        // cannot beat the floor run's; scale <= 1 ⇒ it cannot be worse than the control).
+        const double sdIv = adResidSd(res, kAdQuietLo, kAdQuietHi);
+        const double ratio = (sdOff > 0.0) ? sdIv / sdOff : 1.0;
+        int nOne = 0;
+        for (const double v : s) if (v == 1.0) ++nOne;
+        std::printf("       innovRef 4.0: still sd ratio=%.3f (floor %.3f)  frames at 1.0 = %d/%d\n",
+                    ratio, predicted, nOne, int(s.size()));
+        check(ratio > 0.75 * predicted && ratio <= 1.0 + 1e-9,
+              "innovRef 4.0 lands between the floor run and the control (see the note above)");
+    }
+
+    // ── 13. the group: legs = 11-16, body = 0-16, and the tail NEVER adapts ────
+    std::printf("=== smoothPoseTrack: adapt group selection ===\n");
+    {
+        Lcg rng(0x1E65CA1Fu);
+        const auto times = uniformTimes(150.0, 1.0);
+        const auto in    = buildLegsTrack(times, rng);
+        // Two test-only settings, both so this section measures GROUP SELECTION and
+        // nothing else: gateSig 6 (a reduced q tightens the 3σ gate, and a single flipped
+        // accept flag would make the divergence guard reject the keypoint and hand back the
+        // unadapted output — section 19 is where that is tested), and an unreachable aRef so
+        // every fixture keypoint is genuinely scaled. At the SHIPPED aRef the fixture's
+        // wrist (arc |a| = 400·5² = 10 kpx/s², i.e. above aRefEff) would clamp to 1.0 and
+        // "the group reaches the wrist" would be untestable on this fixture rather than
+        // false — which is exactly how it failed before.
+        PoseSmootherConfig off_ = { };
+        off_.gateSig = 6.0;
+        const auto off   = smoothPoseTrack(in, W, H, off_);
+        PoseSmootherConfig legs = off_;
+        legs.adapt.mode = AdaptMode::Accel;
+        legs.adapt.group = AdaptGroup::Legs;
+        legs.adapt.aRefPxS2 = 1e5;
+        legs.adapt.emitScalesForTest = true;
+        PoseSmootherConfig body = legs;
+        body.adapt.group = AdaptGroup::Body;
+        const auto rl = smoothPoseTrack(in, W, H, legs);
+        const auto rb = smoothPoseTrack(in, W, H, body);
+        std::printf("       adaptFallbacks: legs=%d body=%d\n", rl.adaptFallbacks, rb.adaptFallbacks);
+        check(rl.adaptFallbacks == 0 && rb.adaptFallbacks == 0,
+              "the widened gate keeps both group runs non-divergent");
+
+        // The group decides which keypoints get a scale AT ALL — the rows are the direct
+        // statement of that, independent of whether a given keypoint's |a| then moves it.
+        bool legRows = true, bodyRows = true;
+        for (int k = 0; k < kWholeBodyJoints; ++k) {
+            const bool legWant  = isLegKeypoint(k);
+            const bool bodyWant = (k < kFootFirstKp);
+            legRows  = legRows  && (rl.adaptScale[k].empty() != legWant);
+            bodyRows = bodyRows && (rb.adaptScale[k].empty() != bodyWant);
+        }
+        check(legRows, "group legs emits a scale row for 11-16 and for no other keypoint");
+        check(bodyRows, "group body emits one for 0-16 and for no keypoint of the tail");
+        check(sameWhere(off, rl, [](int k) { return !isLegKeypoint(k); }),
+              "group legs leaves keypoints 0-10 and 17+ byte-identical");
+        check(sameWhere(off, rb, [](int k) { return k >= kFootFirstKp; }),
+              "group body leaves the wholebody tail 17+ byte-identical");
+
+        auto moved = [&](const PoseSmootherOutput &r, int k) {
+            for (std::size_t i = 0; i < off.aux.size(); ++i)
+                if (off.aux[i].sigma[k] != r.aux[i].sigma[k]
+                        || !exactEq(off.smoothed[i].kp[k], r.smoothed[i].kp[k])) return true;
+            return false;
+        };
+        bool legsMoved = true, bodyMoved = true;
+        for (int k = kLegFirstKp; k <= kLegLastKp; ++k) legsMoved = legsMoved && moved(rl, k);
+        for (const KpArc &tr : kLegsFixture)
+            if (tr.kp < kFootFirstKp) bodyMoved = bodyMoved && moved(rb, tr.kp);
+        check(legsMoved, "every legs keypoint 11-16 responds to the adaptive window");
+        check(bodyMoved, "group body reaches the fixture's shoulder (5) and wrist (9) too");
+    }
+
+    // ── 14. every poseSmooth.adapt.* key round-trips through fromOverrides ─────
+    std::printf("=== smoothPoseTrack: adapt override keys ===\n");
+    {
+        QVariantMap ov;
+        ov[QStringLiteral("poseSmooth.adapt.mode")]       = QStringLiteral("accel");
+        ov[QStringLiteral("poseSmooth.adapt.group")]      = QStringLiteral("body");
+        ov[QStringLiteral("poseSmooth.adapt.minScale")]   = 0.2;
+        ov[QStringLiteral("poseSmooth.adapt.aRefPxS2")]   = 12345.0;
+        ov[QStringLiteral("poseSmooth.adapt.expo")]       = 2.0;
+        ov[QStringLiteral("poseSmooth.adapt.leadMs")]     = 35.0;
+        ov[QStringLiteral("poseSmooth.adapt.innovRef")]   = 9.0;
+        ov[QStringLiteral("poseSmooth.adapt.innovRun")]   = 7;
+        ov[QStringLiteral("poseSmooth.adapt.emitScalesForTest")] = true;   // NOT a key
+        const PoseSmootherConfig c = PoseSmootherConfig::fromOverrides(ov);
+        check(c.adapt.mode == AdaptMode::Accel && c.adapt.group == AdaptGroup::Body
+                  && c.adapt.minScale == 0.2 && c.adapt.aRefPxS2 == 12345.0
+                  && c.adapt.expo == 2.0 && c.adapt.leadMs == 35.0
+                  && c.adapt.innovRef == 9.0 && c.adapt.innovRun == 7,
+              "all eight poseSmooth.adapt.* keys round-trip through a QVariantMap");
+        check(!c.adapt.emitScalesForTest,
+              "emitScalesForTest is a test hook, NOT a sweep key (not readable from the map)");
+
+        QVariantMap m2;
+        m2[QStringLiteral("poseSmooth.adapt.mode")] = QStringLiteral("  Innov ");
+        check(PoseSmootherConfig::fromOverrides(m2).adapt.mode == AdaptMode::Innov,
+              "mode parsing trims and case-folds");
+        QVariantMap m3;
+        m3[QStringLiteral("poseSmooth.adapt.mode")]  = QStringLiteral("adaptive");
+        m3[QStringLiteral("poseSmooth.adapt.group")] = QStringLiteral("torso");
+        const PoseSmootherConfig c3 = PoseSmootherConfig::fromOverrides(m3);
+        check(c3.adapt.mode == AdaptMode::Off && c3.adapt.group == AdaptGroup::Legs,
+              "an unrecognised mode/group reads as the dark default (a typo'd sweep line is a control)");
+        // Range guards (F7): the two keys where an out-of-range value would be silently
+        // WRONG rather than merely odd. minScale > 1 would make the "adaptive" window
+        // SHORTER than today's everywhere, < 0 would invert the clamp, and an unbounded
+        // innovRun would let one sweep line carry a multi-second memory of one innovation.
+        QVariantMap bad;
+        bad[QStringLiteral("poseSmooth.adapt.minScale")] = 1.5;
+        bad[QStringLiteral("poseSmooth.adapt.innovRun")] = 1000;
+        const PoseSmootherConfig cb = PoseSmootherConfig::fromOverrides(bad);
+        check(cb.adapt.minScale == 1.0, "minScale 1.5 is clamped to 1.0 (never a SHORTER window)");
+        check(cb.adapt.innovRun == 32, "innovRun 1000 is capped at 32");
+        QVariantMap neg;
+        neg[QStringLiteral("poseSmooth.adapt.minScale")] = -0.5;
+        neg[QStringLiteral("poseSmooth.adapt.innovRun")] = 0;
+        const PoseSmootherConfig cn = PoseSmootherConfig::fromOverrides(neg);
+        check(cn.adapt.minScale == 0.0, "minScale -0.5 is clamped to 0.0");
+        check(cn.adapt.innovRun == 1, "innovRun 0 is raised to 1");
+
+        const PoseSmootherConfig none = PoseSmootherConfig::fromOverrides(QVariantMap{});
+        PoseSmootherConfig def;
+        check(none.adapt.mode == def.adapt.mode && none.adapt.aRefPxS2 == def.adapt.aRefPxS2
+                  && none.adapt.expo == def.adapt.expo && none.adapt.innovRun == def.adapt.innovRun,
+              "an empty override map leaves the frozen adapt defaults");
+    }
+
+    // ── 15. the lead (leadMs) is LOCAL to an acceleration edge ─────────────────
+    // The symmetric max filter exists so the window is short before the acceleration
+    // arrives; the cost of that must be confined to the edges. Noiseless, on the
+    // single-pulse fixture, so |a| is two clean plateaus rather than an oscillation.
+    std::printf("=== smoothPoseTrack: adapt leadMs locality ===\n");
+    {
+        Lcg noRng(1);
+        const auto times = uniformTimes(150.0, 1.35);
+        const auto in    = buildKpTrackWH(KPA, times, pulseTruthX, kAdY, 0.0, noRng, WA, HA);
+        PoseSmootherConfig c0;
+        c0.adapt.mode = AdaptMode::Accel;
+        c0.adapt.leadMs = 0.0;
+        c0.adapt.emitScalesForTest = true;
+        PoseSmootherConfig c3 = c0;
+        c3.adapt.leadMs = 20.0;         // the shipped lead; 3 frames on this uniform track
+        const auto r0 = smoothPoseTrack(in, int(WA), int(HA), c0);
+        const auto r3 = smoothPoseTrack(in, int(WA), int(HA), c3);
+        const std::vector<double> &s0 = r0.adaptScale[KPA];
+        const std::vector<double> &s3 = r3.adaptScale[KPA];
+
+        // Allowance = leadMs + 8 frames. The 8 frames (≈53 ms) are the ESTIMATOR's own
+        // ramp, not the lead's: |a| here is an RTS quantity with a ≈33 ms window at
+        // 150 fps, so it takes several frames to reach a plateau after the truth steps,
+        // and the lead filter can only be asked to be local to within that.
+        const double allowS = c3.adapt.leadMs * 1e-3 + 8.0 / 150.0;
+        const double edges[] = { kPulseE0, kPulseE1, kPulseE2, kPulseE3 };
+        bool monotone = true, localOnly = true, leadsEarly = false;
+        int nFar = 0, nDiff = 0;
+        for (std::size_t i = 0; i < s0.size(); ++i) {
+            const double t = double(in[i].t_us) * 1e-6;
+            double dEdge = 1e30;     // (not `near` - that is a legacy MSVC macro)
+            for (const double e : edges) dEdge = std::min(dEdge, std::abs(t - e));
+            monotone = monotone && s3[i] >= s0[i];
+            if (s3[i] != s0[i]) ++nDiff;
+            if (dEdge > allowS) { ++nFar; localOnly = localOnly && (s3[i] == s0[i]); }
+            if (t < kPulseE0 && (kPulseE0 - t) <= 3.5 / 150.0 && s3[i] > s0[i]) leadsEarly = true;
+        }
+        std::printf("       lead 0 vs 20ms: %d frames differ, %d frames are far from an edge\n",
+                    nDiff, nFar);
+        check(monotone, "a symmetric max filter can only RAISE the scale");
+        check(c3.adapt.leadMs == 20.0, "the lead is a DURATION (ms), not a frame count");
+        check(nFar > 90, "most frames are far from an acceleration edge (the claim is not empty)");
+        check(localOnly, "leadMs 0 vs 20 differ only near an acceleration edge");
+        check(leadsEarly, "and the scale is already higher in the 3 frames BEFORE an edge");
+        check(nDiff > 0, "the two lead settings really do differ somewhere");
+    }
+
+    // ── 16. a segment break: accel widens across it, innov's run restarts ──────
+    std::printf("=== smoothPoseTrack: adapt across a segment break ===\n");
+    {
+        Lcg rng(0xB0B0CAFEu);
+        const auto times = uniformTimes(150.0, kAdQuietS + kAdMotionS + kAdTailS);
+        const double hLo = 1.20, hHi = 1.50;        // 300 ms hole > the 250 ms coast budget
+        const auto in = buildKpTrackWH(KPA, times, adTruthX, kAdY, 3.0, rng, WA, HA, hLo, hHi);
+
+        PoseSmootherConfig ac;
+        ac.adapt.mode = AdaptMode::Accel;
+        ac.adapt.emitScalesForTest = true;
+        const auto ra = smoothPoseTrack(in, int(WA), int(HA), ac);
+        // Selected by conf, not by a reconstructed time — see the ⚠ note in section 18 for
+        // the boundary bug that pattern hides (the fixture stamps the hole from times[i],
+        // a reader recomputing from t_us can land one frame either side of the literal).
+        int nHole = 0, firstAfter = -1;
+        bool holeOne = true, holeOff = true, seenHole = false;
+        for (std::size_t i = 0; i < in.size(); ++i) {
+            if (double(in[i].conf[KPA]) < ac.confMeasMin) {
+                ++nHole;
+                seenHole = true;
+                holeOne = holeOne && ra.adaptScale[KPA][i] == 1.0;
+                holeOff = holeOff && ra.aux[i].tier[KPA] == uint8_t(PoseTier::Off);
+            } else if (seenHole && firstAfter < 0) {
+                firstAfter = int(i);        // the frame that re-opens a segment
+            }
+        }
+        check(nHole > 40, "the 300 ms hole spans ~45 frames");
+        check(holeOff, "the hole leaves no smoothed value (trimmed coast, then no segment)");
+        check(holeOne, "accel carries 1.0 across a break — it never inherits the still window");
+
+        PoseSmootherConfig ivc;
+        ivc.adapt.mode = AdaptMode::Innov;
+        ivc.adapt.emitScalesForTest = true;
+        const auto ri = smoothPoseTrack(in, int(WA), int(HA), ivc);
+        bool headOnes = firstAfter > 0, refilled = false;
+        for (int i = firstAfter; i >= 0 && i <= firstAfter + ivc.adapt.innovRun; ++i)
+            headOnes = headOnes && ri.adaptScale[KPA][std::size_t(i)] == 1.0;
+        for (int i = firstAfter + ivc.adapt.innovRun + 1; i > 0 && i < int(in.size()); ++i)
+            if (ri.adaptScale[KPA][std::size_t(i)] < 1.0) refilled = true;
+        check(headOnes, "innov restarts its accepted-step run in the segment after the break");
+        check(refilled, "and the run refills afterwards (the scale leaves 1.0 again)");
+    }
+
+    // ── 17. aRefPxS2 is a per-FORMAT number: the sqrt(W·H) scaling ─────────────
+    // |a| is a PIXEL quantity, so the same motion filmed larger reads more px/s² and a
+    // fixed threshold would score the smaller capture as quiet. The run therefore scales
+    // aRef by sqrt(frameW·frameH / (1280·1024)) — and these are the cases that fail if
+    // that factor is dropped or reduced to the width alone.
+    //   (a) a SIMILARITY change (both axes ×1.5) is undone EXACTLY: with every
+    //       px-dimensioned filter constant scaled by 1.5 alongside the track, the filter
+    //       is homogeneous of degree 1 in px (states ×1.5, covariances ×2.25, gate
+    //       decisions unchanged), so |a| is exactly 1.5× and the scale vector must be
+    //       UNCHANGED. (In production the σ constants are fixed px, so the invariance is
+    //       approximate — what the factor removes is the first-order dependence.)
+    //   (b) an ANISOTROPIC change cannot be undone by any single factor, and the second
+    //       block below measures what the geometric mean actually does about it.
+    // Both run with an unreachable aRef, minScale 0 and no lead filter, so the emitted
+    // scale is |a|/aRefEff unclamped and the comparison is of the scaling, not the clamp.
+    std::printf("=== smoothPoseTrack: adapt aRef scales with the frame FORMAT ===\n");
+    {
+        Lcg noRng(1);
+        const auto times = uniformTimes(150.0, kAdQuietS + kAdMotionS + kAdTailS);
+        const auto in    = buildKpTrackWH(KPA, times, adTruthX, kAdY, 0.0, noRng, WA, HA);
+        PoseSmootherConfig base;
+        base.adapt.mode = AdaptMode::Accel;
+        base.adapt.aRefPxS2 = 1e5;       // nothing clamps, so the scale IS |a|/aRefEff
+        base.adapt.minScale = 0.0;
+        base.adapt.leadMs   = 0.0;       // per-frame, no max filter
+        base.adapt.emitScalesForTest = true;
+        const auto r1 = smoothPoseTrack(in, int(WA), int(HA), base);
+
+        const double k = 1.5;
+        PoseSmootherConfig big = base;
+        big.measSigBasePx  *= k; big.measSigSlopePx *= k; big.sigmaJerk *= k;
+        big.initSigPPx     *= k; big.initSigV       *= k; big.initSigA  *= k;
+        const auto r2 = smoothPoseTrack(in, int(WA * k), int(HA * k), big);
+
+        double worst = 0.0; int nMid = 0;
+        for (std::size_t i = 0; i < r1.adaptScale[KPA].size(); ++i) {
+            const double a = r1.adaptScale[KPA][i], b = r2.adaptScale[KPA][i];
+            worst = std::max(worst, std::abs(a - b));
+            if (a > 1e-6 && a < 0.999) ++nMid;   // strictly inside the clamp
+        }
+        std::printf("       1280x1024 vs 1920x1536: worst |delta scale| = %.3g over %zu frames"
+                    " (%d strictly inside the clamp)\n", worst, r1.adaptScale[KPA].size(), nMid);
+        check(nMid > 10, "frames sit strictly inside the clamp, so the check is not vacuous");
+        check(worst < 1e-9, "the scale vector is invariant to a SIMILARITY format change");
+
+        // ── the anisotropic case (F8): 1280×1024 → 720×1024, the corpus's own other
+        // format, which changes the width by 0.5625 and the height NOT AT ALL. |a| is one
+        // isotropic magnitude and aRef is one isotropic threshold, so no single factor can
+        // undo that; the geometric mean sqrt(W·H) moves the threshold by sqrt(0.5625) =
+        // 0.75, which SPLITS the error between the axes instead of putting it all on one:
+        //     horizontal motion: |a| ×0.5625, aRef ×0.75  ⇒ s ×0.75
+        //     vertical motion:   |a| ×1.0,    aRef ×0.75  ⇒ s ×1.333
+        // A width-only rule (aRef ×0.5625) would read ×1.0 on the horizontal and ×1.778 on
+        // the vertical — exact for a sway, 78 % wrong for a pelvis lift. This case measures
+        // both so the residual is a number in the log, not a claim in a comment. The honest
+        // fix is per-axis normalisation and it needs a design decision (see the constant).
+        const PoseSmootherConfig &aniso = base;   // same unclamped, un-led config
+        const auto xIn = in;                                        // motion in x
+        const auto yIn = buildYMotionTrack(times, WA, HA);          // motion in y
+        const auto x12 = smoothPoseTrack(xIn, int(WA), int(HA), aniso);
+        const auto x07 = smoothPoseTrack(xIn, 720, int(HA), aniso);
+        const auto y12 = smoothPoseTrack(yIn, int(WA), int(HA), aniso);
+        const auto y07 = smoothPoseTrack(yIn, 720, int(HA), aniso);
+        std::vector<double> rx, ry;
+        for (int i = kAdMotionLo; i < kAdMotionHi; ++i) {
+            const double t = double(xIn[std::size_t(i)].t_us) * 1e-6;
+            if (std::abs(adTruthAccel(t)) < 0.9 * adPeakAccel()) continue;
+            const double a12 = x12.adaptScale[KPA][std::size_t(i)];
+            const double b12 = y12.adaptScale[KPA][std::size_t(i)];
+            if (a12 > 1e-9) rx.push_back(x07.adaptScale[KPA][std::size_t(i)] / a12);
+            if (b12 > 1e-9) ry.push_back(y07.adaptScale[KPA][std::size_t(i)] / b12);
+        }
+        const double mx = medianOf(rx), my = medianOf(ry);
+        std::printf("       720x1024 vs 1280x1024: horizontal motion s ratio=%.4f (mean rule 0.75,"
+                    " width rule 1.0)   vertical s ratio=%.4f (mean rule 1.3333, width rule 1.7778)\n",
+                    mx, my);
+        check(!rx.empty() && !ry.empty(), "both anisotropy fixtures produced readable ratios");
+        check(std::abs(mx / 0.75 - 1.0) < 0.03,
+              "a horizontal motion reads 0.75x at 720x1024 (the geometric mean's half of the error)");
+        check(std::abs(my / (4.0 / 3.0) - 1.0) < 0.03,
+              "and a vertical motion 1.333x — one isotropic threshold cannot undo a non-square change");
+    }
+
+    // ── 18. a step with NO MEASUREMENT never gets the reduced q ────────────────
+    // A coasted step is the filter GUESSING, and its posterior σ is the only honest
+    // statement of that. Shrinking q on such a step shrinks that σ without adding one bit
+    // of information — a bridged sample would claim to be more certain than the measured
+    // samples either side of it, which is precisely the dishonesty this design exists to
+    // remove. So both policies force scale 1.0 wherever there is no measurement, and this
+    // section pins it structurally (the emitted scale) and behaviourally (σ still grows
+    // across the bridge).
+    std::printf("=== smoothPoseTrack: a coasted step keeps today's q ===\n");
+    {
+        const auto times = uniformTimes(150.0, 2.0);
+        const double hLo = 1.00, hHi = 1.10;        // 100 ms (15 frames) — well inside the 250 ms budget
+        Lcg rng(0xFEEDFACEu);
+        const auto in = buildKpTrackWH(KPA, times, [](double) { return kAdX0; },
+                                       kAdY, 2.0, rng, WA, HA, hLo, hHi);
+        // gateSig 6 for the same reason as sections 11(b) and 13: at minScale the tightened
+        // 3σ radius can flip one borderline accept flag, and the divergence guard would then
+        // hand back the unadapted output (with the scale row rewritten to 1.0), which would
+        // make this section pass or fail for a reason that has nothing to do with F2.
+        PoseSmootherConfig fl;                      // floored everywhere the policy can see
+        fl.gateSig = 6.0;
+        fl.adapt.mode = AdaptMode::Accel;
+        fl.adapt.aRefPxS2 = 1e9;
+        fl.adapt.emitScalesForTest = true;
+        PoseSmootherConfig iv = fl;
+        iv.adapt.mode = AdaptMode::Innov;
+        iv.adapt.innovRef = 1e9;                    // same: pinned at the floor
+        PoseSmootherConfig ofc;
+        ofc.gateSig = 6.0;
+        const auto acc = smoothPoseTrack(in, int(WA), int(HA), fl);
+        const auto ivr = smoothPoseTrack(in, int(WA), int(HA), iv);
+        const auto off = smoothPoseTrack(in, int(WA), int(HA), ofc);
+
+        // ⚠ THE COASTED SET IS SELECTED BY conf, NOT BY A TIME COMPARISON, and that is the
+        // whole fix for this section's earlier failure. The fixture stamps the hole using
+        // `times[i]` (an i/150 quotient) while a reader recomputing the time from `t_us`
+        // goes through llround + a 1e-6 multiply, and for the boundary frame those two paths
+        // straddle the literal: t_us/1e6 came out just BELOW 1.10 where i/150.0 was just
+        // above, so the reader's window held 16 frames where the fixture had stamped 15 —
+        // one confident, measured frame inside the "hole", which is exactly what tripped
+        // "every frame Pred" and "every step at 1.0" while the diagnostic line showed
+        // 15 Pred + 1 Meas and scales of 1.0. conf is the same stored byte on both sides,
+        // so this selection cannot drift; the same pattern is used in section 16.
+        int nHole = 0, nOff = 0, nPred = 0, nMeas = 0;
+        bool holeOnesA = true, holeOnesI = true, holePred = true, floorsElsewhere = false;
+        bool seenHole = false;
+        double sigEdgeA = 0.0, sigMidA = 0.0, sigEdgeO = 0.0, sigMidO = 0.0;
+        double firstConf = -1.0, firstScaleA = -1.0, firstScaleI = -1.0;
+        for (std::size_t i = 0; i < in.size(); ++i) {
+            if (double(in[i].conf[KPA]) < fl.confMeasMin) {   // no measurement offered
+                ++nHole;
+                seenHole = true;
+                const uint8_t tier = acc.aux[i].tier[KPA];
+                if (tier == uint8_t(PoseTier::Off)) ++nOff;
+                else if (tier == uint8_t(PoseTier::Pred)) ++nPred;
+                else ++nMeas;
+                if (firstConf < 0.0) {              // one frame's raw facts, for the log
+                    firstConf   = double(in[i].conf[KPA]);
+                    firstScaleA = acc.adaptScale[KPA][i];
+                    firstScaleI = ivr.adaptScale[KPA][i];
+                }
+                holeOnesA = holeOnesA && acc.adaptScale[KPA][i] == 1.0;
+                holeOnesI = holeOnesI && ivr.adaptScale[KPA][i] == 1.0;
+                holePred  = holePred  && tier == uint8_t(PoseTier::Pred);
+                sigMidA = std::max(sigMidA, double(acc.aux[i].sigma[KPA]));
+                sigMidO = std::max(sigMidO, double(off.aux[i].sigma[KPA]));
+            } else if (!seenHole) {
+                sigEdgeA = double(acc.aux[i].sigma[KPA]);   // the last measured frame before it
+                sigEdgeO = double(off.aux[i].sigma[KPA]);
+                if (i > 45 && acc.adaptScale[KPA][i] == fl.adapt.minScale) floorsElsewhere = true;
+            }
+        }
+        // ⚠ THIS LINE IS THE DIAGNOSTIC, and it is here because this section failed once
+        // with all three of its claims false at the same time. Each field discriminates a
+        // different cause: conf says whether the hole reached the fixture at all (it must be
+        // 0.05, i.e. below confMeasMin 0.35); the tier histogram says whether the segment
+        // bridged (Pred), broke (Off) or never coasted (Meas); the two scales say whether the
+        // no-measurement override fired (1.0) or the floor leaked into a coasted step
+        // (minScale); and the fallback counts say whether the guard rewrote the rows.
+        std::printf("       hole: n=%d tiers Off/Pred/Meas=%d/%d/%d  first conf=%.2f"
+                    " scaleA=%.4f scaleI=%.4f  fallbacks A=%d I=%d\n",
+                    nHole, nOff, nPred, nMeas, firstConf, firstScaleA, firstScaleI,
+                    acc.adaptFallbacks, ivr.adaptFallbacks);
+        std::printf("       bridge sigma: adaptive %.2f -> %.2f px   mode off %.2f -> %.2f px\n",
+                    sigEdgeA, sigMidA, sigEdgeO, sigMidO);
+        check(nHole >= 12, "the 100 ms hole spans several frames");
+        check(acc.adaptFallbacks == 0 && ivr.adaptFallbacks == 0,
+              "the widened gate keeps this fixture non-divergent (so the rows are pass 2's)");
+        check(firstConf < 0.35, "the hole really is below confMeasMin (no measurement offered)");
+        check(nOff == 0 && nMeas == 0 && holePred,
+              "the hole bridges (every frame Pred) rather than breaking the segment");
+        check(floorsElsewhere, "the run really IS floored on the measured frames (not a no-op)");
+        check(holeOnesA, "accel: every step without a measurement runs at scale 1.0");
+        check(holeOnesI, "innov: every step without a measurement runs at scale 1.0");
+        // σ still grows across the bridge. NB the adaptive run's bridge σ is legitimately
+        // SMALLER than mode-off's — the state entering the bridge is better determined, and
+        // that is information, not a claim. What F2 fixes is the coasted STEP's own q.
+        check(sigEdgeA > 0.0 && sigMidA > 1.3 * sigEdgeA,
+              "the bridged samples still admit their uncertainty (sigma grows across the hole)");
+    }
+
+    // ── 19. the divergence guard: the adaptive window never removes a sample ───
+    // Pass 2 re-decides segmentation from scratch, and a smaller q shrinks Pp, which
+    // shrinks S, which TIGHTENS the 3σ gate. At the shipped minScale that is negligible;
+    // at the C15 grid's 0.0025 (σ_jerk a full 10× below the collapse knee the .cpp's
+    // derivation block measured) it is not. So the guard compares the two passes'
+    // accepted[]/hasSmoothed[] and, on ANY difference, keeps pass 1 — the UNADAPTED
+    // output — and counts it. The fixture engineers the divergence deterministically: a
+    // still track at conf 1.0 (σ_meas 2 px ⇒ R = 4 ⇒ a 3σ gate radius of ≈6–8 px) carrying
+    // a LADDER of planted single-frame outliers from 3.0 to 13.5 px, so several of them sit
+    // between pass 1's gate radius and pass 2's tighter one wherever exactly those fall.
+    std::printf("=== smoothPoseTrack: adapt divergence guard ===\n");
+    {
+        const auto times = uniformTimes(150.0, 2.7);
+        Lcg rng(0x0D15C0DEu);
+        auto in = buildKpTrackWH(KPA, times, [](double) { return kAdX0; },
+                                 kAdY, 2.0, rng, WA, HA);
+        for (auto &f : in) f.conf[KPA] = 1.0f;      // σ_meas = measSigBasePx = 2 px
+        for (int j = 0; j < 31; ++j) {              // the ladder: 3.00, 3.35, … 13.50 px
+            const int f = 40 + 12 * j;
+            if (f >= int(in.size())) break;
+            in[std::size_t(f)].kp[KPA].setX(in[std::size_t(f)].kp[KPA].x() + (3.0 + 0.35 * j) / WA);
+        }
+        const auto off = smoothPoseTrack(in, int(WA), int(HA));
+
+        PoseSmootherConfig div;
+        div.adapt.mode = AdaptMode::Accel;
+        div.adapt.aRefPxS2 = 1e9;        // floor the scale everywhere the policy can see
+        div.adapt.minScale = 0.0025;     // the C15 grid's floor — the case F3 is about
+        div.adapt.emitScalesForTest = true;
+        const auto res = smoothPoseTrack(in, int(WA), int(HA), div);
+        std::printf("       minScale 0.0025 on a gate-boundary ladder: adaptFallbacks=%d\n",
+                    res.adaptFallbacks);
+        check(res.adaptFallbacks == 1,
+              "the guard fired for exactly the one keypoint whose segmentation would have moved");
+        check(sameWhere(off, res, [](int) { return true; }),
+              "and that keypoint kept its UNADAPTED output, byte for byte (no sample removed)");
+        bool rowOnes = true;
+        for (const double v : res.adaptScale[KPA]) rowOnes = rowOnes && v == 1.0;
+        check(rowOnes, "the emitted scale row describes the output that was KEPT (1.0 = pass 1)");
+
+        // Benign 1: a scale of 1.0 everywhere has nothing to diverge from.
+        PoseSmootherConfig ben = div;
+        ben.adapt.minScale = 1.0;
+        const auto benr = smoothPoseTrack(in, int(WA), int(HA), ben);
+        check(benr.adaptFallbacks == 0, "minScale 1.0 never diverges (count 0)");
+        check(sameWhere(off, benr, [](int) { return true; }),
+              "and is byte-identical to mode off without needing the guard");
+
+        // Benign 2 — the one that matters: a well-behaved ENGAGED run at the shipped
+        // defaults must not trip the guard, or the guard would quietly disable the feature.
+        Lcg noRng(1);
+        const auto clean = buildKpTrackWH(KPA, uniformTimes(150.0, kAdQuietS + kAdMotionS + kAdTailS),
+                                          adTruthX, kAdY, 0.0, noRng, WA, HA);
+        PoseSmootherConfig ship;
+        ship.adapt.mode = AdaptMode::Accel;
+        ship.adapt.emitScalesForTest = true;
+        const auto shipRes = smoothPoseTrack(clean, int(WA), int(HA), ship);
+        bool engaged = false;
+        for (const double v : shipRes.adaptScale[KPA]) if (v < 1.0) engaged = true;
+        check(engaged && shipRes.adaptFallbacks == 0,
+              "the shipped defaults engage on a clean track WITHOUT tripping the guard");
+
+        // Benign 3 — the case that decides whether the guard is usable at all: a QUIET
+        // REAL-CADENCE track (section 11c's fixture, same seed) at the shipped defaults must
+        // not trip it. A guard that fires on ordinary swings disables the feature SILENTLY —
+        // the keypoint keeps its unadapted output and only this count ever says so. The
+        // real-swing equivalent is being measured on the corpus in parallel; this is the
+        // synthetic canary, and its printed count is the number to compare against.
+        Lcg rc(0xC0FFEE11u);
+        const auto rcIn = buildRealisticTrack(
+            realCadenceTimes(kAdQuietS - 0.5, kAdQuietS + kAdMotionS + kAdTailS), rc);
+        PoseSmootherConfig rcCfg;
+        rcCfg.adapt.mode = AdaptMode::Accel;
+        rcCfg.adapt.emitScalesForTest = true;
+        const auto rcRes = smoothPoseTrack(rcIn, int(WA), int(HA), rcCfg);
+        std::printf("       real-cadence track, shipped defaults: adaptFallbacks=%d\n",
+                    rcRes.adaptFallbacks);
+        check(rcRes.adaptFallbacks == 0,
+              "a quiet real-cadence swing at the shipped defaults does not trip the guard");
     }
 
     // ── degenerate inputs ─────────────────────────────────────────────────────

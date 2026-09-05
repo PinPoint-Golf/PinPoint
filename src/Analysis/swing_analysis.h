@@ -426,6 +426,13 @@ struct PoseTrack2D {
     // swings analysed before the smoother existed — additive only.
     std::vector<PoseFrame2D> smoothed;
     std::vector<PoseKpAux>   smoothedAux;
+    // Phase-5 motion-adaptive window: how many keypoints had their adaptive pass
+    // REJECTED because it would have changed the segmentation (pose_smoother.cpp's
+    // divergence guard — the adaptive window is never allowed to remove a sample, so
+    // such a keypoint keeps its unadapted output). 0 = nothing fell back, which is
+    // also the value on every swing analysed with the window off. Diagnostic only:
+    // nothing reads it back, and swing.json omits it when 0.
+    int adaptFallbacks = 0;
     // Dense VISUALIZATION-tier upsample of `smoothed` (pose_synthesis.h): a C¹
     // Hermite interpolation onto a fixed 240 Hz grid so the replay overlays scrub
     // the skeleton smoothly. Off joints (conf 0) stay Off. Metrics/scoring NEVER

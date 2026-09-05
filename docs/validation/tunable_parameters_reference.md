@@ -711,6 +711,195 @@ moves persisted `value[]`, and the P4 corridor content was seeded on the current
 systematic shift at P4 puts [`norm_shapes.md`](../design/norm_shapes.md) in scope rather than being
 absorbed silently.
 
+### 2.19 `poseSmooth.adapt.*` — the motion-adaptive smoother window (2026-09-05)
+
+Eight keys from phase 5 of [`metric_presentation_honesty.md`](../design/metric_presentation_honesty.md)
+§5.4, on the same offline RTS smoother as §2.18. They exist because **§2.18's static scale was
+measured and failed on its own terms**: at `legsJerkScale` 0.1 the hip jitter falls exactly as the
+window law predicts, but the **P7 (impact) samples move 3–4 σ**, because the hips move fast through
+impact, a ≈70 ms window blends the post-impact rotation into the impact frame, and the corridors are
+seeded at P7. A window that is long while the joint is quiet and back to today's while it accelerates
+is the honest version of the same idea.
+
+| key | default | meaning |
+|---|---|---|
+| `poseSmooth.adapt.mode` | `"off"` | `off` \| `accel` \| `innov` — the policy. Unrecognised reads as `off`. |
+| `poseSmooth.adapt.group` | `"legs"` | `legs` = kp 11–16, `body` = kp 0–16. The wholebody tail (17+) **never** adapts. Unrecognised reads as `legs`. |
+| `poseSmooth.adapt.minScale` | `0.05` | clamp floor on the scale. **Clamped to [0, 1]** on read: > 1 would mean a *shorter* window than today's everywhere, which is a different experiment. |
+| `poseSmooth.adapt.aRefPxS2` | `4000.0` | \|a\| that maps to scale 1.0, **px/s² at the 1280×1024 reference format** |
+| `poseSmooth.adapt.expo` | `1.0` | contrast: `s = (\|a\|/aRef)^expo`. Unbounded on purpose (the sweep runs 1 and 2). |
+| `poseSmooth.adapt.leadMs` | `20.0` | symmetric ±max filter on the scale vector, **as a duration** — see the cadence note |
+| `poseSmooth.adapt.innovRef` | `4.0` | innov policy divisor on the normalised innovation |
+| `poseSmooth.adapt.innovRun` | `3` | innov policy window, in **accepted** steps. **Capped to [1, 32]** on read. |
+
+**The mechanism is one multiplier.** `Kf3::predict(dt, qScale)` scales the process-noise variance
+`q = σ_jerk²` for the transition INTO one frame. The 3σ gate, the coast budget, the segmentation, the
+confirmed-run marking and the §2.18 static scales are untouched, and nothing new is persisted — the
+RTS pass needed no change at all because it already reads each step's **stored** predicted covariance
+and dt. `mode "off"` ⇒ no scale vector is built anywhere, so the output is byte-identical to the
+pre-phase-5 tree **by construction**, not by an arithmetic identity (a test pins that with every other
+adapt field set to a wild value).
+
+⚠ **The scale is on q, so the window law's exponents halve.** §2.18's scales multiply σ_jerk (window
+∝ σ_jerk^(−1/3), stationary residual σ ∝ σ_jerk^(+1/6)). A q scale `s` is a σ_jerk scale of `√s`, so
+in q terms **window ∝ s^(−1/6)** and **residual σ ∝ s^(+1/12)**: `minScale = 0.05` is a window ×1.648
+(33 → 54 ms at 150 fps) and a stationary residual σ ×0.779 — *not* the ×2.71 / ×0.61 that the same
+number means as a `legsJerkScale`. The test asserts the 0.779 within 25 %. Do not read the two
+families of numbers off one table.
+
+**`aRefPxS2` is a per-FORMAT number, scaled by the GEOMETRIC MEAN of the two axes.** \|a\| is a pixel
+quantity, so the same hip motion filmed smaller reads fewer px/s² and a fixed threshold would score it
+quiet. The run uses
+
+    aRefEff = aRefPxS2 × sqrt(frameW·frameH / (1280·1024))
+
+⚠ Not `frameW` alone: the corpus's own other format is **720×1024 — the same height**, so a width-only
+rule would move the threshold 44 % while a vertical motion's px/s² did not move at all. The geometric
+mean splits that error between the axes. Measured in `pose_smoother_test.cpp` §17 on that format pair:
+
+| motion | \|a\| ratio | mean rule (shipped) | width-only rule |
+|---|---|---|---|
+| horizontal (sway) | ×0.5625 | s ×**0.75** | s ×1.0 |
+| vertical (lift) | ×1.0 | s ×**1.333** | s ×1.778 |
+
+⚠ **Residual, documented not fixed:** \|a\| is one isotropic magnitude and this is one isotropic
+threshold, so *no* single factor can undo a non-square pixel-scale change. The honest fix is per-axis
+normalisation (two thresholds, or \|a\| normalised per axis before the hypot) and it needs a design
+decision, not a constant. A similarity change (both axes ×k) **is** exact: §17 also scales a track and
+every px-dimensioned filter constant by 1.5 and requires the scale vector to be unchanged.
+
+**Where 4000 comes from — the IMPACT side, measured corpus-wide.** The requirement is `s == 1` through
+**P6–P7 on every session**: that is the phase-4.2 failure this design exists to avoid. The address end
+is a bonus. Over 83 corpus swings (hip centre, normalised to the reference format,
+`tools/metrics/hip_accel_reference.py`):
+
+* `min(|a| at P6, |a| at P7)`: **p05 5232 · p25 7355 · median 9978 px/s²** ⇒ **4000 holds s = 1 through
+  P6–P7 on 80 of 83 swings**;
+* **P4 median 4378**, so the top of the backswing saturates too;
+* the 08-18 subset's **still-address p95 is 2172** ⇒ `s = 0.54` at `expo 1` (0.29 at `expo 2`, 0.16 at
+  `expo 3`) — the address hold sits well down the curve without the impact end moving;
+* the July sessions' addresses are **not still** (P1 p95 up to 21 k) and read as motion. The policy
+  declining to engage there is the correct answer, not a miss.
+
+**20000 would leave P7 at ≈ 0.69** — the phase-4 failure re-created at the one instant that matters — so
+this must not be raised without re-measuring the P6/P7 ladder.
+
+⚠ **One group aRef is not one joint's aRef.** The lead **ankle's** ladder runs at about half the hips'
+level (P7 median 6912), so at a group-wide 4000 it is **un-saturated at P6/P7 on ≈23 % of swings**. If an
+ankle-derived series fails the gate the fix is a **per-joint aRef** — lowering the group number to suit
+the ankle would drag the hips' impact window back into the phase-4 failure.
+
+⚠ **The two hips get two scales.** The policy is per keypoint (each reads its own \|a\|), so a
+hip-line metric mixes two points whose windows can differ by a frame or two of lead. Both track the
+same motion, so the effect is second-order, but a series that reads a *pair* is where it would show.
+
+**The `innov` policy is registered to be rejected or kept on evidence, not recommended.** `innov²/S`
+is the 3σ gate's own statistic, and for a *consistent* filter it is χ²(1) with mean 1 **whatever the
+joint is doing**; the part of a real trajectory a constant-acceleration predictor cannot see over one
+dense step is ~`jerk·dt³/6` — 0.03 px for a 4 Hz 40 px hip excursion at 150 fps, against σ_m ≈ 3.2 px.
+So at dense sampling it is a noise-driven window, not a motion-driven one (the shipped `innovRef` 4.0
+sits at the 2σ point of that noise, ≈5 % of steps). Its virtue is that it is exactly one forward pass.
+The tests pin that it is wired to its knob (an unreachable `innovRef` pins the floor and reproduces the
+window law; a zero `innovRef` saturates at 1.0 and is then byte-identical to `mode off`) and state
+plainly which tolerances had to widen and why.
+
+**The divergence guard: the adaptive window never removes a sample.** Pass 2 re-decides segmentation
+from scratch, and a smaller q shrinks `Pp`, which shrinks `S`, which **tightens the 3σ gate**. At the
+shipped `minScale` that is negligible; at the sweep grid's 0.0025 — σ_jerk a full 10× below the collapse
+knee the `.cpp`'s derivation block measured — it is not. So after pass 2 the run compares the two
+passes' `accepted[]` and `hasSmoothed[]` for that keypoint and, on **any** difference, keeps **pass 1's
+(unadapted) output** and counts the keypoint. The count rides out as
+**`analysis.pose2d.adaptFallbacks`** (written only when > 0, so the window-off default stays
+byte-identical) via `PoseTrack2D::adaptFallbacks`. **A non-zero count is a rejected sweep setting, not a
+warning** — it means the setting would have changed which samples exist. The innov policy has no
+reference pass by design (one forward pass is its whole virtue), so it is **not** guarded; that is a
+known gap, and a reason to prefer `accel` if both pass the gate.
+
+⚠ **The guard as specified is sensitive, and that is a live question for promotion.** It falls back on
+**any** change to `accepted[]`, and a reduced q tightens the 3σ radius by ≈10 % at `minScale = 0.05` —
+enough that on a 3 px white synthetic still track one borderline sample in ~750 flips its accept flag and
+the whole keypoint is handed back unadapted. Three test fixtures therefore widen `gateSig` to 6 so they
+measure what they claim to (the window law, group selection, the no-measurement rule) rather than the
+guard, and every one of them asserts `adaptFallbacks == 0`. The distinction worth drawing before
+promotion: a flipped accept flag makes a sample a **coast the RTS still bridges** (`hasSmoothed` stays
+true, the sample still exists), whereas a collapsed segment **removes** samples. If the corpus shows the
+count firing on ordinary swings, the fix is to gate the fallback on `hasSmoothed` — the actual "never
+removes a sample" invariant — and to count accept-flag flips separately rather than to loosen the rule.
+
+**A step with no measurement never gets the reduced q.** A coasted step is the filter guessing, and its
+posterior σ is the only honest statement of that; shrinking q there would shrink σ without adding
+information, so a bridged sample would claim to be *more* certain than the measured samples either side
+of it. Both policies force scale 1.0 on any step without a measurement.
+
+**`accel` is two passes and that is deliberate.** Pass 1 is the ordinary smoother for the keypoint,
+read only for its RTS acceleration; pass 2 re-runs it with the derived per-frame scale. The
+acceleration estimate has to be **non-causal** — a causal one learns about the impact after the
+corridor has read it — and the symmetric ±`leadMs` max filter is the same argument one derivative
+down: the window must already be short *before* the acceleration arrives. Frames with no smoothed
+value (outside every segment, or a trimmed coast tail) carry 1.0, so a segment break widens back to
+today's window instead of inheriting the address one.
+
+⚠ **The quiet/moving separation is partly the POSE CADENCE, and partly the noise colour.**
+`PoseRunner` does not pose the address hold densely: the address region sits on the coarse/sparse
+grid (the corpus's measured spacing there is ≈27 ms) and the dense ≈6.7 ms zone only opens ≈500 ms
+before impact (`pose_runner.h`'s stride set — `addressStride 15` / `coarseStride 12` for the padded
+address). Two consequences, and the second is the one to remember:
+
+* the filter's own window grows as dt^(1/6), so the |a| noise floor rises only as dt^(1/12) — the
+  coarse grid is worth ≈12 % and nothing more;
+* **the lead is `leadMs`, a DURATION, exactly because of this grid.** A frame count would have meant
+  ±81 ms out at the 27 ms address grid and ±20 ms in the dense zone — widest where the lead is least
+  needed, narrowest where it protects the corridor samples. The flip side, so nobody rediscovers it as
+  a bug: at a 27 ms grid **±20 ms reaches no neighbour**, so the max filter is a no-op out at the
+  address and only bites in the dense zone. A **densely posed address still reads louder**, because
+  there the max runs over several independent samples of the noise floor.
+
+⚠ **Noise COLOUR decides the floor, more than either of the above — and no synthetic track settles
+engagement.** |a| in a still stretch is driven by keypoint error near the filter's cutoff
+`ω_c = (q/(σ_m²·dt))^(1/6)` (≈70–90 rad/s here, i.e. ≈11–14 ms): energy there reads as apparent
+acceleration, energy well below it is tracked as real motion and barely shows. *White* per-frame noise
+is the worst case — full power at ω_c — while real detector error is mostly a slow drift with pose and
+appearance. Hence the corpus's measured still-address hip |a| p95 — **1652** on the 11-swing subset,
+**2172** on the 08-18 sessions — against these synthetic fixtures at the same reference format:
+
+| fixture | still \|a\| p95 | reads as |
+|---|---|---|
+| uniform 150 fps, white 3 px | above aRef | scale **1.000** — never engages at all |
+| real cadence, 2 px as 0.5 px white + 1.94 px AR(1) τ 60 ms | **7546** | motion at aRef 4000 (it was 0.585 at the earlier aRef 8000 with a ±3-frame lead) |
+| corpus, real swings, 08-18 | **2172** | `s = 0.54` at `expo 1` |
+
+The AR(1) fixture is closer but still ≈4.6× the corpus, because an AR(1) drift has a **1/ω² tail** and
+is therefore *not* quiet at ω_c — that 1.94 px drift carries ≈9× the 0.5 px white component's power
+there. Matching the corpus would need a spectrally smoother error model (integrated or band-limited),
+which nothing in this repo measures, and inventing one to make a test pass would prove nothing. So
+`pose_smoother_test.cpp` §11c asserts only the **ordering** (a still stretch is smoothed harder than a
+moving one; the moving stretch returns to 1.0) and **prints the |a| floor beside the corpus number**;
+**whether the policy engages at the shipped aRef is decided by the bake-off on real swings**
+(`tools/metrics/adapt_settings.jsonl` + the C15 gate criteria), not by a fixture.
+
+⚠ **The floor is a real operating limit, not just a fixture artefact.** The corpus's still-address p95
+(1652 / 2172 px/s²) sits below aRef 4000, so on real swings the address hold does engage — but a noisier joint, a coarser posing grid, a wider format or (above all) whiter keypoint error
+eats the margin, and the honest reading of a quiet stretch that will not floor is "aRef is too near
+this joint's own |a| noise", not "the policy is broken". The tests are split along exactly that line: a
+**noiseless** track pins the discrimination exactly, a **white-noise** track pins the window law and
+the excursion, and a **real-cadence** track pins the ordering and prints the |a| floor it presents to
+aRef beside the corpus's number (it cannot decide engagement — see the colour note below).
+
+⚠ **`kMode` / `kGroup` are the frozen header's first non-numeric literals.** §3 below describes
+`pp_tuned_constants.h` as pure numeric literals; these two are `inline constexpr const char *`. They
+live there anyway because **promoting phase 5 is a mode flip**, and the freeze file has to be the one
+edit-point for it. §3's actual constraint is unaffected: they are `constexpr`, Qt-free and header-only,
+so the deliberately Qt-free lowest layer still compiles. One `constexpr` parser in `pose_smoother.h`
+reads both these defaults and a sweep's override string, so an unrecognised value means the same thing
+in both places — `off` / `legs`, i.e. a typo'd sweep line runs as a control.
+
+**Promotion is gated exactly as phase 4.3 was** — the C15 criteria (parity, ΔP4/ΔP7 in units of the
+result's own σ, P1–P7 excursion ratio, still-address jitter reduction, σ ratio), with a **control run**
+beside every before/after because pose is non-deterministic. It is the only part of this design that
+moves persisted `value[]`, and the P4 corridor content was seeded on the current smoothing, so a
+systematic shift at P4 puts [`norm_shapes.md`](../design/norm_shapes.md) in scope rather than being
+absorbed silently.
+
 ## 3. The frozen-defaults header — the single freeze edit-point
 
 `src/Core/pp_tuned_constants.h` (`namespace pinpoint::tuned`) is the **single source of truth** for every

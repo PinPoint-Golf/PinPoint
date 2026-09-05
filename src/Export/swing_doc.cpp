@@ -362,6 +362,14 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
             }
             pose2d.insert(QStringLiteral("smoothed"), smoothed);
         }
+        // Phase-5 motion-adaptive window (poseSmooth.adapt.*): the count of keypoints
+        // whose adaptive pass was REJECTED by the divergence guard and fell back to the
+        // unadapted output. Written ONLY when non-zero — same discipline as sigma/valid —
+        // so a swing analysed with the window off (or with nothing falling back)
+        // serializes byte-identically. Diagnostic: nothing reads it back; it exists so a
+        // sweep can refuse a setting that would have moved the segmentation.
+        if (a.pose2d.adaptFallbacks > 0)
+            pose2d.insert(QStringLiteral("adaptFallbacks"), a.pose2d.adaptFallbacks);
         // Dense VIZ-tier pose synth (pose_synthesis.h): the smoothed skeleton
         // upsampled to 240 Hz so the replay overlays scrub smoothly — the body
         // sibling of club.synth. Lean shape { t_us, kp[x,y,c]×133 } — no tier/sigma

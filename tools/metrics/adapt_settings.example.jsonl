@@ -1,0 +1,39 @@
+# Phase 5 gate grid for sweep_adapt.sh (contract C15). One JSON object per line, dotted
+# swinglab --params keys; "name" is the output subdirectory, not a tuning key. Lines starting
+# with # and blank lines are ignored.
+#
+# The control MUST be present and named "control": no keys at all, i.e. production defaults
+# (poseSmooth.adapt.mode "off"), which is the reference every ratio in sweep_summary.py --gate
+# is taken against.
+#
+# aRefPxS2 VALUES ARE PLACEHOLDERS. The accel policy's reference acceleration has not been
+# measured yet - Phase 0 reports the actual |a| distribution of kp 11-16 through the swing, and
+# these three (10k / 20k / 40k px/s^2, bracketing the C14 placeholder default 20000) exist only
+# to span an order of magnitude either side of it. Re-cut the accel grid around whatever Phase 0
+# reports before reading anything into which cell wins. (As this file was written, a first Phase 0
+# pass had just landed in docs/validation/data/hip_accel_reference_subset.csv: hip-centre |a| runs
+# ~1200 px/s^2 median at address, ~4300 through the downswing, ~12600 at the downswing p95 and
+# ~18000 at peak. If those hold, the useful aRef bracket is nearer 5k-20k than 40k - re-cut before
+# spending eleven swings on a cell that can never leave minScale.)
+#
+# 11 swings per line: the two grids below plus the control are 16 runs. Copy this file, cut the
+# cells you do not need, and keep the control.
+{"name":"control"}
+# accel grid: minScale {0.1, 0.05, 0.02} x aRefPxS2 {10000, 20000, 40000}
+{"name":"accel_ms10_a10k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.1,"poseSmooth.adapt.aRefPxS2":10000}
+{"name":"accel_ms10_a20k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.1,"poseSmooth.adapt.aRefPxS2":20000}
+{"name":"accel_ms10_a40k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.1,"poseSmooth.adapt.aRefPxS2":40000}
+{"name":"accel_ms05_a10k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.05,"poseSmooth.adapt.aRefPxS2":10000}
+{"name":"accel_ms05_a20k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.05,"poseSmooth.adapt.aRefPxS2":20000}
+{"name":"accel_ms05_a40k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.05,"poseSmooth.adapt.aRefPxS2":40000}
+{"name":"accel_ms02_a10k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.02,"poseSmooth.adapt.aRefPxS2":10000}
+{"name":"accel_ms02_a20k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.02,"poseSmooth.adapt.aRefPxS2":20000}
+{"name":"accel_ms02_a40k","poseSmooth.adapt.mode":"accel","poseSmooth.adapt.minScale":0.02,"poseSmooth.adapt.aRefPxS2":40000}
+# innov grid: minScale {0.1, 0.05} x innovRef {2, 4, 8}. innovRef is in units of normalised
+# innovation (innov^2/S), so 4 is "the gate's own scale" - it needs no Phase 0 measurement.
+{"name":"innov_ms10_r2","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.minScale":0.1,"poseSmooth.adapt.innovRef":2}
+{"name":"innov_ms10_r4","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.minScale":0.1,"poseSmooth.adapt.innovRef":4}
+{"name":"innov_ms10_r8","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.minScale":0.1,"poseSmooth.adapt.innovRef":8}
+{"name":"innov_ms05_r2","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.minScale":0.05,"poseSmooth.adapt.innovRef":2}
+{"name":"innov_ms05_r4","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.minScale":0.05,"poseSmooth.adapt.innovRef":4}
+{"name":"innov_ms05_r8","poseSmooth.adapt.mode":"innov","poseSmooth.adapt.minScale":0.05,"poseSmooth.adapt.innovRef":8}

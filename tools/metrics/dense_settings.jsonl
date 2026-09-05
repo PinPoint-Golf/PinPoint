@@ -1,0 +1,8 @@
+# Lever 1 from the 5 Sept discussion: more SAMPLES where the wobble lives, not more averaging.
+# pose.densePreMs is how far before impact the runner poses every frame (default 500 ms; the
+# backswing is otherwise posed every 4th frame, ~27 ms). 1500 covers the whole backswing on a
+# normal tempo; 2500 reaches the address hold as well. Cost is pose runtime per swing.
+{"name":"control"}
+{"name":"dense_pre1500","pose.densePreMs":1500}
+{"name":"dense_pre2500","pose.densePreMs":2500}
+{"name":"dense_pre1500_adapt","pose.densePreMs":1500,"poseSmooth.adapt.mode":"accel","poseSmooth.adapt.aRefPxS2":8000,"poseSmooth.adapt.expo":1,"poseSmooth.adapt.minScale":0.01}

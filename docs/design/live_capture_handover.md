@@ -259,7 +259,7 @@ One command, both products, real hardware, nobody in the room. It:
    calls `model.arm()`), checks the torch survived arming, and injects its own swing
    (`SyntheticAudio.oneSwing`) — no hands, no noise needed;
 3. pulls the phone's own diagnostics off the device;
-4. leaves `~/pinpoint-diags/<stamp>-integration/` with host log, device log, phone log and the
+4. leaves `PinPointCapture/diags/<stamp>-integration/` with host log, device log, phone log and the
    usbmuxd stream;
 5. **fails if either half fails**, and prints a `PROBE DOCTOR` line naming the first rung of the
    chain that did not happen.

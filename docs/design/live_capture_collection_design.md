@@ -140,7 +140,7 @@ statement and an untrue one.
 ## 2. The evidence
 
 A wrist session on 1 September 2026: one iPhone 16 over USB, audio-triggered shots, PPS at
-`06e92fe`, PPC at `c382888`. Raw logs preserved at `~/pinpoint-diags/2026-09-01-wrist-ppcp/`.
+`06e92fe`, PPC at `c382888`. Raw logs preserved at `PinPointCapture/diags/2026-09-01-wrist-ppcp/`.
 
 | | |
 |---|---|

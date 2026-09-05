@@ -227,6 +227,47 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
 
 ---
 
+
+---
+
+## Phase 5 — Motion-adaptive smoother window `[~]`
+
+Follows from Phase 4's finding. Contract: `metric_presentation_honesty_phase5_contracts.md`.
+Run unattended per Mark's instruction (5 Sept): the C15 gate decides promotion.
+
+- [ ] **5.0** `tools/metrics/hip_accel_reference.py`: hip-centre acceleration on the smoothed track
+      per swing window (still address / backswing / downswing / post-impact) → `aRefPxS2`.
+- [ ] **5.1** The hook: `Kf3::predict(dt, qScale)`, per-frame qScale into `smoothKeypoint`, rts
+      returns the smoothed acceleration. Byte-identical when off.
+- [ ] **5.2** Two policies behind `poseSmooth.adapt.*` (mode off|accel|innov, group legs|body,
+      minScale, aRefPxS2, expo, leadFrames, innovRef, innovRun), tests per C14.
+- [ ] **5.3** Sweep tooling: `sweep_adapt.sh` + `sweep_summary.py --gate` printing C15.
+- [ ] **5.4** Bake-off on the 11-swing subset with a control; parity at off.
+- [ ] **5.5** Promote the winner for `legs` if the gate passes; else nothing promoted, reason
+      recorded. Design §5.4 updated either way.
+
+
+---
+
+## Phase 6 — Draw the windowed mean `[ ]`
+
+Agreed with Mark 5 Sept ("I think the chart should draw the windowed mean"), after Phase 5.
+Rationale: Phases 1–3 deliberately never changed the drawn line ("one curve"), so the wobble
+looks the same to the eye. Drawing the SAME 40 ms centred mean (with the ≥3-sample widening) that
+the PEAK tile already reduces on keeps "one curve" honest: line and numbers come from one
+reduction, and the raw samples stay visible as faint dots behind the line.
+
+- [ ] **6.1** `ChartMetrics::windowedMean(t_us, value, valid)` in C++ (delegating to
+      series_reduce's centred-mean at every valid sample; invalid samples excluded and kept
+      invalid), exposed to QML once per data change.
+- [ ] **6.2** `PpChartPlot.qml` draws the mean as the trace; raw samples as dots at low opacity
+      (a `showRawDots` default on); invalid runs still dashed; hover reads the mean and shows the
+      raw sample in the tooltip; the σ ribbon follows the mean.
+- [ ] **6.3** `PpSegmentBrush.qml` sparkline uses the same mean.
+- [ ] **6.4** Probe prints mean-vs-raw at the peak index; tests pin that the tiles equal the drawn
+      line at the peak (PEAK == max of the drawn mean inside the window).
+- [ ] **6.5** One windowed look by Mark.
+
 ## Side items (not gating any phase)
 
 - [x] `PpChartSummary.qml` text overflow: the 2×2 grid's value texts overrun their cells at
@@ -463,3 +504,16 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   shows in a PK RATE tile; runtime override plumbing for `reduce.*`; a full-corpus confirmation of
   Phases 1–3 on GOLFSIMPC when a Windows build is next made; a motion-adaptive smoother window
   as the honest route to less hip jitter.
+
+- **2026-09-05 (Phase 5 built; 3-cell probe on real swings)** — Hook + both policies built and
+  reviewed (a coasted step never takes the reduced q; pass 2 falls back to pass 1 on any change
+  to accepted[]/hasSmoothed[] and counts it as `pose2d.adaptFallbacks`; keys clamped; aRef
+  scaled by √(W·H)); parity at mode off byte-identical (11/11). aRef re-measured from the IMPACT
+  side on the whole corpus (`hip_accel_reference.py` per-P columns): min(|a| at P6, P7) p05 5232
+  px/s², P4 median 4378, so **aRef = 4000** keeps today's window from the top through impact on
+  80/83 swings; the July sessions' addresses read as loud as their downswings (real setup
+  motion) and correctly do not engage. Probe (control + expo 2/3 at minScale 0.05, 11 swings):
+  P4/P7 moved ≤ 0.21 σ, excursion 1.00, σ ratio 0.99, no lost samples, **0 fallbacks**;
+  still-address jitter ratio 0.83 (expo 2) / 0.78 (expo 3) — plumb bob 0.65, sway 0.80, hip
+  tilt 0.88, so C4 (each ≤ 0.80) fails on hip tilt. Cause: at expo 3 the address sits at s ≈
+  0.16 (a ~45–50 ms window); a steeper expo (5, 8) is the lever. Full sweep cut 3 running.
