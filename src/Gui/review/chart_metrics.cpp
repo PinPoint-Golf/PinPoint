@@ -159,6 +159,18 @@ double interpValid(const ValidSamples &s, qint64 pos)
     return vLo + (vHi - vLo) * f;
 }
 
+// ⚠ ONE CONFIG FOR EVERY REDUCTION THIS CLASS PERFORMS (F8.2). summaryMasked and windowedMean must
+// window the curve identically or the PEAK tile stops being a point on the drawn line — the whole
+// content of Phase 6 — so neither of them constructs its own. Today it is the frozen defaults
+// (tuned::sampler::kWindowHalfUs, tuned::reduce::kExtremumWindowUs, tuned::reduce::kRateWindowUs);
+// the day a runtime override arrives (docs/validation/tunable_parameters_reference.md §2.17 records
+// the keys the sweep will use) it arrives HERE, once, and cannot reach one caller without the other.
+// Two `ReduceConfig{}` literals in two functions is exactly how that drift would happen, quietly.
+pa::ReduceConfig chartCfg()
+{
+    return pa::ReduceConfig{};
+}
+
 // The finest step any reading in this unit may be printed in, whatever σ says — the FLOOR of
 // ChartMetrics::displayStep. One unit for every unit today, which is exactly the rounding this class
 // did before σ existed, and the reason the σ rule can only ever COARSEN a number: a σ of 0.1 in must
@@ -241,8 +253,8 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
     // tuned::reduce::kExtremumWindowUs, tuned::reduce::kRateWindowUs), so ±15 ms, 40 ms and 50 ms
     // are authored in exactly one place. The card literally cannot be reading a different 40 ms
     // than buildPhaseGrid is, which is the property design §5.2 exists to buy and §7 item 5 is
-    // measured on.
-    const pa::ReduceConfig cfg{};
+    // measured on. Through chartCfg() so windowedMean below cannot be given a different one.
+    const pa::ReduceConfig cfg = chartCfg();
 
     // ── Window edges — the ±15 ms windowed MEDIAN, the reducer the diagnostics grid already uses ─
     //
@@ -287,6 +299,11 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
     // interpolated window EDGES no longer take part in min/max the way they did when this scanned
     // the raw samples and seeded itself from them: an extremum is now a statement about
     // measurements inside the window, and an edge is a statement about an instant.
+    //
+    // ⚠ AND SINCE PHASE 6 THE CHART DRAWS THOSE SAME MEANS — windowedMean() below returns the whole
+    // candidate array, PpChartPlot strokes it, and this reduction picks its extremum out of it. So
+    // "the PEAK tile is a point on the drawn line" is bit-exact by construction, not a tolerance,
+    // and chart_metrics_test asserts it on every fixture in this file.
     const pa::Reduced loR = pa::reduceExtremum(view, startUs, endUs, false, cfg);
     const pa::Reduced hiR = pa::reduceExtremum(view, startUs, endUs, true,  cfg);
 
@@ -385,8 +402,62 @@ QVariantMap ChartMetrics::summaryMasked(const QVariantList &tUs, const QVariantL
     r.insert(QStringLiteral("peakSigma"), peakSigma);
     r.insert(QStringLiteral("rateSigma"), rateR.ok ? rateR.sigma : 0.0);
     r.insert(QStringLiteral("edgeOk"),    edgeOk);
+    // ⚠ extremumOk — THE THIRD ABSENCE FLAG, and the one Phase 6 made load-bearing (F2).
+    //
+    // False when NO VALID SAMPLE LIES IN THE WINDOW at all, which is not the exotic case it sounds:
+    // any window narrower than the sample spacing does it on a perfectly healthy series (a brush
+    // pinched to 50 ms on a 100 ms-strided address, a phase pair closer together than one frame).
+    // min/max/peak/range then come from the two INTERPOLATED EDGES above — numbers taken between
+    // measurements rather than from them.
+    //
+    // Before Phase 6 that was defensible: the edges were the only readings there were, and the chart
+    // drew the raw samples so nothing on screen contradicted them. Now the trace draws the windowed
+    // mean and the PEAK tile is advertised as a point ON it — and in this one case it is not on it,
+    // because no point of the line is inside the window to be the peak. `partial` cannot cover for
+    // it either: `partial` requires an honoured mask (see its rule above), so on an UNMASKED series
+    // this state wears no chip whatever and reads as an ordinary reading.
+    //
+    // So it is stated, the same way rateOk states the absent rate: the values are still returned (a
+    // caller mid-migration degrades rather than crashes) and a display that prints PEAK/MIN/MAX/
+    // RANGE without testing this has been told not to. Δ and @impact are NOT gated by it — they are
+    // statements about instants, which is exactly what the edges are.
+    r.insert(QStringLiteral("extremumOk"), loR.ok && hiR.ok);
     r.insert(QStringLiteral("rateOk"),    rateR.ok);
     r.insert(QStringLiteral("tRateUs"),   rateR.ok ? qint64(rateR.atUs) : qint64(0));
+    return r;
+}
+
+QVariantMap ChartMetrics::windowedMean(const QVariantList &tUs, const QVariantList &value,
+                                       const QVariantList &valid) const
+{
+    // ONE CURVE (design §4 principle 1). This function computes NOTHING: it lifts the bridge's
+    // arrays exactly as summaryMasked does — same lift(), same chartView(), same chartCfg(), so the
+    // same ±20 ms window and the same ≥3-sample widening — and hands them to
+    // the shared reducer. The line the chart draws is therefore literally the array
+    // reduceExtremum ranks to produce the PEAK tile, and the two cannot be made to disagree by
+    // editing this file: there is nothing here to edit.
+    const Lifted s = lift(tUs, value, valid);
+
+    std::vector<pa::WindowedMean> wm;
+    pa::windowedMeans(chartView(s), wm, chartCfg());
+
+    // Two parallel lists rather than a list of maps: QML indexes these per sample in a path
+    // binding (PpChartPlot's PathPolyline / PathMultiline), and a QVariantMap per sample would
+    // allocate a hash per point of every series on every re-evaluation.
+    QVariantList mean, sigma;
+    mean.reserve(int(wm.size()));
+    sigma.reserve(int(wm.size()));
+    for (const pa::WindowedMean &m : wm) {
+        // `m.ok` is deliberately dropped — see the header. An invalid sample's `value` is its RAW
+        // value, which is what makes drawing this array over the whole curve leave the bridged runs
+        // showing their persisted numbers.
+        mean.append(m.value);
+        sigma.append(m.sigma);
+    }
+
+    QVariantMap r;
+    r.insert(QStringLiteral("mean"),  mean);
+    r.insert(QStringLiteral("sigma"), sigma);
     return r;
 }
 

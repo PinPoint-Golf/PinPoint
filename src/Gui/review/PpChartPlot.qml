@@ -35,7 +35,15 @@ Item {
 
     // ── Data (decorated by the parent) ────────────────────────────────────────────
     // series: [{ key, label, unit, t_us:[…], value:[…], phaseSamples:[…], color,
-    //            valid?:[0|1…], validFromUs?, validToUs?, sigma? }]
+    //            valid?:[0|1…], validFromUs?, validToUs?, sigma?, mean?:[…], meanSigma?:[…] }]
+    //
+    // `mean` is THE CURVE THIS PLOT STROKES (design §4 principle 1, Phase 6): the 40 ms centred
+    // windowed mean at every sample, from ChartMetrics.windowedMean, which is the same array
+    // ChartMetrics.summaryMasked reduces to produce the PEAK tile — so the line and the numbers are
+    // one reduction and cannot drift apart. OPTIONAL: a caller that has not decorated it gets the
+    // persisted `value` stroked instead, exactly as before this phase (see _meanOf). `meanSigma` is
+    // the per-sample standard error of that mean; nothing in here reads it yet — the ±σ ribbon quotes
+    // the SERIES' σ, which is a different statement (the instrument's noise, not this window's).
     //
     // `sigma` is the series' 1σ MEASUREMENT noise in its own unit (§5.3) and is read by exactly one
     // thing in here, the ±σ ribbon below. Optional, and ABSENT means never characterised rather
@@ -65,6 +73,23 @@ Item {
     property bool showDots:      true
     property bool showCrosshair: true
     property real cursorUs:     -1       // shared hover cursor (−1 = inactive)
+
+    // ── THE RAW SAMPLES, BEHIND THE LINE — ON BY DEFAULT (Phase 6) ─────────────────
+    //
+    // One faint dot per MEASURED sample at its persisted value. This is what makes drawing a
+    // reduction legitimate instead of a quiet filter: the stroke is the 40 ms windowed mean (the
+    // number the tiles report), and the dots are what was actually recorded, on the same axes, at the
+    // same time. A reader can see the wobble the reduction declined to call a peak, and the distance
+    // between the dots and the line IS the reduction — visible, not described.
+    //
+    // ⚠ DEFAULT TRUE, unlike showSigmaBand. The ribbon is an undecided visual (design §8); these
+    // dots are the honesty half of a change that alters the drawn line, so shipping the line without
+    // them would be shipping the half that hides something. The property exists for a caller that
+    // wants the bare reduced shape (a compact strip, a thumbnail), not as a preference to persist.
+    //
+    // Nothing is drawn for a series with no `mean`: there the stroke IS the raw curve and the dots
+    // would just double it.
+    property bool showRawDots:   true
 
     // ── THE ±σ RIBBON — OFF, AND OFF FOR A REASON (design §5.3, §8) ────────────────
     //
@@ -143,10 +168,13 @@ Item {
     // dashed stroke. A gap would be honest too, but a dashed bridge is honest AND keeps the eye
     // on where the curve resumes (design §5.1, the Chart bullet).
     //
-    // ⚠ THIS IS NOT A FILTER AND NOT A SMOOTHER. Every persisted sample is on screen at its
-    // persisted value; only the stroke changes. Display-only smoothing is forbidden outright
-    // (design §4 principle 1) — a chart that shows one thing while the card computes another is
-    // where dishonesty starts, and it hides the measurement problem from whoever must fix it.
+    // ⚠ THIS IS NOT A FILTER. Every persisted sample is on screen — as a raw dot at its persisted
+    // value (see showRawDots), and the bridged runs draw the persisted value on the stroke as well
+    // (an invalid sample's `mean` entry IS its raw value). What the stroke shows through the measured
+    // runs is the 40 ms windowed MEAN, which is not display-only smoothing but the reduction the PEAK
+    // tile reports: design §4 principle 1 forbids the chart showing one thing while the card computes
+    // another, and Phase 6's answer is to make them the same thing rather than to leave the line raw
+    // and the tile windowed — which is what the reader was being asked to reconcile before.
     function _hasDomain(s) {
         return s.validFromUs !== undefined && s.validToUs !== undefined
                && s.validToUs > s.validFromUs
@@ -160,9 +188,16 @@ Item {
     // Short-mask rule, shared with the C++ (chart_metrics.h) and with measure_sample.cpp: a `valid`
     // list that does not cover the curve is a malformed document and is discarded WHOLESALE, not
     // applied to the prefix it covers — two views of one curve must not disagree about it.
+    //
+    // ⚠ A NON-FINITE VALUE IS NOT A MEASUREMENT EITHER (F5), the same fold SeriesView::isValid makes
+    // on the C++ side and for the same reason: nothing in the pipeline should produce a NaN, which is
+    // exactly why it must not be trusted as an invariant. Here it is also a rendering matter — one
+    // NaN in a ShapePath's point list takes out the WHOLE run, so a single bad sample would silently
+    // erase a series' trace, its dots or its ribbon rather than showing a gap where it is.
     function _measured(s, i) {
         if (root._hasDomain(s) && (s.t_us[i] < s.validFromUs || s.t_us[i] > s.validToUs))
             return false
+        if (!isFinite(s.value[i])) return false
         if (!s.valid || s.valid.length < s.t_us.length) return true
         return s.valid[i] !== 0
     }
@@ -182,6 +217,21 @@ Item {
         var i = root._nearestIndex(s, t)
         return i < 0 || root._measured(s, i)
     }
+    // WHICH ARRAY IS THE CURVE: `mean` where the host decorated one (PpMetricChart._plottable), the
+    // persisted `value` otherwise. A "which array" choice rather than arithmetic, so it stays in QML;
+    // the identical pair is in PpMetricChart and PpSegmentBrush because all three are handed a
+    // `series` list and none of them may assume the others prepared it.
+    //
+    // The predicate is separate from the getter, and asked by name rather than by comparing the
+    // returned array against s.value: an array identity test would be answering "is there a
+    // reduction here" with a question about object lifetimes across the QML/C++ boundary, which is
+    // not something a drawing decision should depend on.
+    function _hasMean(s) {
+        return !!(s && s.mean && s.t_us && s.mean.length === s.t_us.length)
+    }
+    function _meanOf(s) {
+        return root._hasMean(s) ? s.mean : s.value
+    }
 
     // Each series split into RUNS of one drawn state: [{ color, dashed, t:[…], v:[…] }] in time
     // order. Index ranges, not screen points, so a resize or a Y-range change re-runs only the
@@ -193,11 +243,27 @@ Item {
     // themselves dashed — a segment with one unmeasured end is not a measured segment. Solid runs
     // therefore stay strictly inside their own samples, and a solid run left with fewer than two
     // samples draws nothing: its neighbours already cover those segments.
+    //
+    // ⚠ THE VALUES ARE `mean`, NOT `value` (Phase 6). One array for every run, and a dashed run still
+    // shows the PERSISTED numbers, because windowedMean puts the raw value at every sample its mask
+    // marked invalid — so the bridged and out-of-domain regions draw exactly what they drew before
+    // this phase. The seam between a dashed and a solid run stays continuous because both runs read
+    // the same array at the shared endpoint (a valid sample, hence a mean on both sides).
+    //
+    // ⚠ THAT DEPENDS ON THE HOST HAVING COMPOSED THE MASK (F4), and it is the reason
+    // PpMetricChart._reduceMask exists. `_measured` below is `valid` AND in-domain, while
+    // windowedMean only knows the mask it was given: hand it `valid` alone and on a swing whose
+    // producer never marked the out-of-domain run, THAT run would be dashed at a mean rather than at
+    // its persisted value, and its samples would be averaged into the in-domain anchors beside the
+    // boundary as well. The host therefore reduces through `valid` ∧ in-domain, so "invalid to the
+    // reducer" and "unmeasured on this plot" are the same set of samples. An undecorated caller
+    // (no `mean`) draws the raw curve and none of this arises.
     readonly property var _traceRuns: {
         var out = []
         for (var k = 0; k < (root.series ? root.series.length : 0); ++k) {
             var s = root.series[k]
             if (!s || !s.t_us || !s.value || s.t_us.length < 2) continue
+            var mv = root._meanOf(s)
 
             // Per-sample drawn state first, so the run walk below reads a plain boolean array.
             var solid = []
@@ -214,14 +280,54 @@ Item {
                 }
                 if (b > a) {
                     var t = [], v = []
-                    for (var j = a; j <= b; ++j) { t.push(s.t_us[j]); v.push(s.value[j]) }
-                    out.push({ color: s.color, dashed: !solid[i0], t: t, v: v })
+                    // NON-FINITE POINTS ARE OMITTED FROM THE RUN, not drawn (F5). _measured already
+                    // refuses to call them measurements, but a DASHED run draws the persisted value —
+                    // and a NaN there is not a dash, it is the loss of every segment in the run. The
+                    // line closes over the omitted sample exactly as it closes over a bridge.
+                    for (var j = a; j <= b; ++j)
+                        if (isFinite(mv[j])) { t.push(s.t_us[j]); v.push(mv[j]) }
+                    if (t.length > 1) out.push({ color: s.color, dashed: !solid[i0], t: t, v: v })
                 }
                 i0 = i1 + 1
             }
         }
         return out
     }
+
+    // ── THE RAW SAMPLES' GEOMETRY (Phase 6) ───────────────────────────────────────
+    //
+    // Per series, the MEASURED samples' times and PERSISTED values as { color, t[], v[] } — index
+    // data, not screen points, for the same reason _traceRuns holds indices: a resize or a Y-range
+    // change then re-runs only the cheap coordinate map in the path binding below.
+    //
+    // Unmeasured samples get no dot. A bridged or out-of-domain sample is not a measurement, so there
+    // is nothing there to show as one — and the dashed stroke already draws its persisted value, so
+    // the number is not being hidden either. Same predicate as everything else on this plot
+    // (_measured), so the dots, the dashes, the phase dots and the crosshair cannot disagree about
+    // which samples are readings.
+    //
+    // Skipped entirely when the series has no `mean`: the stroke is then the raw curve itself and a
+    // dot on every sample would just thicken it. Also skipped, at one boolean test, when the dots are
+    // off — no pass over any series.
+    readonly property var _rawDots: {
+        var out = []
+        if (!root.showRawDots) return out
+        for (var k = 0; k < (root.series ? root.series.length : 0); ++k) {
+            var s = root.series[k]
+            if (!s || !s.t_us || !s.value || s.t_us.length < 2) continue
+            if (!root._hasMean(s)) continue               // no reduction ⇒ nothing to show behind
+            var t = [], v = []
+            for (var i = 0; i < s.t_us.length; ++i)
+                if (root._measured(s, i)) { t.push(s.t_us[i]); v.push(s.value[i]) }
+            if (t.length > 0) out.push({ color: s.color, t: t, v: v })
+        }
+        return out
+    }
+    // How many series are drawing raw dots — 0 when they are off, when no series carries a `mean`,
+    // and when nothing was measured. Read by the plumb-bob probe (which duck-types for it while
+    // walking the chart) so a probe run can REPORT that the dots drew rather than assert it from the
+    // property being set, exactly as it does for sigmaBandRuns. Not used by any binding.
+    readonly property int rawDotRuns: root._rawDots.length
 
     // The ±σ ribbon's geometry: per series, its MEASURED runs as { color, sigma, t[], v[] }, or an
     // empty list when the band is off. Only the measured runs get one, for the same reason the
@@ -235,12 +341,16 @@ Item {
     //
     // The whole walk is behind `showSigmaBand`, so the default-off case costs one boolean test per
     // re-evaluation rather than a pass over every series.
+    //
+    // ⚠ CENTRED ON `mean` SINCE PHASE 6, not on the raw samples: the band is ± the series' σ around
+    // THE DRAWN LINE, and a ribbon offset from the stroke it belongs to would read as a second curve.
     readonly property var _sigmaRuns: {
         var out = []
         if (!root.showSigmaBand) return out
         for (var k = 0; k < (root.series ? root.series.length : 0); ++k) {
             var s = root.series[k]
             if (!s || !s.t_us || !s.value || s.t_us.length < 2) continue
+            var mv = root._meanOf(s)
             // ChartMetrics.seriesSigma, not a local guard: one implementation of "absent means
             // absent" (it was three). Called once per series here, on a binding that changes with
             // the DATA — never per frame; it marshals the whole series.
@@ -249,7 +359,7 @@ Item {
             var t = [], v = []
             for (var i = 0; i < s.t_us.length; ++i) {
                 if (root._measured(s, i)) {
-                    t.push(s.t_us[i]); v.push(s.value[i])
+                    t.push(s.t_us[i]); v.push(mv[i])
                 } else if (t.length > 0) {
                     if (t.length > 1) out.push({ color: s.color, sigma: sg, t: t, v: v })
                     t = []; v = []
@@ -421,6 +531,74 @@ Item {
             }
         }
 
+        // Raw samples — ONE Shape per series, drawn after the ribbon and BEFORE the traces so the
+        // reduced line sits on top of the measurements it reduces.
+        //
+        // ⚠ WHY ONE SHAPE AND A PathMultiline, and not a Repeater of dots. The All preset can put 25
+        // series of ~250 samples on one plot: a Repeater over points is ~6 000 QQuickRectangles, each
+        // with its own x/y bindings re-evaluated on every resize and every brush frame, which is not
+        // affordable and would make the honest half of this phase the expensive half. A PathMultiline
+        // takes a LIST OF POLYLINES in one property, so the whole dot field of a series is one path
+        // element inside one ShapePath: 25 Shapes for the plot, and the per-frame work is the same
+        // array map the trace already does (one Qt.point pair per sample) with no item creation at all.
+        //
+        // Each dot is a 1px horizontal segment with a ROUND CAP of the dot's diameter — the cheapest
+        // shape Qt Quick Shapes can express as a dot, and a real (non-degenerate) segment because a
+        // zero-length one is not guaranteed to raster at all. So the mark is a capsule about
+        // (2r + 1) × 2r px, which at 0.35 opacity reads as a dot.
+        //
+        // ⚠ THE RADIUS HAS A ONE-PIXEL FLOOR (F7). Theme.sp() rounds, so sp(1.2) is 1 at the default
+        // scale and 0 on a smaller one — and a zero stroke width does not draw a smaller dot, it
+        // draws NOTHING. The honesty half of this phase would then be silently absent on exactly the
+        // displays where the reduction is hardest to see. Math.max(1, …) makes the failure impossible
+        // rather than unlikely; the dot cannot get thinner than a pixel, which is the right floor for
+        // a mark whose job is to be present.
+        Repeater {
+            model: root._rawDots
+            delegate: Shape {
+                id: rawd
+                required property var modelData
+                readonly property real r: Math.max(1, Theme.sp(1.2))
+                // Read back by the plumb-bob probe: the number of polylines the PathMultiline is
+                // actually holding after the assignment, which is the only form of "the dots drew"
+                // that is not just the JS model restated. −1 means the property came back in a shape
+                // this cannot count, which is itself worth reporting (the paths conversion is the one
+                // part of this that no test can reach).
+                readonly property int pathCount: {
+                    var pp = dotPath.paths
+                    return (pp && pp.length !== undefined) ? pp.length : -1
+                }
+                objectName: "rawDots"
+                anchors.fill: parent
+                // The GEOMETRY renderer on purpose: these are 2px round caps at a third opacity, where
+                // the curve renderer's antialiasing quality buys nothing and its per-segment curve
+                // geometry would be paid thousands of times per plot.
+                preferredRendererType: Shape.GeometryRenderer
+                // Same colour as the trace, faint: the dots are the same measurement as the line, not
+                // a second series. A different hue would read as one.
+                opacity: 0.35
+                ShapePath {
+                    strokeColor: rawd.modelData.color
+                    strokeWidth: 2 * rawd.r
+                    capStyle:    ShapePath.RoundCap
+                    fillColor:   "transparent"
+                    PathMultiline {
+                        id: dotPath
+                        // One two-point polyline per sample, in plot coordinates — so a Y-range change
+                        // or a resize re-runs only this map and not the sample walk in _rawDots.
+                        paths: {
+                            var out = [], m = rawd.modelData, n = m.t.length
+                            for (var i = 0; i < n; ++i) {
+                                var x = root.xForT(m.t[i]), y = root.yForV(m.v[i])
+                                out.push([Qt.point(x - 0.5, y), Qt.point(x + 0.5, y)])
+                            }
+                            return out
+                        }
+                    }
+                }
+            }
+        }
+
         // Traces — one Shape per RUN (see _traceRuns): a series is one run when everything in it
         // was measured, which is every series that predates the validity mask.
         Repeater {
@@ -479,6 +657,13 @@ Item {
                     // the single most confident thing on this chart — it says "graded reading
                     // here". It must not sit on a bridged value or on a foreshortened body line.
                     //
+                    // ⚠ AND THEY KEEP THEIR PERSISTED VALUES — they are NOT moved onto the mean the
+                    // trace now draws (Phase 6). A phaseSample is the PRODUCER's graded reading at
+                    // that landmark, the thing a corridor scored and a coach was told; re-stating it
+                    // as our window mean would silently overwrite someone else's measurement with our
+                    // display arithmetic. A dot therefore sits a little off the line where the
+                    // reduction moved, which is true and is exactly what the raw dots behind it show.
+                    //
                     // Held in its own property rather than inlined into `visible`: `visible` also
                     // depends on the view window, which changes on every frame of a brush drag,
                     // and measuredAt marshals the whole series across the QML boundary. This way
@@ -520,8 +705,13 @@ Item {
                 id: cmark
                 required property var modelData
                 readonly property real r: Theme.sp(3)
+                // ON THE MEAN, because that is where the line is (Phase 6) and this marker's job is
+                // to say "the curve is here at this instant". The readout beside it prints the same
+                // mean and the raw sample after it (PpMetricChart._valueTextAt / _rawTextAt), so the
+                // marker, the line and the two numbers are one statement.
                 readonly property real cv: labels.valueAtNearest(cmark.modelData.t_us,
-                                                                 cmark.modelData.value, root.cursorUs)
+                                                                 root._meanOf(cmark.modelData),
+                                                                 root.cursorUs)
                 // The readout beside it prints "—" here (PpMetricChart._valueTextAt), so the
                 // marker has to go too: a dot pinned to the bridged value with a dash beside it
                 // would tell the reader the number exists and is merely being withheld.

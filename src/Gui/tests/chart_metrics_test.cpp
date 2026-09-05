@@ -45,6 +45,14 @@
 // pre-Phase-3 strings byte for byte, because that is what makes the whole phase safe to ship on a
 // corpus whose producers have not propagated σ yet. The other is that the step is never finer than
 // one unit, because a rule meant to remove false precision must not be able to manufacture it.
+//
+// AND, since Phase 6, ChartMetrics::windowedMean — the array the chart STROKES. Drawing anything
+// other than the persisted samples is only defensible if it is the same reduction the tiles report
+// (design §4 principle 1), so what is at risk is an identity rather than a value: PEAK must be an
+// extremum of the drawn line inside the window, BIT-EXACTLY, on every fixture in this file. That is
+// asserted by scanning the returned array — not by asking the reducer twice — with a checkExactD
+// that has no epsilon, because a tolerance would pass exactly the state this design exists to end:
+// two implementations of one window, drifting.
 
 #include "chart_metrics.h"
 
@@ -74,6 +82,19 @@ static void checkEqD(const char *label, double got, double want)
 {
     const bool ok = std::fabs(got - want) < 1e-6;
     std::printf("  [%s] %-42s got %8.3f  want %8.3f\n", ok ? "PASS" : "FAIL", label, got, want);
+    if (!ok) ++g_fail;
+}
+// ── BIT-EXACT, and it is a different question from checkEqD's 1e-6 ────────────────────────────
+//
+// Phase 6 (C17) draws the array the PEAK tile reduces, so "the tile is a point on the drawn line"
+// is not an approximation to be toleranced — it is the SAME double, produced by the same code, or
+// the two reductions have drifted apart and the whole claim is gone. A 1e-6 tolerance would pass a
+// build where the chart re-implemented the window slightly differently, which is exactly the state
+// this design exists to end.
+static void checkExactD(const char *label, double got, double want)
+{
+    const bool ok = got == want;               // deliberate: no epsilon
+    std::printf("  [%s] %-42s got %17.10g  want %17.10g\n", ok ? "PASS" : "FAIL", label, got, want);
     if (!ok) ++g_fail;
 }
 static void checkStr(const char *label, const QString &got, const char *want)
@@ -211,6 +232,43 @@ static double oldPeak(const QVariantList &v)
     for (const QVariant &x : v)
         if (std::fabs(x.toDouble()) > std::fabs(p)) p = x.toDouble();
     return p;
+}
+
+// ── The C17 identity, restated INDEPENDENTLY of the reducer ───────────────────────────────────
+//
+// The extremes of ChartMetrics::windowedMean over the anchors a query may pick — every VALID sample
+// whose t lies in [a, b]. This is the whole content of Phase 6's promise ("PEAK is the extremum of
+// the drawn line inside the window") written as a plain scan over the array the chart draws, so the
+// assertion is not "the reducer agrees with itself": it walks the returned array, not the series.
+//
+// The mask rule here is the SHORT-MASK RULE, spelled out a second time on purpose — a mask shorter
+// than the curve is discarded wholesale (chart_metrics.h haveMask), and if this test applied it to
+// the prefix instead it would be asserting a different question than the class answers. Non-finite
+// values are excluded for the same reason SeriesView::isValid excludes them: they are not
+// measurements, and no fixture here has one, which is exactly why it must not be assumed.
+struct MeanExtremes {
+    double mn = 0.0, mx = 0.0;
+    int    iMin = -1, iMax = -1;
+    bool   any = false;                 // false ⇒ NO anchor in the window; the identity is silent
+};
+static MeanExtremes meanExtremesOver(const QVariantList &t, const QVariantList &v,
+                                     const QVariantList &mean, const QVariantList &valid,
+                                     qlonglong a, qlonglong b)
+{
+    MeanExtremes r;
+    const int n = qMin(qMin(t.size(), v.size()), mean.size());
+    const bool haveMask = n > 0 && valid.size() >= n;
+    for (int i = 0; i < n; ++i) {
+        const qlonglong ti = t.at(i).toLongLong();
+        if (ti < a || ti > b) continue;
+        if (haveMask && valid.at(i).toInt() == 0) continue;
+        if (!std::isfinite(v.at(i).toDouble())) continue;
+        const double m = mean.at(i).toDouble();
+        if (!r.any) { r.mn = r.mx = m; r.iMin = r.iMax = i; r.any = true; continue; }
+        if (m < r.mn) { r.mn = m; r.iMin = i; }
+        if (m > r.mx) { r.mx = m; r.iMax = i; }
+    }
+    return r;
 }
 
 int main()
@@ -1120,7 +1178,7 @@ int main()
         // `st.rateOk` against a map without it gets `undefined` — falsy — and the PK RATE tile
         // would print "—" on every card of every swing, which is exactly as wrong as printing a
         // fabricated number.
-        for (const char *k : { "peakSigma", "rateSigma", "edgeOk", "rateOk", "tRateUs" })
+        for (const char *k : { "peakSigma", "rateSigma", "edgeOk", "rateOk", "tRateUs", "extremumOk" })
             checkTrue(k, a.contains(QLatin1String(k)));
         // …and nothing that was there before was lost on the way: three QML files and one probe
         // read these by name.
@@ -1136,6 +1194,296 @@ int main()
         checkEqD("all-ones rate", ones.value(QStringLiteral("rate")).toDouble(),
                                   a.value(QStringLiteral("rate")).toDouble());
         checkTrue("all-ones is not partial", !ones.value(QStringLiteral("partial")).toBool());
+    }
+
+    // ── C17 / Phase 6: THE DRAWN LINE AND THE PEAK TILE ARE ONE REDUCTION ────────
+    //
+    // The chart no longer strokes the persisted samples: it strokes ChartMetrics::windowedMean, the
+    // per-sample 40 ms centred mean that reduceExtremum ranks. That is only defensible — design §4
+    // principle 1 forbids display-only smoothing outright — if the line and the numbers are provably
+    // THE SAME ARITHMETIC, so this suite asserts the identity BIT-EXACTLY, on every fixture in this
+    // file, in the form the user can check by eye on the panel:
+    //
+    //     summaryMasked(win).min / .max / .peak  ==  the extremes of the drawn line inside win
+    //
+    // Bit-exact rather than toleranced because a 1e-6 agreement would still permit two
+    // implementations of one window, which is the state Phase 2 removed for the tiles and Phase 6
+    // removes for the stroke. If this suite fails, either the reducer stopped sharing its per-sample
+    // mean (C16) or the chart started smoothing on its own; both are the same defect.
+    //
+    // ⚠ ONE KNOWN WAY THIS COULD FAIL WITHOUT EITHER BEING TRUE, stated so a failure is diagnosable
+    // rather than mysterious: reduceExtremum breaks ties with a RELATIVE MARGIN (series_reduce.h
+    // detail::improves, 1e-12·|value|) so the reported instant is not decided by float noise, while
+    // the scan below takes the strict extremum. Two candidate means within that margin of each other
+    // would therefore hand the two different WINNERS — same curve, same window, a difference in the
+    // twelfth digit. No fixture here has one (the ties that exist are exact, and both rules keep the
+    // EARLIEST of those), and a real failure of that kind would still be worth reading: it would mean
+    // the PEAK tile is not quite the line's extremum, by a hair, on a curve that flat.
+    {
+        std::printf("windowedMean — the line the chart draws IS the reduction the tiles report\n");
+
+        // Every fixture this file already exercises, in one table, so a case added to the reducer
+        // suite is one line away from being covered here too. The windows are the ones each of those
+        // cases uses, including the degenerate ones (inside a bridged run, all bridged, one valid
+        // sample, a mask too short to honour) — those are where an identity most easily stops holding.
+        struct Fixture { const char *name; QVariantList t, v, mask; qlonglong a, b; };
+
+        const int          nSpike = 25, iSpike = 12;
+        const QVariantList tSpike = tAt(nSpike);
+        QVariantList       vSpike = flatV(nSpike, 4.0);
+        vSpike[iSpike] = 99.0;
+        const qlonglong    spikeEnd = qlonglong(nSpike - 1) * kDtUs;
+
+        const QVariantList tRamp25 = tAt(25);
+        const QVariantList vRamp25 = rampV(25, 0.0, 1.0);
+        const QVariantList bridged = onesMask(25, 8, 15);        // t = 64…120 ms bridged
+
+        const QVariantList tCoarse{ qlonglong(0),      qlonglong(100000), qlonglong(200000),
+                                    qlonglong(300000), qlonglong(400000) };
+        const QVariantList vCoarse{ 0.0, 1.0, 2.0, 3.0, 4.0 };
+
+        QVariantList allBridged;
+        for (int i = 0; i < 25; ++i) allBridged.append(0);
+        QVariantList oneGood;
+        for (int i = 0; i < 25; ++i) oneGood.append(i == 12 ? 1 : 0);
+
+        const Fixture fixtures[] = {
+            { "spike, whole series",      tSpike, vSpike, {},                 0, spikeEnd },
+            { "spike, interior window",   tSpike, vSpike, {},                 5 * kDtUs, 20 * kDtUs },
+            { "spike masked out",         tSpike, vSpike, onesMask(nSpike, iSpike, iSpike),
+                                                                              0, spikeEnd },
+            { "spike, short mask",        tSpike, vSpike, onesMask(13, 12, 12), 0, spikeEnd },
+            { "spike, over-length mask",  tSpike, vSpike, onesMask(nSpike + 4, iSpike, iSpike),
+                                                                              0, spikeEnd },
+            { "still noise (σ=1)",        tAt(51), noiseV(51, 1.0), {},        0, 50 * kDtUs },
+            { "clean ramp, interior",     tAt(51), rampV(51, 10.0, 2.0), {},   13 * kDtUs, 37 * kDtUs },
+            { "sparse 27 ms ramp",        tAt(21, 27000), rampV(21, 0.0, 2.7), {},
+                                                                              2 * 27000, 18 * 27000 },
+            { "two samples",              QVariantList{ qlonglong(0), qlonglong(kDtUs) },
+                                          QVariantList{ 1.0, 2.0 }, {},       0, kDtUs },
+            { "bridged run, across it",   tRamp25, vRamp25, bridged,           12 * kDtUs, 24 * kDtUs },
+            { "bridged run, inside it",   tRamp25, vRamp25, bridged,           10 * kDtUs, 13 * kDtUs },
+            { "bridged run, clean tail",  tRamp25, vRamp25, bridged,           17 * kDtUs, 24 * kDtUs },
+            { "coarse 100 ms strides",    tCoarse, vCoarse, {},                140000, 300000 },
+            // ⚠ F2's CASE, AND IT IS UNMASKED: a window narrower than the sample spacing, on a
+            // perfectly healthy series. No sample lies in [140, 190] ms, so there is no drawn point
+            // in there to be the peak and `partial` cannot say so (it needs an honoured mask). This
+            // is the fixture that pins `extremumOk` as the thing that does.
+            { "coarse, tight unmasked win", tCoarse, vCoarse, {},                140000, 180000 },
+            { "coarse, one bridged",      tCoarse, vCoarse, QVariantList{ 1, 0, 1, 1, 1 },
+                                                                              140000, 300000 },
+            { "all bridged",              tRamp25, vRamp25, allBridged,        0, 24 * kDtUs },
+            { "one valid sample",         tRamp25, vRamp25, oneGood,           0, 24 * kDtUs },
+        };
+
+        for (const Fixture &f : fixtures) {
+            const QVariantMap  st   = cm.summaryMasked(f.t, f.v, f.mask, f.a, f.b);
+            const QVariantMap  wm   = cm.windowedMean(f.t, f.v, f.mask);
+            const QVariantList mean = wm.value(QStringLiteral("mean")).toList();
+            const QVariantList sig  = wm.value(QStringLiteral("sigma")).toList();
+
+            std::printf("  · %s\n", f.name);
+            // Parallel to the curve, always — a caller indexes mean[i] against value[i] and a
+            // shorter array would silently draw a truncated line (PpChartPlot._meanOf falls back to
+            // the raw values on a length mismatch, so this is what keeps the mean reachable at all).
+            checkEqI("   length == the curve", mean.size(), qMin(f.t.size(), f.v.size()));
+            checkEqI("   sigma is parallel too", sig.size(), mean.size());
+
+            const MeanExtremes ex = meanExtremesOver(f.t, f.v, mean, f.mask, f.a, f.b);
+            if (!ex.any) {
+                // NO ANCHOR IN THE WINDOW — a window wholly inside a bridged run, an all-bridged
+                // series, or (F2) a window narrower than the sample spacing on a series with nothing
+                // wrong with it. summaryMasked then reports the two interpolated EDGES as its
+                // extremes: there is no drawn measurement in there to be equal to, and asserting one
+                // would be asserting that a gap has a peak.
+                //
+                // ⚠ WHAT IS ASSERTED IS THAT THE CARD SAYS SO — and it is `extremumOk`, not
+                // `partial`. This assertion used to test `partial`, which ENCODED THE BUG: partial
+                // requires an honoured mask, so it is true for the two masked cases here and
+                // unreachable for the unmasked one, where the tile printed an interpolated edge as
+                // PEAK wearing no chip at all. extremumOk is exactly this branch's condition
+                // (loR.ok && hiR.ok), whatever the mask says.
+                checkTrue("   no valid anchor ⇒ extremumOk false",
+                          !st.value(QStringLiteral("extremumOk")).toBool());
+                continue;
+            }
+            // …and the converse, on every fixture that HAS an anchor: the flag is not simply always
+            // false, and a display gating PEAK on it does not lose the tile everywhere.
+            checkTrue("   an anchor in the window ⇒ extremumOk true",
+                      st.value(QStringLiteral("extremumOk")).toBool());
+            checkExactD("   min == min of the drawn line",
+                        st.value(QStringLiteral("min")).toDouble(), ex.mn);
+            checkExactD("   max == max of the drawn line",
+                        st.value(QStringLiteral("max")).toDouble(), ex.mx);
+            // PEAK is the extremum of larger MAGNITUDE (chart_metrics.cpp's rule, unchanged), so the
+            // tile a reader actually sees is pinned as well and not merely its two ingredients.
+            const bool   maxWins = std::fabs(ex.mx) >= std::fabs(ex.mn);
+            const double peak    = maxWins ? ex.mx : ex.mn;
+            checkExactD("   peak == that value on the line",
+                        st.value(QStringLiteral("peak")).toDouble(), peak);
+            // …AT THE SAME INSTANT, which is what makes the PEAK marker land ON the stroke rather
+            // than near it: tPeakUs is the winning anchor's own sample time.
+            checkEqI("   tPeakUs == that sample's time",
+                     st.value(QStringLiteral("tPeakUs")).toLongLong(),
+                     f.t.at(maxWins ? ex.iMax : ex.iMin).toLongLong());
+            // …and the ± beside the tile is that sample's own entry in the sigma array, so the chart
+            // could draw the tile's uncertainty at the tile's point with no second reduction.
+            if (sig.size() == mean.size())          // guarded: the length check above already failed
+                checkExactD("   peakSigma == sigma at that sample",
+                            st.value(QStringLiteral("peakSigma")).toDouble(),
+                            sig.at(maxWins ? ex.iMax : ex.iMin).toDouble());
+        }
+
+        // ── F2 IN FULL: the window with nothing in it, on a series with nothing wrong ──────
+        //
+        // The loop above pins `extremumOk` false here. This pins the other half — WHY a new flag was
+        // needed rather than reading one of the two that already existed — because that is the part a
+        // future reader will want to argue with.
+        std::printf("  · F2: a window narrower than the sample spacing, unmasked\n");
+        const QVariantMap tight = cm.summary(tCoarse, vCoarse, 140000, 180000);
+        checkTrue("   extremumOk false (no sample in the window)",
+                  !tight.value(QStringLiteral("extremumOk")).toBool());
+        // `edgeOk` is TRUE: the series has readings, just not in here. So it cannot report this.
+        checkTrue("   …but edgeOk is true — the curve has readings",
+                  tight.value(QStringLiteral("edgeOk")).toBool());
+        // …and `partial` is FALSE and unreachable: it requires an honoured mask, and this series
+        // declares nothing. Before extremumOk the card therefore printed an interpolated edge as PEAK
+        // with no chip of any kind — the confident absurdity, with the tile's Phase 6 claim ("a point
+        // on the drawn line") false at the same time.
+        checkTrue("   …and `partial` cannot fire on an unmasked series",
+                  !tight.value(QStringLiteral("partial")).toBool());
+        // The proof that PEAK is not on the line here: it equals an EDGE (the interpolated value at
+        // 140 ms or 180 ms, 1.4 and 1.8 on this ramp-shaped coarse series), not any sample's mean.
+        // (180, not 190: an edge within ±15 ms of a sample is that sample's median, not a fallback.)
+        checkExactD("   peak is the window's own edge, not a measurement",
+                    tight.value(QStringLiteral("peak")).toDouble(),
+                    tight.value(QStringLiteral("end")).toDouble());
+        checkEqD("   …which is the interpolation at 180 ms",
+                 tight.value(QStringLiteral("end")).toDouble(), 1.8);
+    }
+
+    // ── windowedMean: what an INVALID sample contributes, which is nothing ────────
+    {
+        std::printf("windowedMean — an invalid sample is absent, and keeps its raw value\n");
+        const int n = 25, iSpike = 12;
+        const QVariantList t = tAt(n);
+        QVariantList v = flatV(n, 4.0);
+        v[iSpike] = 99.0;
+
+        const QVariantList bare = cm.windowedMean(t, v, QVariantList{})
+                                    .value(QStringLiteral("mean")).toList();
+        // UNMASKED: at 8 ms a ±20 ms window holds five samples, so every anchor within 20 ms of the
+        // spike means (4·4 + 99)/5 = 23 exactly — including the spike's own anchor. This is the
+        // number the tile prints, and after Phase 6 it is also the height the line reaches: the
+        // reader can no longer see a 99 on the curve beside a 23 on the card and conclude that one
+        // of the two is lying.
+        checkExactD("the spike's own sample draws as 23", bare.at(iSpike).toDouble(), 23.0);
+        checkExactD("…and so does its neighbour",         bare.at(iSpike - 1).toDouble(), 23.0);
+        checkExactD("…while a sample 40 ms away is untouched", bare.at(iSpike - 5).toDouble(), 4.0);
+        checkExactD("the tile agrees with the line",
+                    cm.summary(t, v, 0, qlonglong(n - 1) * kDtUs).value(QStringLiteral("peak")).toDouble(),
+                    23.0);
+
+        // MASKED: the invalid entry carries its RAW value — the chart draws the bridged run dashed at
+        // the persisted numbers, exactly as it did before this phase — and it enters no neighbour's
+        // window, so the baseline either side is 4.0 to the last bit rather than 4-point-something.
+        const QVariantList masked = cm.windowedMean(t, v, onesMask(n, iSpike, iSpike))
+                                      .value(QStringLiteral("mean")).toList();
+        checkExactD("an invalid entry is the RAW value", masked.at(iSpike).toDouble(), 99.0);
+        checkExactD("…and pulls no neighbour up",        masked.at(iSpike - 1).toDouble(), 4.0);
+        checkExactD("…on either side",                   masked.at(iSpike + 1).toDouble(), 4.0);
+
+        // ⚠ THE COUNTER-CASE, and it is the one that proves this is a reduction and not a smoother:
+        // on a straight line a symmetric window's mean IS the value at its centre, so the drawn line
+        // lies exactly on the samples and a real excursion is not shrunk. Interior anchors only —
+        // the first two and last two have one-sided support, which is a real property of the window
+        // and not what this pins.
+        const QVariantList tr = tAt(51), vr = rampV(51, 10.0, 2.0);
+        const QVariantList mr = cm.windowedMean(tr, vr, QVariantList{})
+                                  .value(QStringLiteral("mean")).toList();
+        bool   onTheLine = true;
+        double maxSigma  = 0.0;
+        const QVariantList sr = cm.windowedMean(tr, vr, QVariantList{})
+                                  .value(QStringLiteral("sigma")).toList();
+        for (int i = 2; i < 49; ++i) {
+            if (mr.at(i).toDouble() != vr.at(i).toDouble()) onTheLine = false;
+            const double si = std::fabs(sr.at(i).toDouble());
+            if (si > maxSigma) maxSigma = si;      // no <algorithm> needed for one comparison
+        }
+        checkTrue("on a ramp the drawn line IS the samples", onTheLine);
+        // …and it says so: a straight line leaves no residual, so the mean it carries has no noise.
+        // "± 0" on a noiseless curve, never the slope dressed up as uncertainty.
+        //
+        // ⚠ A BOUND, NOT AN EXACT ZERO, and the distinction is the whole content of the assertion.
+        // windowMeanSigma fits a local line and sums the squared residuals of a curve that IS that
+        // line, so the residuals are cancellations of numbers of order 100 — they come back as a few
+        // ulps rather than as 0.0, and on this ramp the SSE guard (`sse > 0.0`) does not always
+        // catch them. That is arithmetic, not a claim. What WOULD be a claim is a σ big enough to
+        // print: the smallest thing formatUncertainty renders is 0.05, and a σ that was really the
+        // ramp's own slope (the failure this case exists to catch — the first version of this
+        // reducer reported ±0.08 on a noiseless ramp) is tens of millions of times the bound. So the
+        // measured maximum is PRINTED, and the gate is 1e-9: anything between that and a visible
+        // number is a real bias and must be reported, never toleranced by widening this line.
+        char sigLabel[128];
+        std::snprintf(sigLabel, sizeof(sigLabel),
+                      "…and its σ is 0 to float noise (max |σ| = %.3g)", maxSigma);
+        checkTrue(sigLabel, maxSigma < 1e-9);
+    }
+
+    // ── windowedMean: the short-mask rule, and an empty curve ─────────────────────
+    {
+        std::printf("windowedMean — a malformed mask is no mask, and an empty curve is empty\n");
+        const int n = 25;
+        const QVariantList t = tAt(n);
+        QVariantList v = flatV(n, 4.0);
+        v[12] = 99.0;
+
+        // A mask covering 13 of 25 samples is a malformed document, not a partial statement, and is
+        // discarded WHOLESALE — the same rule summaryMasked, measuredAt and the QML index form apply,
+        // asserted here as an element-wise identity with the unmasked line so the DRAWN CURVE cannot
+        // become the fourth opinion about it.
+        const QVariantList none  = cm.windowedMean(t, v, QVariantList{})
+                                     .value(QStringLiteral("mean")).toList();
+        const QVariantList trunc = cm.windowedMean(t, v, onesMask(13, 12, 12))
+                                     .value(QStringLiteral("mean")).toList();
+        bool identical = trunc.size() == none.size();
+        for (int i = 0; identical && i < none.size(); ++i)
+            identical = trunc.at(i).toDouble() == none.at(i).toDouble();
+        checkTrue("short mask ⇒ the unmasked line, sample for sample", identical);
+
+        // An EMPTY mask is "every sample valid" (C4) — the state of every series written before the
+        // field existed — so it must be the same identity in the other direction.
+        const QVariantList ones = cm.windowedMean(t, v, onesMask(n))
+                                    .value(QStringLiteral("mean")).toList();
+        bool sameAsOnes = ones.size() == none.size();
+        for (int i = 0; sameAsOnes && i < none.size(); ++i)
+            sameAsOnes = ones.at(i).toDouble() == none.at(i).toDouble();
+        checkTrue("all-ones mask ⇒ the same line", sameAsOnes);
+
+        // An empty curve returns two EMPTY lists rather than nothing at all: the QML side reads
+        // `wm.mean` unconditionally in _plottable, and a missing key there would decorate `undefined`
+        // onto the series and take every trace on the panel with it.
+        const QVariantMap empty = cm.windowedMean(QVariantList{}, QVariantList{}, QVariantList{});
+        checkTrue("empty curve ⇒ mean key present",  empty.contains(QStringLiteral("mean")));
+        checkTrue("empty curve ⇒ sigma key present", empty.contains(QStringLiteral("sigma")));
+        checkEqI("empty curve ⇒ empty mean",  empty.value(QStringLiteral("mean")).toList().size(),  0);
+        checkEqI("empty curve ⇒ empty sigma", empty.value(QStringLiteral("sigma")).toList().size(), 0);
+
+        // A ONE-SAMPLE curve is a point, not a trace (the chart refuses to plot it), but it must not
+        // be a special case here: its own window holds itself, so it draws at its own value.
+        const QVariantList one = cm.windowedMean(QVariantList{ qlonglong(0) }, QVariantList{ 7.0 },
+                                                 QVariantList{}).value(QStringLiteral("mean")).toList();
+        checkEqI("one sample ⇒ one entry", one.size(), 1);
+        checkExactD("…at its own value",   one.at(0).toDouble(), 7.0);
+
+        // ⚠ MISMATCHED ARRAYS: the length follows the CURVE (the shorter of the two), which is what
+        // makes PpChartPlot._meanOf's `mean.length === t_us.length` guard fire and fall back to the
+        // persisted values. A malformed pair draws the raw curve; it does not draw a truncated one.
+        QVariantList vShort;
+        for (int i = 0; i < 20; ++i) vShort.append(4.0);
+        checkEqI("mismatched arrays ⇒ min length",
+                 cm.windowedMean(t, vShort, QVariantList{}).value(QStringLiteral("mean")).toList().size(),
+                 20);
     }
 
     // ── domainFor: the manifest says where a metric means something ───────────────

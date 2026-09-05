@@ -127,6 +127,16 @@ public:
     //   the mask is the only thing that ever says so; a series with nothing readable at all is
     //   `edgeOk` false, not `partial` true.
     //
+    //   `extremumOk` (bool) — false when NO VALID SAMPLE LIES INSIDE [startUs, endUs], so
+    //   min/max/peak/range came from the two interpolated EDGES rather than from any measurement in
+    //   the window. Ordinary rather than exotic: any window narrower than the sample spacing does it
+    //   on a healthy series. It matters more since Phase 6, because the PEAK tile is otherwise a
+    //   point on the DRAWN LINE (windowedMean) by construction and this is the one state where it
+    //   cannot be — no point of the line is in the window to be the peak. `partial` does not cover
+    //   it: that flag needs an honoured mask, so an unmasked series in this state wore no chip at
+    //   all. Gate PEAK/MIN/MAX/RANGE on it exactly as PK RATE is gated on `rateOk`; Δ and the
+    //   window edges are NOT gated, being statements about instants, which is what the edges are.
+    //
     //   `edgeOk` (bool) — false when the series carries NO valid sample: every sample bridged, or
     //   an empty curve. There is then nothing for the window edges to interpolate between, and
     //   start/end/min/max/peak/range/delta are all 0.0 — a "PEAK 0, Δ 0, RANGE 0" card that reads
@@ -162,6 +172,52 @@ public:
     Q_INVOKABLE QVariantMap summaryMasked(const QVariantList &tUs, const QVariantList &value,
                                           const QVariantList &valid,
                                           qint64 startUs, qint64 endUs) const;
+
+    // ── THE LINE THE CHART DRAWS — and it is the same reduction the PEAK tile reports ──────
+    //
+    //   { mean: [double…], sigma: [double…] }, both as long as the curve.
+    //
+    // ⚠ WHY THIS EXISTS AT ALL, because "the chart draws a smoothed curve" is exactly the sentence
+    // design §4 principle 1 forbids. Phases 1–3 left the drawn line alone deliberately: the stroke
+    // passed through every persisted sample, and only the STROKE said which of it was measured. The
+    // cost was that the eye and the card were reading different things — the tile said PEAK 23
+    // because a peak has to hold for 40 ms, while the line beside it visibly touched 99, and a
+    // reader can only conclude that one of the two is lying. Phase 6 closes that by drawing THE
+    // CANDIDATE MEANS reduceExtremum ranks (series_reduce.h windowedMeans): the same per-sample
+    // centred 40 ms mean, the same ≥3-sample symmetric widening, the same exclusion of invalid
+    // samples. So `summaryMasked().peak` IS an extremum of this array inside the window, bit-exact
+    // and by construction rather than by agreement — which is what chart_metrics_test pins on every
+    // fixture — and the drawn line is a REDUCTION with a definition, not a display filter with a
+    // taste.
+    //
+    // ⚠ AND IT IS NOT A SMOOTHER, in the one sense that matters: nothing here changes what is
+    // persisted (design §6 — no `value` moves in 5.1–5.3), and the raw samples stay ON SCREEN as
+    // faint dots behind the line (PpChartPlot.showRawDots, default on). A reader can always see the
+    // wobble the reduction is refusing to call a peak. There is no OTHER smoothing anywhere in the
+    // chart: this one shared reduction or nothing.
+    //
+    // An INVALID sample's entry is its RAW value, not a mean, and that is deliberate: it is not a
+    // measurement, it is drawn dashed, and it may not draw on its valid neighbours (nor they on it).
+    // So a caller can draw `mean` for the WHOLE curve and the bridged runs still show the persisted
+    // values, exactly as they did before this phase. `ok` is NOT exported — the QML side already
+    // decides validity per sample (PpChartPlot._measured, the same short-mask rule), and a second
+    // copy of that verdict crossing the bridge is a second chance to disagree with it.
+    //
+    // `sigma[i]` is the standard error of that mean about a local straight line — the same number
+    // `peakSigma` carries for the winning window (never the spread of the samples; see
+    // series_reduce.h detail::windowMeanSigma). It is 0 where the reduction has nothing to say, and
+    // meaningless on an invalid entry (a raw value has no window), which costs nothing because the
+    // ±σ ribbon draws over measured runs only.
+    //
+    // Short-mask rule as everywhere else in this class (see measuredAt): a `valid` list shorter than
+    // the curve is a malformed document and is discarded wholesale.
+    //
+    // ⚠ NOT FOR PER-FRAME BINDINGS, and this one is the most expensive call in the class: it
+    // marshals two whole series in and two whole arrays back. It is called ONCE PER DATA CHANGE, in
+    // PpMetricChart._plottable, where the result is decorated onto the series entry as `mean` /
+    // `meanSigma` and every plot, sparkline, crosshair and tooltip reads it from there.
+    Q_INVOKABLE QVariantMap windowedMean(const QVariantList &tUs, const QVariantList &value,
+                                         const QVariantList &valid) const;
 
     // Where a metric's geometry MEANS something:
     //   { firstPhase:int, lastPhase:int, firstNarrowed:bool, lastNarrowed:bool, narrowed:bool }

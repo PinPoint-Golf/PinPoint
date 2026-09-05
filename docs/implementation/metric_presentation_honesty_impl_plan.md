@@ -249,7 +249,7 @@ Run unattended per Mark's instruction (5 Sept): the C15 gate decides promotion.
 
 ---
 
-## Phase 6 — Draw the windowed mean `[ ]`
+## Phase 6 — Draw the windowed mean `[x]` (6.5, Mark's look, outstanding)
 
 Agreed with Mark 5 Sept ("I think the chart should draw the windowed mean"), after Phase 5.
 Rationale: Phases 1–3 deliberately never changed the drawn line ("one curve"), so the wobble
@@ -257,14 +257,14 @@ looks the same to the eye. Drawing the SAME 40 ms centred mean (with the ≥3-sa
 the PEAK tile already reduces on keeps "one curve" honest: line and numbers come from one
 reduction, and the raw samples stay visible as faint dots behind the line.
 
-- [ ] **6.1** `ChartMetrics::windowedMean(t_us, value, valid)` in C++ (delegating to
+- [x] **6.1** `ChartMetrics::windowedMean(t_us, value, valid)` in C++ (delegating to
       series_reduce's centred-mean at every valid sample; invalid samples excluded and kept
       invalid), exposed to QML once per data change.
-- [ ] **6.2** `PpChartPlot.qml` draws the mean as the trace; raw samples as dots at low opacity
+- [x] **6.2** `PpChartPlot.qml` draws the mean as the trace; raw samples as dots at low opacity
       (a `showRawDots` default on); invalid runs still dashed; hover reads the mean and shows the
       raw sample in the tooltip; the σ ribbon follows the mean.
-- [ ] **6.3** `PpSegmentBrush.qml` sparkline uses the same mean.
-- [ ] **6.4** Probe prints mean-vs-raw at the peak index; tests pin that the tiles equal the drawn
+- [x] **6.3** `PpSegmentBrush.qml` sparkline uses the same mean.
+- [x] **6.4** Probe prints mean-vs-raw at the peak index; tests pin that the tiles equal the drawn
       line at the peak (PEAK == max of the drawn mean inside the window).
 - [ ] **6.5** One windowed look by Mark.
 
@@ -545,3 +545,28 @@ reduction, and the raw samples stay visible as faint dots behind the line.
   the promotion (July sessions: the address must NOT be smoothed harder where the golfer moves —
   the gate predicts that, the run should confirm it); per-joint aRef for the ankle if an
   ankle-derived series ever fails the gate; a ms-based lead is already in.
+
+- **2026-09-05 (Phase 6 built)** — `windowedMeans` in series_reduce.h (reduceExtremum now ranks
+  exactly those entries; 7 fixtures × 3 windows bit-exact identity); `ChartMetrics::windowedMean`
+  computes nothing of its own; `_plottable` decorates `mean`/`meanSigma` once per data change;
+  PpChartPlot draws the mean as the trace, the raw samples as one PathMultiline of 1 px round-cap
+  ticks per series at 0.35 opacity (25 Shapes on the All preset, no item instantiation; off in the
+  compact tile), invalid runs still dashed at the raw value, ribbon and crosshair on the mean;
+  hover/legend/@IMPACT read the mean with "raw N" beside them; the legend Δ baseline is the mean
+  at Address; the brush sparkline draws the mean. 16-fixture bit-exact test that summaryMasked's
+  peak/min/max/tPeakUs/peakSigma are points on the drawn line. Probe on the promoted 08-18 swing:
+  ONE CURVE ✓ on all four series (e.g. sway PEAK 21.2462 == max of the drawn mean, raw 21.8542
+  at that index), raw dots drew on all three facets. 6.5 (Mark's windowed look) remains.
+
+- **2026-09-05 (Phase 6 CLOSED, committed)** — Review round: reduceExtremum now computes the
+  residual σ once for the winner (was per candidate: ~2× iterations, 40× allocations on a
+  per-brush-frame path); `extremumOk` gates PEAK/MIN/MAX/RANGE where a window holds no valid
+  anchor (an unmasked series with a window narrower than the sample spacing used to show an
+  interpolated edge as PEAK with no chip — the test had encoded the bug and now pins the fix);
+  one composed mask (valid ∧ in-domain ∧ finite) feeds EVERY reduction on the panel, so legacy
+  swings analysed before the producers wrote domains reduce domain-honestly too (their narrowed
+  cards can change, and `partial` becomes reachable on them); non-finite samples are omitted from
+  every polyline; hover row and legend chip resolve one index per row (no per-frame marshalling);
+  "@end" reads the drawn line; dot stroke never rounds to zero; the probe reads the
+  PathMultiline back. 9 suites green; probe ONE CURVE ✓ on all series. One test expectation
+  corrected by me (an edge within ±15 ms of a sample is that sample's median, not a fallback).

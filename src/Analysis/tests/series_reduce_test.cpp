@@ -33,6 +33,12 @@
 // (at 27 ms spacing a ±20 ms window held one sample, so the reducer did nothing at
 // all across the address and the backswing).
 //
+// §10 is Phase 6's contract: the chart DRAWS windowedMeans, so PEAK has to be the
+// largest point ON THE DRAWN LINE inside the window — bit-for-bit, on every fixture,
+// for any [from, to]. It is an identity test, which means it can pass on two wrong
+// numbers; so it also pins the line's own values against §1's and §2's derivations,
+// which are the numbers the card has always reported.
+//
 // ⚠ EVERY EXPECTED NUMBER IS DERIVED IN A COMMENT BESIDE IT, not observed from a
 // run. If one of these fails, read the derivation before changing the number: the
 // window arithmetic is the thing under test.
@@ -123,6 +129,107 @@ struct Lcg {
         return acc - 6.0;
     }
 };
+
+// ── §10's reference reduction of the drawn line ──────────────────────────────
+// An identity assertion needs the other side written independently of the code under test: the
+// largest (or smallest) windowedMeans entry among the VALID samples whose t lies in [from, to] —
+// the same candidate bounds reduceExtremum uses — with ties kept at the EARLIEST sample.
+//
+// ⚠ THE TIE RULE IS THE ONE PLACE THIS REFERENCE COULD LEGITIMATELY DIVERGE. detail::improves makes
+// a candidate beat the incumbent by 1e-12 RELATIVE before it takes the instant, where the bare `>`
+// below takes it on the last bit. So the two rankings can differ only on a pair of candidates that
+// are within the last few bits of each other and yet NOT bit-equal. These fixtures are ramps and
+// 5-sample means of 0.2-sd noise — neighbouring means are hundredths apart — and the one place they
+// do coincide (the sparse 27 ms pair whose windows widen to the same three samples) they coincide
+// EXACTLY, being the same three doubles summed in the same order. If a future fixture ever fails
+// one of these by ~1e-16, it is this reference that is wrong and not the reducer, and the fix is to
+// rank with detail::improves here.
+struct Query { int64_t from; int64_t to; };
+
+struct RefEx {
+    double  value = 0.0;
+    double  sigma = 0.0;
+    int64_t atUs  = 0;
+    bool    ok    = false;
+};
+
+static RefEx pickFromLine(const Series &r, const std::vector<WindowedMean> &line, const Query &q,
+                          bool wantMax)
+{
+    RefEx best;
+    for (size_t i = 0; i < r.t.size() && i < line.size(); ++i) {
+        if (r.t[i] < q.from || r.t[i] > q.to) continue;     // candidates only, as the reducer does
+        if (!line[i].ok) continue;                          // not a measurement: cannot be the peak
+        const bool better = wantMax ? (line[i].value > best.value) : (line[i].value < best.value);
+        if (best.ok && !better) continue;                   // ties keep the earliest
+        best.value = line[i].value;
+        best.sigma = line[i].sigma;
+        best.atUs  = r.t[i];
+        best.ok    = true;
+    }
+    return best;
+}
+
+// The whole of C16 on one fixture: the vector's shape, its invalid entries, and — for three
+// different queries, max and min — that reduceExtremum reports exactly the extreme of the drawn
+// line, at exactly that sample's instant, with exactly that entry's sigma.
+static void checkDrawnLine(const char *label, const Series &r, const ReduceConfig &cfg,
+                           const Query (&qs)[3])
+{
+    const SeriesView s = view(r);
+
+    // ⚠ ONE call, with NO query in it. The support is query-independent by design (see
+    // reduceExtremum's comment), which is exactly what lets this single vector be the reference for
+    // all three windows below — and what lets the chart compute it once per data change.
+    std::vector<WindowedMean> line;
+    windowedMeans(s, line, cfg);
+
+    char buf[320];
+    std::snprintf(buf, sizeof buf, "%s: one entry per sample (%zu)", label, r.t.size());
+    CHECK(buf, line.size() == r.t.size());
+
+    bool okIsValidity = true, invalidIsRaw = true;
+    for (size_t i = 0; i < line.size() && i < r.t.size(); ++i) {
+        if (line[i].ok != s.isValid(i)) okIsValidity = false;
+        if (!line[i].ok) {
+            // The raw value, bit-for-bit — including a NaN, which is raw too. It is drawn dashed
+            // and it is not a measurement, so it carries no sigma.
+            const bool raw = (line[i].value == r.v[i])
+                             || (std::isnan(line[i].value) && std::isnan(r.v[i]));
+            if (!raw || line[i].sigma != 0.0) invalidIsRaw = false;
+        }
+    }
+    std::snprintf(buf, sizeof buf, "%s: ok is exactly validity (bridged and non-finite alike)",
+                  label);
+    CHECK(buf, okIsValidity);
+    std::snprintf(buf, sizeof buf,
+                  "%s: an invalid entry is the RAW value with sigma 0, never a mean", label);
+    CHECK(buf, invalidIsRaw);
+
+    for (int k = 0; k < 3; ++k) {
+        for (int pass = 0; pass < 2; ++pass) {
+            const bool    wantMax = (pass == 0);
+            const Reduced red = reduceExtremum(s, qs[k].from, qs[k].to, wantMax, cfg);
+            const RefEx   ref = pickFromLine(r, line, qs[k], wantMax);
+            std::printf("      %s [%lld,%lld] %s: reducer %.17g @%lld s%.6g | line %.17g @%lld\n",
+                        label, static_cast<long long>(qs[k].from),
+                        static_cast<long long>(qs[k].to), wantMax ? "max" : "min", red.value,
+                        static_cast<long long>(red.atUs), red.sigma, ref.value,
+                        static_cast<long long>(ref.atUs));
+            std::snprintf(buf, sizeof buf,
+                          "%s [%lld,%lld] %s: == the drawn line's extreme, BIT-EXACT, at that "
+                          "sample's instant", label, static_cast<long long>(qs[k].from),
+                          static_cast<long long>(qs[k].to), wantMax ? "max" : "min");
+            CHECK(buf, red.ok == ref.ok
+                           && (!ref.ok || (red.value == ref.value && red.atUs == ref.atUs)));
+            std::snprintf(buf, sizeof buf,
+                          "%s [%lld,%lld] %s: sigma is that same entry's sigma", label,
+                          static_cast<long long>(qs[k].from), static_cast<long long>(qs[k].to),
+                          wantMax ? "max" : "min");
+            CHECK(buf, !ref.ok || red.sigma == ref.sigma);
+        }
+    }
+}
 
 int main()
 {
@@ -628,6 +735,174 @@ int main()
                     rate.value);
         CHECK("rate: coincident timestamps do not divide by zero, and the pair pulls the fit",
               rate.ok && near(rate.value, 7.764227642276, 1e-9));
+    }
+
+    // ── 10) THE DRAWN LINE IS THE CANDIDATE SET (Phase 6, contract C16) ──────
+    {
+        std::printf("=== 10) windowedMeans: PEAK == the largest point on the drawn line ===\n");
+        // The chart draws windowedMeans and the card reports reduceExtremum. Before Phase 6 the
+        // chart drew the RAW samples, so the PEAK dot sat above the line it was drawn on wherever
+        // the window had pulled the peak in — the reader saw a number the picture contradicted.
+        // Both now come from detail::windowMeanValueAt, and this is what holds it: the shape
+        // of the vector, its invalid entries, and the identity for three different queries on seven
+        // fixtures. Every window's answer is checked against ONE query-independent vector.
+        //
+        // The value walk and the σ walk are two functions (the reducer ranks values and gathers the
+        // residual only for the winner, which is what keeps a brush-drag frame affordable), so the
+        // σ half of the identity is pinned separately below as well.
+
+        // Shape first, on the degenerate inputs.
+        std::vector<WindowedMean> line;
+        line.push_back(WindowedMean{ 1.0, 2.0, true });        // must be CLEARED, not appended to
+        Series none;
+        windowedMeans(view(none), line, cfg);
+        CHECK("windowedMeans: an empty series gives an empty vector (and clears the caller's)",
+              line.empty());
+        windowedMeans(SeriesView{}, line, cfg);
+        CHECK("windowedMeans: a null view is empty too, not a crash", line.empty());
+        MetricSeries emptyMetric;
+        windowedMeans(viewOf(emptyMetric), line, cfg);
+        CHECK("windowedMeans: viewOf(empty MetricSeries) likewise", line.empty());
+
+        // ⚠ THE IDENTITY CAN PASS ON TWO WRONG NUMBERS, so the line's own values are pinned to the
+        // derivations §1 and §2 already argue. Clean ramp, 8 ms, v = 0.08 i:
+        //   entry 99 — window {97,98,99} (772000 is not a sample) ⇒ (7.76+7.84+7.92)/3 = 7.84,
+        //              which is §1's PEAK, and 7.92 is the raw sample the dots still show;
+        //   entry 0  — window {0,1,2} ⇒ (0.00+0.08+0.16)/3 = 0.08, §1's minimum;
+        //   entry 50 — window {48..52} ⇒ (3.84+3.92+4.00+4.08+4.16)/5 = 4.00, the ramp itself: a
+        //              centred mean of a straight line is the line, which is why drawing this
+        //              instead of the samples changes nothing a reader could object to.
+        const Series ramp = makeRamp(8000, 100, 10.0);
+        windowedMeans(view(ramp), line, cfg);
+        CHECK("line: the ramp's last entry is 7.84 — §1's PEAK, not the 7.92 sample under it",
+              line.size() == 100 && near(line[99].value, 7.84, 1e-12)
+                  && near(line[99].value, refMax, 1e-12) && near(ramp.v[99], 7.92, 1e-12));
+        CHECK("line: the ramp's first entry is 0.08 — §1's minimum", near(line[0].value, 0.08, 1e-12));
+        CHECK("line: mid-ramp the line IS the ramp (a centred mean of a straight line)",
+              near(line[50].value, 4.0, 1e-12) && line[50].sigma <= 1e-9);
+
+        // The spike fixture: the line's own peak is anchor 52 at 23.16 — the number §2 derives for
+        // the card — and the entry AT the spike is 23.0 ((3.84+3.92+99+4.08+4.16)/5), not 99. The
+        // 99 is still on screen as a raw dot; it is just not the line and not the peak.
+        Series spike = makeRamp(8000, 100, 10.0);
+        spike.v[50] = 99.0;
+        windowedMeans(view(spike), line, cfg);
+        CHECK("line: at the spike the line reads 23.0, and the spike's own 99 is not on it",
+              near(line[50].value, 23.0, 1e-9) && spike.v[50] == 99.0);
+        CHECK("line: the line's peak entry is §2's 23.16 at anchor 52, and the card reports that "
+              "very double",
+              near(line[52].value, 23.16, 1e-9)
+                  && reduceExtremum(view(spike), 0, 792000, true, cfg).value == line[52].value);
+
+        // The masked fixtures. §4's spike-on-an-invalid-sample, plus a BRIDGED RUN (samples 20..25,
+        // the shape metric_channel.h draws across a gated stretch) so an anchor beside a gap has to
+        // widen past it, and §4's NaN/inf pair.
+        Series masked = spike;
+        masked.valid.assign(masked.t.size(), 1u);
+        masked.valid[50] = 0u;
+        for (int i = 20; i <= 25; ++i) masked.valid[size_t(i)] = 0u;
+        windowedMeans(view(masked), line, cfg);
+        CHECK("line: the bridged spike entry carries its RAW 99 and ok=false — dashed, not averaged",
+              !line[50].ok && line[50].value == 99.0 && line[50].sigma == 0.0);
+        CHECK("line: every sample of the bridged RUN is ok=false and raw",
+              !line[20].ok && !line[25].ok && line[22].value == masked.v[22] && line[19].ok
+                  && line[26].ok);
+        // Anchor 19's ±20 ms window would hold 17..21, but 20 and 21 are bridged, so it holds
+        // 17, 18, 19 — three valid samples, so no widening is needed — ⇒ (1.36+1.44+1.52)/3 = 1.44.
+        CHECK("line: an anchor beside the gap averages only the VALID samples in its window",
+              line[19].ok && near(line[19].value, 1.44, 1e-12));
+
+        Series nonfinite = makeRamp(8000, 100, 10.0);
+        nonfinite.v[50] = std::numeric_limits<double>::quiet_NaN();
+        nonfinite.v[60] = std::numeric_limits<double>::infinity();
+        windowedMeans(view(nonfinite), line, cfg);
+        CHECK("line: a NaN sample is INVALID — ok=false, its raw NaN, sigma 0",
+              !line[50].ok && std::isnan(line[50].value) && line[50].sigma == 0.0);
+        CHECK("line: an inf sample likewise",
+              !line[60].ok && std::isinf(line[60].value) && line[60].sigma == 0.0);
+        // Anchor 48's window is [364000, 404000] = samples 46..50, and 50 is the NaN, so it
+        // averages the four valid ones: (3.68+3.76+3.84+3.92)/4 = 3.80. Anchor 62's is samples
+        // 60..64 with 60 the inf ⇒ (4.88+4.96+5.04+5.12)/4 = 5.00. Neither is NaN, and neither is
+        // the 5-sample mean — the non-finite sample was DROPPED, not repaired.
+        CHECK("line: a non-finite sample's neighbours average the valid four (3.80 / 5.00), and no "
+              "entry anywhere is non-finite",
+              line[48].ok && near(line[48].value, 3.80, 1e-12) && line[62].ok
+                  && near(line[62].value, 5.00, 1e-12));
+        bool allFinite = true;
+        for (const WindowedMean &w : line)
+            if (!std::isfinite(w.sigma) || (w.ok && !std::isfinite(w.value))) allFinite = false;
+        CHECK("line: every OK entry is finite and every sigma is finite", allFinite);
+
+        // Noise (§3's fixture, same LCG seed ⇒ the same numbers) and the sparse 27 ms grid (§5's),
+        // so the identity is pinned where the window WIDENS as well as where it is inert.
+        Lcg    rng;
+        Series noise;
+        for (int i = 0; i < 80; ++i) {
+            noise.t.push_back(8000 * int64_t(i));
+            noise.v.push_back(100.0 + 0.2 * rng.gauss());
+        }
+        const Series sparse = makeRamp(27000, 20, 10.0);        // 0..513000, v = 0.27 i
+
+        // Three windows each: the whole series (what the review card asks for), an interior span
+        // (what the engine's phase grid asks for), and a tail span that starts mid-curve.
+        const Query rampQs[3]   = { { 0, 792000 }, { 200000, 400000 }, { 600000, 792000 } };
+        const Query noiseQs[3]  = { { 0, 632000 }, { 96000, 288000 },  { 320000, 632000 } };
+        const Query sparseQs[3] = { { 0, 513000 }, { 81000, 270000 },  { 270000, 513000 } };
+
+        checkDrawnLine("ramp",      ramp,      cfg, rampQs);
+        checkDrawnLine("spike",     spike,     cfg, rampQs);
+        checkDrawnLine("masked",    masked,    cfg, rampQs);
+        checkDrawnLine("nonfinite", nonfinite, cfg, rampQs);
+        checkDrawnLine("noise",     noise,     cfg, noiseQs);
+        checkDrawnLine("sparse27",  sparse,    cfg, sparseQs);
+
+        // And the mixed 8→27 ms grid from §5, where the widening fires at one end of the SAME
+        // series and is inert at the other.
+        Series mixed;
+        for (int i = 0; i < 10; ++i) mixed.t.push_back(27000 * int64_t(i));
+        for (int k = 1; k <= 20; ++k) mixed.t.push_back(243000 + 8000 * int64_t(k));
+        for (int64_t t : mixed.t) mixed.v.push_back(10.0 * (double(t) * 1.0e-6));
+        const Query mixedQs[3] = { { 0, 403000 }, { 0, 243000 }, { 243000, 403000 } };
+        checkDrawnLine("mixed", mixed, cfg, mixedQs);
+
+        // ⚠ THE σ SPLIT'S OWN REGRESSION GUARD. The value is ranked at every candidate, but the
+        // residual is gathered ONCE — for the winner, after the loop (detail::windowMeanSigmaAt) —
+        // while windowedMeans gathers one per entry from reused scratch. Two call sites of one
+        // arithmetic, so the card's error bar has to be the drawn line's error bar AT THE WINNING
+        // SAMPLE, to the last bit; if the split ever re-gathers a different window (a stale `h`, a
+        // different validity rule) this is where it shows. The 8 ms grids make the winner's index
+        // atUs / 8000, which is asserted rather than assumed.
+        windowedMeans(view(spike), line, cfg);
+        const Reduced spikeMax = reduceExtremum(view(spike), 0, 792000, true, cfg);
+        const size_t  spikeWin = size_t(spikeMax.atUs / 8000);
+        CHECK("split: the card's sigma IS the line's sigma at the winning sample (spike, σ ≈ 15.5)",
+              spikeMax.ok && spikeWin < line.size() && spike.t[spikeWin] == spikeMax.atUs
+                  && spikeMax.value == line[spikeWin].value
+                  && spikeMax.sigma == line[spikeWin].sigma && spikeMax.sigma > 1.0);
+
+        windowedMeans(view(noise), line, cfg);
+        const Reduced noiseMax = reduceExtremum(view(noise), 0, 632000, true, cfg);
+        const size_t  noiseWin = size_t(noiseMax.atUs / 8000);
+        CHECK("split: and on noise, where sigma is neither 0 nor enormous (≈ sd/√5)",
+              noiseMax.ok && noiseWin < line.size() && noise.t[noiseWin] == noiseMax.atUs
+                  && noiseMax.value == line[noiseWin].value
+                  && noiseMax.sigma == line[noiseWin].sigma && noiseMax.sigma > 0.0);
+
+        // The sparse tie, stated on the LINE rather than on the reducer: anchors 18 and 19 widen to
+        // the same three samples {17,18,19}, so their entries are BIT-EQUAL and §5's "earliest
+        // wins" is a statement about equal points on the drawn line, not about float noise.
+        windowedMeans(view(sparse), line, cfg);
+        CHECK("line: the sparse tie is an exact one — entries 18 and 19 are the same double",
+              line[18].value == line[19].value && near(line[18].value, 4.86, 1e-9));
+        CHECK("line: and the reducer hands the instant to the earlier of the two",
+              reduceExtremum(view(sparse), 0, 513000, true, cfg).atUs == 486000);
+
+        // A window with no candidate in it: both sides say nothing, and neither says zero.
+        windowedMeans(view(ramp), line, cfg);            // back to the ramp's line for the indices
+        const Reduced empty = reduceExtremum(view(ramp), 800000, 900000, true, cfg);
+        const RefEx   eref  = pickFromLine(ramp, line, Query{ 800000, 900000 }, true);
+        CHECK("identity: a query with no candidate is ok=false on BOTH sides",
+              !empty.ok && !eref.ok);
     }
 
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);

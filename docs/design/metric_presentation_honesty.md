@@ -110,8 +110,13 @@ would produce implausible tiles on a perfectly measured curve with ordinary nois
 
 ## 4. Principles
 
-1. **One curve.** The chart draws exactly the persisted series, the tooltip prints it, and the
-   reducers grade it. No display-only smoothing in QML. A chart that shows one thing while the
+1. **One curve.** The chart draws the same reduction the tiles are computed on, the tooltip
+   prints it, and the reducers grade it. No display-only smoothing in QML. (Restated
+   2026-09-05, Phase 6: the drawn line is the 40 ms centred windowed mean that the PEAK tile
+   already ranks — `windowedMeans` in series_reduce.h — so PEAK is a point on the line by
+   construction; the persisted raw samples stay on screen as faint dots behind it, invalid
+   runs still draw dashed at the raw value, and the phase dots keep the producers' readings.
+   Nothing persisted changes.) A chart that shows one thing while the
    card and the corridors compute another is where dishonesty starts, and it hides the problem
    from the person who needs to fix the measurement.
 2. **Absence over fabrication.** Where the geometry is degenerate or the metric is outside its

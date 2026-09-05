@@ -36,7 +36,21 @@
 // an ABSENT state (`rateOk` false: no window long enough, or too few valid samples in it), and it
 // prints "—" with its unit hidden rather than a fitted-from-nothing 0. The same for PEAK and Δ on a
 // series with no valid sample anywhere (`edgeOk` false), where every window number is a 0 read out
-// of nothing rather than a flat curve.
+// of nothing rather than a flat curve. PEAK has a third absence of its own (`extremumOk` false): a
+// window narrower than the sample spacing contains no measurement to have an extremum, so the tile
+// prints "—" rather than the interpolated edge the reducer falls back to.
+//
+// Since Phase 6 the CHART DRAWS those same windowed means (ChartMetrics.windowedMean, decorated as
+// `mean` by PpMetricChart._plottable), so the PEAK tile here is now a point on the line beside it —
+// bit-exactly, by construction, and pinned that way in chart_metrics_test. Nothing in this file
+// changed for that: it already reduced on those means.
+//
+// ⚠ AND @IMPACT READS THE MEAN TOO. It was the last reading on this panel taken from a raw sample,
+// which after Phase 6 meant the number a coach quotes could differ from the curve under the
+// crosshair by the height of a single frame's wobble — one panel, two answers, at the one instant a
+// reader trusts most. It is now the drawn value at the impact sample, with the RAW value one hover
+// away in its tooltip (same "raw N" the chart's hover row prints). No reading on this panel is
+// anything other than the line beside it.
 
 pragma ComponentBehavior: Bound
 
@@ -100,22 +114,46 @@ ColumnLayout {
              : b === "good"      ? Theme.colorGood
              :                     Theme.colorText
     }
+    // WHICH ARRAY IS THE CURVE (Phase 6): `mean` — the 40 ms centred windowed mean the chart strokes
+    // and summaryMasked reduces — where the host decorated one (PpMetricChart._plottable), else the
+    // persisted `value`. The same one-line rule as PpChartPlot._meanOf, PpMetricChart._meanOf and
+    // PpSegmentBrush._meanOf: this component takes a `series` list from anywhere and may not assume
+    // another prepared it. The predicate is asked by name rather than by comparing the returned array
+    // against s.value, so no drawing or display decision rests on object identity across the bridge.
+    //
+    // ⚠ THE REDUCERS ARE STILL FED RAW. summaryMasked below gets `value`, never this — reducing a
+    // reduction would window the curve twice and no tile would mean what its definition says.
+    function _hasMean(s) {
+        return !!(s && s.mean && s.t_us && s.mean.length === s.t_us.length)
+    }
+    function _meanOf(s) {
+        return root._hasMean(s) ? s.mean : s.value
+    }
+
     // The measured-at-an-instant test, in JS for the reason chart_metrics.h gives: cm.measuredAt
     // marshals the whole series per call, and these bindings re-evaluate as the window moves.
     // Same rule, same short-mask discipline (a mask that does not cover the curve is discarded).
+    //
+    // ⚠ isFinite IS FOLDED IN (F5), which is why the nearest sample is now found before the
+    // short-mask early return rather than after it: a series with NO mask must still not print a NaN
+    // as a reading — `formatBare` on one renders "nan", in the band colour, as the card's headline
+    // number. Same fold as PpChartPlot._measured and SeriesView::isValid, for the same reason:
+    // nothing in the pipeline should produce a NaN, which is exactly why it cannot be assumed.
     function _measuredAt(s, t) {
         if (s.validFromUs !== undefined && s.validToUs !== undefined
             && s.validToUs > s.validFromUs && (t < s.validFromUs || t > s.validToUs))
             return false
         var tt = s.t_us
         if (!tt || tt.length === 0) return true
-        if (!s.valid || s.valid.length < tt.length) return true
         var best = -1, bd = Infinity
         for (var i = 0; i < tt.length; ++i) {
             var d = Math.abs(tt[i] - t)
             if (d < bd) { bd = d; best = i }
         }
-        return best < 0 || s.valid[best] !== 0
+        if (best < 0) return true
+        if (s.value && !isFinite(s.value[best])) return false
+        if (!s.valid || s.valid.length < tt.length) return true
+        return s.valid[best] !== 0
     }
 
     // The card's window: the active window CLAMPED to this metric's phase domain, because the
@@ -164,9 +202,18 @@ ColumnLayout {
                 required property var modelData
                 readonly property real   winStartUs: root._winStart(card.modelData)
                 readonly property real   winEndUs:   root._winEnd(card.modelData)
+                // ⚠ `reduceValid`, NOT `valid` (F4): the host composes `valid` AND in-domain into one
+                // mask (PpMetricChart._reduceMask) and every reduction on the panel is given that
+                // same one. Without it, a swing analysed before the producers marked out-of-domain
+                // samples invalid has those samples averaged into the anchors beside the domain
+                // boundary — a hip line past impact, which measures rotation and not tilt, feeding a
+                // tile that design §5.1 says it must not reach — and the tile then differs from the
+                // line the chart drew, which was told the truth. Falls back to `valid` for a caller
+                // that has not composed one, which is the pre-Phase-6 behaviour exactly.
                 readonly property var    st:  cm.summaryMasked(card.modelData.t_us,
                                                          card.modelData.value,
-                                                         card.modelData.valid || [],
+                                                         card.modelData.reduceValid
+                                                         || card.modelData.valid || [],
                                                          card.winStartUs, card.winEndUs)
                 // THE DOMAIN CLAMP EMPTIED THE WINDOW: the reader picked a span (IMP→P8 on a
                 // P1–P7 metric, say) lying wholly outside where this metric means anything. The
@@ -207,6 +254,26 @@ ColumnLayout {
                 // guards are for a QML file that outlives a C++ change.)
                 readonly property bool   valueOk: card.st.edgeOk !== false && !card.collapsed
 
+                // ── PEAK's OWN GATE (F2) ────────────────────────────────────────────────────
+                //
+                // `extremumOk` false means NO VALID SAMPLE LIES IN THIS WINDOW, so min/max/peak/range
+                // were taken from the two interpolated EDGES — between measurements, not from any.
+                // It happens on a perfectly healthy series whenever the window is narrower than the
+                // sample spacing (a brush pinched to 50 ms on a 100 ms-strided address, or a phase
+                // pair closer together than a frame), and on an UNMASKED series `partial` cannot
+                // report it: that chip needs an honoured mask, so this state used to wear nothing at
+                // all and read as an ordinary PEAK.
+                //
+                // Since Phase 6 the tile claims more than it used to — the drawn line IS the reduced
+                // curve, so PEAK is advertised as a point on it — and this is the one state where no
+                // point of the line is in the window to be that peak. So it prints "—", exactly as
+                // PK RATE does on `rateOk` false. Δ SEGMENT and @IMPACT are deliberately NOT gated on
+                // it: both are statements about INSTANTS, which is precisely what the edges are.
+                //
+                // `!== false` like valueOk, not `=== true` like rateOk: a map from a C++ that never
+                // heard of the key must not blank the tile on every card of every swing.
+                readonly property bool   peakOk: card.valueOk && card.st.extremumOk !== false
+
                 // Value at the impact landmark — a fixed anatomical reference, so it reads the
                 // whole series (not the view window); the more useful thing to compare against
                 // PEAK. Falls back to the window @end when no impact is known.
@@ -219,11 +286,35 @@ ColumnLayout {
                 // colour. It is NOT gated on the window: this tile is deliberately not
                 // window-scoped, and an emptied window says nothing about the impact landmark.
                 readonly property bool   impMeasured: root.impactUs > 0
-                                                      && root._measuredAt(card.modelData, root.impactUs)
+                                                      && root._measuredAt(card.modelData,
+                                                                          root.impactUs)
+                //
+                // ⚠ THE MEAN, NOT THE RAW SAMPLE (Phase 6). The chart strokes the 40 ms windowed
+                // mean, so a tile quoting the persisted sample at impact could differ from the curve
+                // the reader is looking at by one frame's wobble — the panel would carry two answers
+                // for one instant, which is the exact failure design §4 principle 1 is about. The raw
+                // sample is not lost: `impRaw` puts it in this tile's tooltip, the same "raw N" the
+                // chart's hover row prints, so the reduction stays visible rather than silent.
+                //
+                // The FALLBACK is still `st.end`, the window's ±15 ms median edge, for a series with
+                // no known impact — a different reduction, but it is answering a different question
+                // ("where did this window leave off") and it always did.
                 readonly property real   impVal: root.impactUs > 0
                                                  ? labels.valueAtNearest(card.modelData.t_us,
-                                                       card.modelData.value, root.impactUs)
+                                                       root._meanOf(card.modelData), root.impactUs)
                                                  : card.st.end
+                // The persisted sample under that reading, for the tooltip. "" when there is no
+                // reduction to explain (the tile IS the raw sample then) or no impact landmark, so
+                // the tooltip is offered only where it has something to add. Same σ step as the
+                // reading above: a raw sample is a reading like any other (design §5.3), and a
+                // tooltip printing finer digits than the tile it explains would be the false
+                // precision the step rule exists to remove, reintroduced in small type.
+                readonly property string impRaw: (root.impactUs > 0 && root._hasMean(card.modelData))
+                                                 ? qsTr("raw %1").arg(cm.formatBare(
+                                                       labels.valueAtNearest(card.modelData.t_us,
+                                                           card.modelData.value, root.impactUs),
+                                                       card.modelData.unit, card.sig))
+                                                 : ""
                 // "" = NO VERDICT, and it must stay neutral rather than green: bandAtNearest now
                 // refuses to answer when the nearest phaseSample is a frame or more away, or when
                 // there are none, instead of defaulting to "good" off nothing at all.
@@ -375,14 +466,35 @@ ColumnLayout {
                             // 5° here. NO ± beside this tile — @IMPACT is a reading of the curve at
                             // an instant, and the only uncertainty on it is the series σ already
                             // stated in the header chip. A second ± would double-count it.
-                            Text { Layout.fillWidth: true; elide: Text.ElideRight
-                                   text: card.impMeasured
-                                         ? cm.formatBare(card.impVal, card.modelData.unit, card.sig)
-                                         : "—"
-                                   font.family: Theme.fontData
-                                   font.pixelSize: Theme.fontSzData
-                                   color: card.impMeasured ? root._bandColor(card.bnd)
-                                                           : Theme.colorText3 }
+                            Text {
+                                id: impText
+                                Layout.fillWidth: true; elide: Text.ElideRight
+                                text: card.impMeasured
+                                      ? cm.formatBare(card.impVal, card.modelData.unit, card.sig)
+                                      : "—"
+                                font.family: Theme.fontData
+                                font.pixelSize: Theme.fontSzData
+                                color: card.impMeasured ? root._bandColor(card.bnd)
+                                                        : Theme.colorText3
+                                // THE RAW SAMPLE, ONE HOVER AWAY. The tile is the drawn line's value
+                                // at impact; this is what the frame actually recorded there. It is a
+                                // tooltip rather than a second line because the 2×2 grid has no room
+                                // for a fifth number and because the reduction is the reading — the
+                                // raw sample is the evidence behind it, which is what a tooltip is
+                                // for. The chart's hover row prints the same pair side by side for a
+                                // reader who wants it at every instant, not just at impact.
+                                //
+                                // Offered ONLY where it adds something: no impact landmark, no mean,
+                                // or nothing measured there ⇒ no tooltip. A "raw N" beside a "—"
+                                // would say the reading exists and is being withheld.
+                                HoverHandler { id: impHover }
+                                ToolTip.visible: impHover.hovered && impText.ToolTip.text.length > 0
+                                ToolTip.delay: 400
+                                ToolTip.text: (card.impMeasured && card.impRaw.length > 0)
+                                              ? qsTr("Drawn value at impact (40 ms windowed mean). "
+                                                     + "Recorded sample there: %1.").arg(card.impRaw)
+                                              : ""
+                            }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -392,12 +504,12 @@ ColumnLayout {
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
                             Text { Layout.fillWidth: true; elide: Text.ElideRight
-                                   text: card.valueOk
+                                   text: card.peakOk
                                          ? cm.formatBare(card.st.peak, card.modelData.unit, card.sig)
                                          : "—"
                                    font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData
-                                   color: card.valueOk ? Theme.colorText : Theme.colorText3 }
+                                   color: card.peakOk ? Theme.colorText : Theme.colorText3 }
                             // ── ± ON THE PEAK, AND WHY IT IS ITS OWN LINE ────────────────────
                             //
                             // summaryMasked's `peakSigma`: the standard error of the winning 40 ms
@@ -419,11 +531,12 @@ ColumnLayout {
                             // fixed-width token on the value's row leaves the value and the ± both
                             // elided into ellipses. A caveat that is illegible is worse than absent.
                             //
-                            // Hidden with the value, not merely dimmed: `valueOk` false means the
-                            // series carries no valid sample at all and peakSigma came back 0 out of
-                            // nothing, and "± 0" under an em dash claims a measured exactness.
+                            // Hidden with the value, not merely dimmed: `peakOk` false means either
+                            // that the series carries no valid sample at all or that none of them is
+                            // in this window, and peakSigma came back 0 out of nothing either way —
+                            // "± 0" under an em dash claims a measured exactness.
                             Text { Layout.fillWidth: true; elide: Text.ElideRight
-                                   visible: card.valueOk
+                                   visible: card.peakOk
                                    text: cm.formatUncertainty(card.st.peakSigma)
                                    font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro

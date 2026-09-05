@@ -29,6 +29,11 @@
 // out-of-domain runs are drawn dashed and dimmer rather than as measurements. A sparkline is
 // small, but it is the surface a reader uses to DECIDE WHERE TO LOOK, so a single bridged
 // outlier flattening the whole trace into a spike sends them to the wrong place.
+//
+// Since Phase 6 the sparkline draws the same 40 ms WINDOWED MEAN the chart's traces do (`mean`,
+// decorated by PpMetricChart._plottable from ChartMetrics.windowedMean) — one reduction across both
+// surfaces, so the shape a reader picks a window from is the shape they then read. No raw dots here:
+// at this height the reduced line is the legible one, and the raw samples are on the chart it scopes.
 
 pragma ComponentBehavior: Bound
 
@@ -94,11 +99,27 @@ Item {
         return s.validFromUs !== undefined && s.validToUs !== undefined
                && s.validToUs > s.validFromUs
     }
+    // ⚠ isFinite folded in (F5), the same rule as PpChartPlot._measured and SeriesView::isValid: a
+    // NaN is not a measurement, and one NaN in a ShapePath's point list takes out the whole run —
+    // a single bad sample would erase a series' sparkline rather than show a gap where it is.
     function _measured(s, i) {
         if (root._hasDomain(s) && (s.t_us[i] < s.validFromUs || s.t_us[i] > s.validToUs))
             return false
+        if (!isFinite(s.value[i])) return false
         if (!s.valid || s.valid.length < s.t_us.length) return true
         return s.valid[i] !== 0
+    }
+    // WHICH ARRAY IS THE CURVE (Phase 6): `mean` — the 40 ms centred windowed mean the chart's
+    // traces stroke and the summary tiles reduce — where the host decorated one, else the persisted
+    // `value`. The same one-line rule as PpChartPlot._meanOf and PpMetricChart._meanOf, because all
+    // three are handed a `series` list and none may assume another prepared it. (No `_hasMean`
+    // companion here: nothing on this strip has to ask whether a reduction exists, only what to draw.)
+    //
+    // NO RAW DOTS HERE, and that is deliberate: this strip is 40px tall and is used to DECIDE WHERE
+    // TO LOOK, not to read values off. The reduced shape is the legible one at this size; the raw
+    // samples are one click away on the chart the strip scopes.
+    function _meanOf(s) {
+        return (s && s.mean && s.t_us && s.mean.length === s.t_us.length) ? s.mean : s.value
     }
 
     // Each series split into runs of one drawn state, flattened across all series:
@@ -112,6 +133,7 @@ Item {
         for (var k = 0; k < (root.series ? root.series.length : 0); ++k) {
             var s = root.series[k]
             if (!s || !s.t_us || !s.value || s.t_us.length < 2) continue
+            var mv = root._meanOf(s)
 
             var solid = []
             for (var i = 0; i < s.t_us.length; ++i) solid.push(root._measured(s, i))
@@ -128,7 +150,13 @@ Item {
                                           : root.axisStartUs
             var winB = root._hasDomain(s) ? Math.min(root.axisEndUs, s.validToUs)
                                           : root.axisEndUs
-            var st = cm.summaryMasked(s.t_us, s.value, s.valid || [], winA, Math.max(winA, winB))
+            // `reduceValid` (`valid` AND in-domain, composed once by PpMetricChart._reduceMask) so
+            // this strip's scale is taken over the same samples the chart's line and cards were told
+            // about — on an older swing whose producer never marked the out-of-domain run, `valid`
+            // alone would let a post-impact hip-line reading set the height of the shape a reader
+            // picks their window from. Falls back to `valid` for an undecorated caller.
+            var st = cm.summaryMasked(s.t_us, s.value, s.reduceValid || s.valid || [],
+                                      winA, Math.max(winA, winB))
             var lo = st.min, hi = st.max
             if (!(hi > lo)) { lo = st.min; hi = st.min + 1 }   // flat or nothing to scale by
 
@@ -143,8 +171,12 @@ Item {
                 }
                 if (b > a) {
                     var t = [], v = []
-                    for (var j = a; j <= b; ++j) { t.push(s.t_us[j]); v.push(s.value[j]) }
-                    out.push({ color: s.color, dashed: !solid[i0], t: t, v: v, lo: lo, hi: hi })
+                    // Non-finite points omitted, not drawn — see _measured: a NaN in the list would
+                    // cost the whole run, and the strip is where a reader looks for the SHAPE.
+                    for (var j = a; j <= b; ++j)
+                        if (isFinite(mv[j])) { t.push(s.t_us[j]); v.push(mv[j]) }
+                    if (t.length > 1)
+                        out.push({ color: s.color, dashed: !solid[i0], t: t, v: v, lo: lo, hi: hi })
                 }
                 i0 = i1 + 1
             }
@@ -166,18 +198,25 @@ Item {
             // silently draws a DashLine solid and the distinction would vanish.
             preferredRendererType: spark.modelData.dashed ? Shape.GeometryRenderer
                                                           : Shape.CurveRenderer
-            // ⚠ CLAMPED TO THE STRIP, and the clamp is load-bearing since Phase 2. `lo`/`hi` are
-            // ChartMetrics' min/max, which are now the extremes of the 40 ms WINDOWED MEAN — by
-            // construction strictly inside the raw range they used to be. The polyline still draws
-            // the RAW samples, so an excursion sharper than 40 ms maps outside [lo, hi]: on
-            // rich_7iron shoulderPlaneAngle reached 11.9 % of the strip height above the band and
-            // hipLineTilt 24 % below it, drawing over the phase tags underneath.
+            // ⚠ CLAMPED TO THE STRIP, and it is still load-bearing after Phase 6 — for a
+            // narrower reason than before. `lo`/`hi` are ChartMetrics' min/max, the extremes of the
+            // 40 ms WINDOWED MEAN over the axis window clipped to the metric's domain, and the
+            // polyline now draws that same mean: every MEASURED sample inside that window is
+            // therefore inside [lo, hi] by construction, which it was NOT while this drew the raw
+            // samples (on rich_7iron shoulderPlaneAngle then reached 11.9 % of the strip height above
+            // the band and hipLineTilt 24 % below it, over the phase tags underneath).
             //
-            // Clamping rather than rescaling to the raw extremes on purpose: the outlier-resistant
-            // scale is the whole point of the choice made at :119-123 — scaled to include a bridged
-            // outlier the sparkline collapses to a flat line with one spike, which is the wrong
-            // picture for someone choosing a window from this shape. A clipped peak reads as "it
-            // goes off the top here", which is true; a flattened curve reads as "nothing happens
+            // What can still leave the band is the part the reducer was never allowed to see: an
+            // INVALID sample carries its raw value in `mean` (it is not a measurement and may not be
+            // averaged), and an out-of-domain sample is excluded from lo/hi for the same reason — so
+            // the dashed runs can still be a spike, and they are exactly the runs that must not be
+            // allowed to set the scale.
+            //
+            // Clamping rather than rescaling to those extremes on purpose: the outlier-resistant
+            // scale is the whole point of the choice made where lo/hi are taken — scaled to include a
+            // bridged outlier the sparkline collapses to a flat line with one spike, which is the
+            // wrong picture for someone choosing a window from this shape. A clipped peak reads as
+            // "it goes off the top here", which is true; a flattened curve reads as "nothing happens
             // here", which is not.
             function ys(v) {
                 var lo = spark.modelData.lo, hi = spark.modelData.hi

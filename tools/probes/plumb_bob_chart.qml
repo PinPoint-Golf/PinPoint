@@ -25,7 +25,9 @@
 //   5. Reports, per series, everything the chart layer decorates and derives — including the
 //      Phase 3 display step and the exact strings the summary card prints.
 //   6. Reports whether the ±σ ribbon drew, by asking the plots, not by asserting the switch.
-//   7. Walks the live tree read-only to cross-check the on-screen chart.
+//   7. Reports what the traces DRAW (Phase 6: the windowed mean) and whether the raw samples are
+//      still on screen behind them — again by asking the plots, not the switch.
+//   8. Walks the live tree read-only to cross-check the on-screen chart.
 //
 // ⚠ WHY A PRIVATE PpMetricChart AND NOT THE ONE ON SCREEN. The on-screen chart is a lazily
 // created panel delegate whose existence depends on the user's persisted View layout
@@ -540,7 +542,13 @@ Item {
                 + "   ← §5.1: this must contribute nothing to a card")
 
         // ── summaryMasked, unclamped vs domain-clamped ───────────────────────────────────
-        var mask = raw.valid || []
+        // ⚠ THE COMPOSED MASK, WHICH IS WHAT THE APP REDUCES THROUGH (F4): PpMetricChart._plottable
+        // folds `valid` AND the phase domain into one array (`reduceValid`) and hands the same one to
+        // every reduction on the panel, so a probe reading `raw.valid` here would be reporting numbers
+        // no surface in the app computes — and would report a false ⛔ on the ONE CURVE check below
+        // for any swing whose producer never marked its out-of-domain samples. Falls back to
+        // `raw.valid` if the decoration is ever absent.
+        var mask = p.reduceValid || raw.valid || []
         var ws = chart.viewStartUs, we = chart.viewEndUs
         function sm(a, b) {
             try { return cm.summaryMasked(t, v, mask, Math.round(a), Math.round(b)) }
@@ -646,6 +654,67 @@ Item {
                                       : "  (no σ — §7 item 3 not judgeable on this series)")
                             + "   tile = '" + cm.formatBare(csum.peak, raw.unit, sg) + "'"
                             + "   nearest sample " + probe.ms(pbd) + " from tPeak")
+
+                // ── PHASE 6 / C17: IS THE TILE A POINT ON THE LINE THE CHART DRAWS? ───────
+                //
+                // The line above compares PEAK against the persisted SAMPLE at tPeak, which after
+                // Phase 6 is no longer what the chart strokes: the trace draws ChartMetrics
+                // .windowedMean, the same per-sample 40 ms centred mean reduceExtremum ranks. So the
+                // interesting comparison is now a three-way one — mean[pi] (what is drawn),
+                // value[pi] (what was recorded, drawn as a faint dot behind it) and csum.peak (what
+                // the tile says) — and the first and third must be the SAME DOUBLE, not merely close.
+                //
+                // Printed here AS WELL AS asserted in chart_metrics_test, because a fixture cannot
+                // show what the reduction is worth on a real curve: the mean-vs-raw gap on
+                // hipLineTilt at its peak IS the wobble the design is arguing about, in the metric's
+                // own units, on a swing Mark has watched.
+                if (pi >= 0) {
+                    var wm = null
+                    try { wm = cm.windowedMean(t, v, mask) }
+                    catch (e) { probe.miss("cm.windowedMean (" + e + ")") }
+                    if (wm && wm.mean && wm.mean.length === t.length) {
+                        // The extremum of the DRAWN line over the same clamped window the card
+                        // reduced, found by walking the array the chart draws — the identity is
+                        // worth nothing if it is checked by calling the reducer a second time.
+                        var bMin = Infinity, bMax = -Infinity, nAnchor = 0
+                        var hasMask = mask && mask.length >= t.length
+                        for (var q3 = 0; q3 < t.length; ++q3) {
+                            if (t[q3] < cs || t[q3] > ce) continue
+                            if (hasMask && mask[q3] === 0) continue
+                            // A non-finite sample is not a measurement and cannot be an anchor —
+                            // SeriesView::isValid folds this in on the C++ side, so a scan that did
+                            // not would compare the reducer's answer against a different set of
+                            // candidates and report a false ⛔ (F5).
+                            if (!isFinite(v[q3])) continue
+                            nAnchor++
+                            if (wm.mean[q3] < bMin) bMin = wm.mean[q3]
+                            if (wm.mean[q3] > bMax) bMax = wm.mean[q3]
+                        }
+                        var drawn = (nAnchor === 0) ? null
+                                  : (Math.abs(bMax) >= Math.abs(bMin) ? bMax : bMin)
+                        probe.w("   PEAK on the DRAWN   = mean[" + pi + "] = "
+                                + probe.num(wm.mean[pi], 4)
+                                + "   vs raw value[" + pi + "] = " + probe.num(v[pi], 4)
+                                + "   (the reduction moved the line "
+                                + probe.num(Math.abs(wm.mean[pi] - v[pi]), 4) + " "
+                                + cm.shortUnit(raw.unit) + " here)"
+                                + "   meanSigma = " + probe.num(wm.sigma[pi], 4))
+                        probe.w("   ONE CURVE (C17)     = "
+                                + (nAnchor === 0
+                                   ? "no valid anchor in the clamped window — the card read its "
+                                     + "interpolated edges, so there is no drawn peak to match"
+                                   : (drawn === csum.peak
+                                      ? "✓ csum.peak === max/min of the drawn mean over "
+                                        + nAnchor + " anchor(s), EXACTLY (" + probe.num(drawn, 6) + ")"
+                                      : "⛔ csum.peak " + probe.num(csum.peak, 6)
+                                        + " ≠ the drawn extremum " + probe.num(drawn, 6)
+                                        + " — the tile and the stroke are NOT one reduction")))
+                    } else if (wm) {
+                        probe.miss("cm.windowedMean returned " + (wm.mean ? wm.mean.length : "no")
+                                   + " mean(s) for " + t.length + " samples — the chart will fall "
+                                   + "back to drawing the raw curve")
+                    }
+                }
                 if (stepv > 1)
                     probe.w("   step rule cost      = PEAK "
                             + cm.formatBare(csum.peak, raw.unit) + " → "
@@ -824,12 +893,110 @@ Item {
                     + "on, so the run splitting in PpChartPlot._sigmaRuns is at fault")
     }
 
+    // ── 7. THE DRAWN LINE (Phase 6 / C17) ────────────────────────────────────────────────
+    //
+    // Same shape as the ribbon report above, and for the same reason: the only honest way to say
+    // whether the raw dots drew is to ask the DRAWING CODE, not to infer it from showRawDots being
+    // true. Two questions, and they are reported apart: how many series were HANDED dot data
+    // (PpChartPlot.rawDotRuns, the model its Repeater got) and how many polylines the PathMultiline
+    // elements are actually HOLDING (their pathCount, read back after assignment). The second is the
+    // claim; the first only tells you what was asked for.
+    //
+    // Why it matters enough to have its own section: Phase 6 changed what the stroke IS. Drawing a
+    // reduction is only defensible while the samples it reduces are still on screen, so the dots are
+    // not decoration — they are the half of the change that keeps it honest. A plot stroking the mean
+    // with no dots behind it is display-only smoothing, which design §4 principle 1 forbids outright,
+    // and this line is how a run says which of the two shipped.
+    function reportDrawnLine() {
+        probe.w("")
+        probe.w("═══ 7. THE DRAWN LINE = THE WINDOWED MEAN (design §4 principle 1, Phase 6) ═══")
+
+        var plots = [], dotShapes = [], guard = 0
+        function walk(it) {
+            if (!it || guard++ > 8000) return
+            // Duck-typed, like the ribbon walk: PpChartPlot is a module-local type with nothing for
+            // `instanceof` to test from out here, and rawDotRuns exists on exactly one component.
+            if (it.rawDotRuns !== undefined) plots.push(it)
+            // ⚠ AND THE DOT SHAPES THEMSELVES (F7). rawDotRuns is the length of the JS model the
+            // Repeater was GIVEN; pathCount is what the PathMultiline is holding after the assignment.
+            // Only the second can fail, and it is the one thing here no test can reach: `paths` takes
+            // a QVariant, so a JS array-of-arrays-of-points that did not convert would leave the
+            // element empty and the dots absent with no warning anywhere. Reading it back is the
+            // difference between "we asked for dots" and "there are dots".
+            if (it.objectName === "rawDots" && it.pathCount !== undefined) dotShapes.push(it)
+            var kids = it.children || []
+            for (var i = 0; i < kids.length; ++i) walk(kids[i])
+        }
+        try { walk(chart) } catch (e) { probe.miss("walk for PpChartPlot (" + e + ")") }
+
+        // Does every visible series actually CARRY a mean? A series the host failed to decorate falls
+        // back to the raw curve (PpChartPlot._meanOf) — the pre-Phase-6 picture, silently, on that one
+        // trace — so the count is reported rather than assumed.
+        var withMean = 0, withoutMean = []
+        try {
+            for (var j = 0; j < chart._visible.length; ++j) {
+                var s = chart._visible[j]
+                if (!s) continue
+                if (s.mean && s.t_us && s.mean.length === s.t_us.length) withMean++
+                else withoutMean.push(s.key)
+            }
+        } catch (e) { probe.miss("chart._visible (" + e + ")") }
+        probe.w("visible series with a mean = " + withMean
+                + (withoutMean.length ? "   ⛔ NO MEAN (drawing raw): " + withoutMean.join(", ")
+                                      : "   ✓ every visible series draws the reduction"))
+
+        var asked = 0
+        probe.w("PpChartPlot instances      = " + plots.length)
+        for (var i2 = 0; i2 < plots.length; ++i2) {
+            var pl = plots[i2]
+            var n = 0
+            try { n = pl.rawDotRuns } catch (e) {}
+            asked += n
+            probe.w("   plot[" + i2 + "] facet='" + (pl.facetName || "(overlay)")
+                    + "'  series=" + ((pl.series && pl.series.length) || 0)
+                    + "  showRawDots=" + pl.showRawDots
+                    + "  raw-dot series=" + n)
+        }
+
+        // What the ELEMENTS hold, read back one by one.
+        var drawnPts = 0, unreadable = 0
+        for (var i3 = 0; i3 < dotShapes.length; ++i3) {
+            var pc = -1
+            try { pc = dotShapes[i3].pathCount } catch (e) {}
+            if (pc < 0) unreadable++
+            else drawnPts += pc
+        }
+        probe.w("PathMultiline read-back    = " + dotShapes.length + " dot Shape(s), "
+                + drawnPts + " polyline(s) held"
+                + (unreadable ? "   ⛔ " + unreadable + " whose `paths` could not be counted — the "
+                                + "QVariant conversion is suspect, dots may be absent on screen"
+                              : ""))
+
+        if (plots.length === 0)
+            probe.w("RAW DOTS DREW              = no — this preset instantiated no plot at all")
+        else if (drawnPts > 0)
+            probe.w("RAW DOTS DREW              = YES — " + drawnPts + " persisted samples at 0.35 "
+                    + "opacity behind the stroke (counted off the PathMultiline, not off the model), "
+                    + "so the wobble the 40 ms window declined to call a peak is still on screen")
+        else if (withMean === 0)
+            probe.w("RAW DOTS DREW              = no, and correctly — no visible series carries a "
+                    + "mean, so the stroke IS the raw curve and dots would double it")
+        else if (asked > 0)
+            probe.w("RAW DOTS DREW              = ⛔ NO — " + asked + " series were HANDED dot data and "
+                    + "the elements are holding none of it. The model is fine and the drawing is not: "
+                    + "suspect the PathMultiline `paths` assignment or a zero stroke width.")
+        else
+            probe.w("RAW DOTS DREW              = ⛔ NO, and they should have — the traces are drawing "
+                    + "a reduction with the samples it reduces hidden, which is display-only "
+                    + "smoothing by any other name (check PpChartPlot.showRawDots / _rawDots)")
+    }
+
     // ── The live on-screen chart, read-only ──────────────────────────────────────────────
     // Not the subject of the report — just a cross-check that the real panel exists and is
     // sitting on the same vocabulary. It is absent unless the user's View layout has the
     // Charts panel on for this mode; that absence is reported, never corrected.
     function reportLiveChart() {
-        probe.w("═══ 7. THE ON-SCREEN CHART (read-only cross-check) ═══")
+        probe.w("═══ 8. THE ON-SCREEN CHART (read-only cross-check) ═══")
         var root = probe
         var guard = 0
         while (root.parent && guard++ < 64) root = root.parent
@@ -898,7 +1065,8 @@ Item {
             case 4: probe.safe("applyPreset",   probe.stepApplyPreset);   break
             case 5: probe.safe("report",        probe.stepReport);        break
             case 6: probe.safe("sigmaBand",     probe.reportSigmaBand);   break
-            case 7: probe.safe("liveChart",     probe.reportLiveChart);   break
+            case 7: probe.safe("drawnLine",     probe.reportDrawnLine);   break
+            case 8: probe.safe("liveChart",     probe.reportLiveChart);   break
             default:
                 probe.w("═══ DONE ═══")
                 Qt.quit()

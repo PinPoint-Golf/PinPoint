@@ -45,6 +45,19 @@
 //                 adjacent-frame difference: at 8 ms spacing that divides the jitter by 8 ms and
 //                 calls the result a rate.
 //
+// And, added in Phase 6 so a chart can DRAW what a card reports:
+//
+//   * windowedMeans — the Extremum's own per-sample centred mean, one entry per sample. THE DRAWN
+//                 LINE IS THE CANDIDATE SET reduceExtremum RANKS: both call the one per-sample
+//                 function (detail::windowMeanValueAt), so "PEAK is the largest value on the line
+//                 inside the window" holds BY CONSTRUCTION, not by two arithmetics that agree.
+//                 That is the same argument as the paragraph above about the card and the engine,
+//                 one layer out — a line and a number computed two ways will differ one day, and
+//                 the reader has no way to tell which of them is lying. There is no other smoothing
+//                 anywhere for display; the raw samples stay drawn beside this line, and an INVALID
+//                 sample's entry is its RAW value with ok = false, because a bridged run is a line
+//                 the producer drew and not a measurement to average.
+//
 // ⚠ A LEAST-SQUARES SLOPE IS NOT A ROBUST ESTIMATOR, and the header says so where a reader will
 // look. It removes the "noise ÷ 8 ms" failure completely — that is the failure the design is about,
 // and on white noise the fitted slope is near zero where the adjacent-frame rate is an order of
@@ -80,6 +93,17 @@
 // start at the first sample at or after `fromUs` instead of at 0, so a late span does not rescan the
 // prefix once per anchor; and every loop that is bounded by `toUs` tests it BEFORE validity and
 // breaks, so a long all-bridged tail is not rescanned either (it was, when validity came first).
+//
+// Phase 6 split the per-sample mean into detail::windowMeanValueAt (the value, ranked at every
+// candidate) and detail::windowMeanSigmaAt (the residual, wanted at exactly one), because the first
+// cut computed both together and that is a real cost in the place it lands. On a 250-sample series
+// reduceExtremum is ~64 k inner iterations and 2 vector allocations per call — the σ gather runs
+// once, for the winner, after the loop — where computing σ per candidate made it ~125 k iterations
+// and ~500 allocations, twice per summaryMasked per brush-drag frame across up to 25 facets.
+// windowedMeans is the ~125 k one by nature (every sample gets a σ) and keeps its allocations at 2
+// by reusing scratch vectors, and it runs ONCE PER DATA CHANGE rather than per frame. The value
+// arithmetic is still written exactly once, which is the C16 guarantee; only the error bar is
+// computed where it is asked for.
 
 #include "../Core/pp_tuned_constants.h"    // tuned::sampler:: / tuned::reduce::
 
@@ -149,6 +173,20 @@ struct Reduced {
     int64_t atUs  = 0;      // where the answer was taken (see each reducer for what it means)
     double  sigma = 0.0;    // 1σ on `value` where the reduction has one, else 0
     bool    ok    = false;
+};
+
+// One sample's windowed mean — the drawn line, and the Extremum's candidate at that sample.
+//
+// `ok` false means THIS SAMPLE IS NOT A MEASUREMENT (bridged, gated, or non-finite), and then
+// `value` is the sample's RAW value: it is what the chart already draws dashed across a bridged run
+// and it is the only thing the curve has to say there. `sigma` is 0 for such an entry — an invalid
+// sample has no mean, so it cannot have a standard error on one, and printing a small number
+// instead would be a claim. There is no `atUs`: the entry belongs to sample i, whose time the
+// caller already has.
+struct WindowedMean {
+    double value = 0.0;
+    double sigma = 0.0;
+    bool   ok    = false;
 };
 
 namespace detail {
@@ -229,7 +267,140 @@ inline double windowMeanSigma(const std::vector<double> &xs, const std::vector<d
     return std::sqrt(sse / static_cast<double>(k - 2)) / std::sqrt(static_cast<double>(k));
 }
 
+// ⚠ THE ONE PLACE THE WINDOWED MEAN IS COMPUTED. reduceExtremum ranks these and windowedMeans
+// tabulates them, so there is exactly one arithmetic and the chart's line cannot drift from the
+// card's PEAK. Do not inline a second copy of this loop anywhere, for any reason.
+//
+// The mean of the valid samples within ±extremumWindowUs/2 of t_i, WIDENED symmetrically (out to
+// the next valid sample's distance, both sides) until it holds minExtremumSamples valid samples or
+// the series has no sample left to give. The support is the anchor's own neighbourhood over the
+// WHOLE series and is deliberately NOT clamped to any query — the full argument for that, and for
+// the widening, is in reduceExtremum's comment below, which is where a reader looking for the
+// definition of PEAK will be. Query-independence is exactly what lets one of these serve every
+// span, every card and the drawn line at once.
+//
+// ⚠ THE VALUE AND ITS σ ARE TWO CALLS ON PURPOSE. reduceExtremum needs the value at EVERY candidate
+// and the σ at exactly one of them (the winner), and it runs twice per summaryMasked per
+// brush-drag frame across up to 25 facets; computing the residual here would put two vector
+// allocations and a second full walk on every candidate for a number all but one of them throws
+// away. So this returns the window it settled on (`h`, `cnt`) and windowMeanSigmaAt finishes the
+// job for whoever actually wants the error bar. The VALUE arithmetic is still in one place, which
+// is the guarantee that matters.
+//
+// An out-of-range or invalid `i` returns the raw value with ok = false; for a valid `i` cnt >= 1
+// always, since sample i is inside its own window.
+struct WindowValue {
+    double      value = 0.0;    // the windowed mean, or the RAW sample when !ok
+    int64_t     h     = 0;      // the half-width the widening settled on
+    std::size_t cnt   = 0;      // valid samples inside it
+    bool        ok    = false;
+};
+
+inline WindowValue windowMeanValueAt(const SeriesView &s, std::size_t i, const ReduceConfig &cfg)
+{
+    WindowValue w;
+    if (i >= s.n)
+        return w;                      // nothing to read: value stays 0, ok stays false
+    w.value = s.v[i];                  // the raw value, which is all an invalid sample has
+    if (!s.isValid(i))
+        return w;
+
+    const int64_t half  = cfg.extremumWindowUs / 2;
+    const int     minEx = std::max(1, cfg.minExtremumSamples);
+
+    // This anchor's half-width and its window mean, in one walk per widening step. `next` is the
+    // smallest distance strictly outside the current width, i.e. where the window would have to
+    // reach to admit one more sample; when there is none the series has nothing further to give and
+    // the window is as wide as it will ever be.
+    int64_t     h   = half;
+    double      sum = 0.0;
+    std::size_t cnt = 0;
+    for (;;) {
+        sum = 0.0;
+        cnt = 0;
+        int64_t next = -1;
+        for (std::size_t j = 0; j < s.n; ++j) {
+            if (!s.isValid(j))
+                continue;
+            const int64_t d = absUs(s.t[j] - s.t[i]);
+            if (d <= h) {
+                sum += s.v[j];
+                ++cnt;
+            } else if (next < 0 || d < next) {
+                next = d;
+            }
+        }
+        if (static_cast<int>(cnt) >= minEx || next < 0)
+            break;
+        h = next;
+    }
+
+    w.value = sum / static_cast<double>(cnt);
+    w.h     = h;
+    w.cnt   = cnt;
+    w.ok    = true;
+    return w;
+}
+
+// The standard error of THAT mean, about a local straight line (windowMeanSigma). Second half of
+// the pair above: it re-gathers the window windowMeanValueAt settled on — same anchor, same `h`,
+// same validity rule, so the same samples in the same order — and hands them to the one σ
+// arithmetic. x in SECONDS from the anchor, never raw µs (see reduceRate for why).
+//
+// `xs` / `ys` are CALLER-OWNED SCRATCH, cleared here and never shrunk, so a caller that asks for
+// every sample's σ (windowedMeans) allocates twice for the whole series instead of twice per
+// sample. A caller that wants one σ can pass two empty locals and pay the two allocations once.
+inline double windowMeanSigmaAt(const SeriesView &s, std::size_t i, const WindowValue &w,
+                                std::vector<double> &xs, std::vector<double> &ys)
+{
+    if (!w.ok)
+        return 0.0;                    // an invalid sample has no mean, so no error on one
+
+    xs.clear();
+    ys.clear();
+    xs.reserve(w.cnt);
+    ys.reserve(w.cnt);
+    for (std::size_t j = 0; j < s.n; ++j) {
+        if (!s.isValid(j))
+            continue;
+        if (absUs(s.t[j] - s.t[i]) > w.h)
+            continue;
+        xs.push_back(static_cast<double>(s.t[j] - s.t[i]) * 1.0e-6);
+        ys.push_back(s.v[j]);
+    }
+    return windowMeanSigma(xs, ys, w.value);
+}
+
 } // namespace detail
+
+// ── The drawn line ──────────────────────────────────────────────────────────
+// One entry per sample: `out.size() == s.n` always, and an empty series gives an empty vector.
+// Entry i is the windowed mean AT SAMPLE i — the very number reduceExtremum ranks when sample i is
+// a candidate — so a caller that plots this vector is plotting the curve the PEAK tile reduces, and
+// the tile's value is the extremum of the plotted points inside its window BIT-FOR-BIT (pinned in
+// series_reduce_test §10). Invalid samples carry their raw value with ok = false; nothing here
+// depends on a query, so ONE call per data change serves every window the caller will ever ask
+// about.
+//
+// COST. This is the expensive one and it is meant to be: every sample pays BOTH walks (the value
+// window and the σ gather), which on a 250-sample curve is ~125 k inner iterations — twice
+// reduceExtremum's, which gathers σ for the winner alone. It buys that back by running ONCE PER
+// DATA CHANGE, never per frame (PpMetricChart._plottable), and by reusing one pair of scratch
+// vectors for the whole series, so the whole call allocates twice rather than twice per sample.
+inline void windowedMeans(const SeriesView &s, std::vector<WindowedMean> &out,
+                          const ReduceConfig &cfg = {})
+{
+    out.clear();
+    out.resize(s.n);
+
+    std::vector<double> xs, ys;        // reused across entries: clear() keeps the capacity
+    for (std::size_t i = 0; i < s.n; ++i) {
+        const detail::WindowValue w = detail::windowMeanValueAt(s, i, cfg);
+        out[i].value = w.value;        // the mean, or the raw sample where !ok
+        out[i].ok    = w.ok;
+        out[i].sigma = detail::windowMeanSigmaAt(s, i, w, xs, ys);
+    }
+}
 
 // ── At ──────────────────────────────────────────────────────────────────────
 // Median of the VALID samples within ±atHalfWindowUs of `us`, INCLUSIVE at the edge (`> window`
@@ -290,6 +461,12 @@ inline Reduced reduceDelta(const SeriesView &s, int64_t fromUs, int64_t toUs,
 // local straight line (detail::windowMeanSigma — the noise the mean carries, NOT the curve's
 // spread). Ties go to the earliest window (detail::improves).
 //
+// THE CANDIDATES ARE windowedMeans()'s ENTRIES, one per valid anchor in range — the same
+// detail::windowMeanValueAt call, so `value` is by construction the extremum of the curve a chart
+// draws from that vector; and `sigma` is that entry's sigma, gathered once for the winner by
+// detail::windowMeanSigmaAt out of the very window that entry used (series_reduce_test §10 pins
+// both, bit-exact, on every fixture).
+//
 // ⚠ [from, to] BOUNDS THE CANDIDATES, NOT THE SUPPORT. Only the anchors — the instants that may
 // WIN — are required to lie in the window; each anchor's ±half-window mean draws on every valid
 // sample near it, inside the window or not. That is deliberate and it is the harder of the two
@@ -334,8 +511,8 @@ inline Reduced reduceExtremum(const SeriesView &s, int64_t fromUs, int64_t toUs,
     if (s.n == 0)
         return r;
 
-    const int64_t half  = cfg.extremumWindowUs / 2;
-    const int     minEx = std::max(1, cfg.minExtremumSamples);
+    detail::WindowValue best;      // the winning anchor's window, for its σ after the loop
+    std::size_t         bestI = 0;
 
     // The CANDIDATE block starts here — the anchors, not their support (see the note above), so
     // this bounds the outer loop only and a late span does not walk the prefix once per anchor.
@@ -347,60 +524,32 @@ inline Reduced reduceExtremum(const SeriesView &s, int64_t fromUs, int64_t toUs,
         if (s.t[i] > toUs)
             break;                     // ascending: no later anchor is in range either
         if (!s.isValid(i))
+            continue;              // skipped before the window is built — w.ok would say the same
+
+        // ⚠ THE CANDIDATE IS windowedMeans[i], NOT A SECOND COPY OF ITS ARITHMETIC. Phase 6 lifted
+        // the mean into detail::windowMeanValueAt so the chart can draw the same numbers this loop
+        // ranks; ranking anything else here — a raw sample, a differently-clamped mean — would put
+        // the line and the card back into disagreement, which is the one failure this header
+        // exists to make impossible.
+        const detail::WindowValue w = detail::windowMeanValueAt(s, i, cfg);
+        if (r.ok && !detail::improves(w.value, r.value, wantMax))
             continue;
 
-        // This anchor's half-width and its window mean, in one walk per widening step. `next` is
-        // the smallest distance strictly outside the current width, i.e. where the window would
-        // have to reach to admit one more sample; when there is none the series has nothing further
-        // to give and the window is as wide as it will ever be.
-        //
-        // ⚠ THE WALK IS OVER THE WHOLE SERIES, NOT OVER [from, to] — see the note above. The
-        // support is the anchor's own neighbourhood, so that this mean is the same number whichever
-        // query asked for it and the engine's span cache can agree with the card.
-        int64_t     h    = half;
-        double      sum  = 0.0;
-        std::size_t cnt  = 0;
-        for (;;) {
-            sum = 0.0;
-            cnt = 0;
-            int64_t next = -1;
-            for (std::size_t j = 0; j < s.n; ++j) {
-                if (!s.isValid(j))
-                    continue;
-                const int64_t d = detail::absUs(s.t[j] - s.t[i]);
-                if (d <= h) {
-                    sum += s.v[j];
-                    ++cnt;
-                } else if (next < 0 || d < next) {
-                    next = d;
-                }
-            }
-            if (static_cast<int>(cnt) >= minEx || next < 0)
-                break;
-            h = next;
-        }
-        // cnt >= 1 always: sample i is valid and is inside its own window.
-        const double mean = sum / static_cast<double>(cnt);
-        if (r.ok && !detail::improves(mean, r.value, wantMax))
-            continue;
-
-        // The winner's window, gathered once for its standard error. x in SECONDS from the anchor,
-        // never raw µs — see reduceRate for why.
-        std::vector<double> xs, ys;
-        xs.reserve(cnt);
-        ys.reserve(cnt);
-        for (std::size_t j = 0; j < s.n; ++j) {
-            if (!s.isValid(j))
-                continue;
-            if (detail::absUs(s.t[j] - s.t[i]) > h)
-                continue;
-            xs.push_back(static_cast<double>(s.t[j] - s.t[i]) * 1.0e-6);
-            ys.push_back(s.v[j]);
-        }
-        r.value = mean;
-        r.atUs  = s.t[i];
-        r.sigma = detail::windowMeanSigma(xs, ys, mean);
+        best    = w;               // its window, kept for the ONE σ gather below
+        bestI   = i;
+        r.value = w.value;
+        r.atUs  = s.t[i];          // the winner's OWN time: the centre of its window
         r.ok    = true;
+    }
+
+    // σ for the WINNER ONLY, after the loop. Every candidate needs a value; exactly one needs an
+    // error bar, and this reducer runs twice per summaryMasked per brush-drag frame across up to
+    // 25 facets — so the residual walk is paid once per call and not once per sample. It is the
+    // same window windowedMeans would gather at bestI, hence the same double
+    // (series_reduce_test §10).
+    if (r.ok) {
+        std::vector<double> xs, ys;
+        r.sigma = detail::windowMeanSigmaAt(s, bestI, best, xs, ys);
     }
     return r;
 }

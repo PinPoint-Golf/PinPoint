@@ -32,6 +32,16 @@
 //
 // TWO independent narrowings, deliberately kept apart: the preset chooses WHICH SERIES
 // (enabledKeys), the segment chips/brush choose WHICH TIME SPAN (viewStartUs/viewEndUs).
+//
+// ⚠ WHAT THE LINE IS, since Phase 6 of docs/design/metric_presentation_honesty.md. Every surface
+// here draws and quotes the 40 ms centred WINDOWED MEAN — the array ChartMetrics.windowedMean
+// returns and ChartMetrics.summaryMasked reduces for the PEAK tile — decorated onto each series
+// entry as `mean` in _plottable, ONCE per data change. The raw samples remain on screen as faint
+// dots behind the stroke (PpChartPlot.showRawDots) and the hover row prints the raw value beside
+// the reading, so nothing is hidden and nothing persisted is touched. This is the ONLY reduction
+// applied to a drawn curve anywhere in this panel: display-only smoothing is forbidden outright
+// (design §4 principle 1), and the way to stay honest about a windowed line is to make it the same
+// window the numbers come from.
 
 pragma ComponentBehavior: Bound
 
@@ -300,6 +310,40 @@ Item {
                 var dom = root._domainWindow(s.key, s)
                 d.validFromUs = dom.fromUs
                 d.validToUs   = dom.toUs
+                // ── THE DRAWN LINE, RESOLVED ONCE (design §4 principle 1, Phase 6) ─────
+                //
+                // `mean` is the 40 ms centred windowed mean at every sample — the exact array
+                // ChartMetrics.summaryMasked reduces to produce PEAK, so the line the plots stroke
+                // and the number the tiles print are ONE reduction. The raw samples are still drawn
+                // (PpChartPlot.showRawDots) and nothing persisted moves; this decorates a derived
+                // array onto a copy of the series entry.
+                //
+                // ⚠ HERE AND NOWHERE ELSE. windowedMean marshals two whole series across the QML
+                // boundary and returns two more, so it may only ever be called from a binding that
+                // changes with the DATA — this one depends on root._list alone. Every consumer (both
+                // plot modes, the sparkline strip, the crosshair markers, the tooltip and the legend
+                // chips) reads `mean` off the entry instead of asking again, which is also what
+                // makes them incapable of disagreeing about it.
+                //
+                // ⚠ AND IT IS REDUCED THROUGH THE COMPOSED MASK, NOT `valid` (F4). What the chart
+                // calls a measurement is `valid` AND inside the phase domain (PpChartPlot._measured);
+                // what a reducer knows about is `valid` alone. On a swing analysed BEFORE the
+                // producers began marking out-of-domain samples invalid the two disagree, and the
+                // disagreement is not cosmetic: the out-of-domain samples — a hip line past impact,
+                // measuring rotation rather than tilt — would be averaged into the means of the
+                // in-domain anchors next to the boundary, and the run the chart draws DASHED would be
+                // drawn at a mean rather than at the persisted value it is supposed to show. Both
+                // surfaces would then be showing a number design §5.1 says contributes nothing.
+                //
+                // So the mask is composed HERE, once, and the same composition goes to every
+                // reduction on the panel (`reduceValid`): the drawn line, the summary cards, the
+                // sparkline's scale. That is also what keeps Phase 6's identity true on those older
+                // swings — the tile can only be a point on the line if both were told the same thing
+                // about which samples exist.
+                d.reduceValid = root._reduceMask(s, dom)
+                var wm = cm.windowedMean(s.t_us, s.value, d.reduceValid)
+                d.mean      = wm.mean
+                d.meanSigma = wm.sigma
                 out.push(d)
             }
         }
@@ -346,6 +390,29 @@ Item {
         return { fromUs: d.firstNarrowed ? root._nearestSampleUs(t, root._phaseUs(d.firstPhase, first)) : first,
                  toUs:   d.lastNarrowed  ? root._nearestSampleUs(t, root._phaseUs(d.lastPhase,  last))  : last }
     }
+    // The mask EVERY reduction on this panel is given: `valid` AND inside the metric's phase domain.
+    //
+    // Returns [] — "every sample is a measurement", the cheapest thing the bridge can carry — when
+    // there is nothing to say: no honoured mask and a domain that clips neither end, which is the
+    // common case and must cost nothing. A `valid` list that does not cover the curve is discarded
+    // wholesale here too (the short-mask rule, chart_metrics.h): honouring it for the prefix would
+    // make this mask disagree with the C++ about the same series.
+    //
+    // isFinite is folded in for the same reason SeriesView::isValid folds it in on the other side of
+    // the bridge — a NaN is not a measurement — so the array says exactly what the reducers will do
+    // with it rather than leaving them to disagree about one sample.
+    function _reduceMask(s, dom) {
+        var t = s.t_us, n = t.length
+        var haveMask = s.valid && s.valid.length >= n
+        var clips = dom.fromUs > t[0] || dom.toUs < t[n - 1]
+        if (!haveMask && !clips) return []
+        var out = []
+        for (var i = 0; i < n; ++i)
+            out.push(((!haveMask || s.valid[i] !== 0)
+                      && t[i] >= dom.fromUs && t[i] <= dom.toUs
+                      && isFinite(s.value[i])) ? 1 : 0)
+        return out
+    }
     function _nearestSampleUs(t, us) {
         if (!t || t.length === 0) return us
         var lo = 0, hi = t.length - 1
@@ -377,8 +444,9 @@ Item {
         return winEnd > winStart && root._domWinEnd(s, winStart, winEnd) <= root._domWinStart(s, winStart)
     }
 
-    // The split-mode gutter's "@end" readout — the same domain-clamped, mask-aware summary the
-    // cards use, and the same "—" when the clamp emptied the window.
+    // The split-mode gutter's "@end" readout — domain-clamped and mask-aware like the cards, with the
+    // same "—" when the clamp emptied the window. (The reading itself is now the drawn line at the
+    // window's last sample; see _facetEndText below for why, and what that gave up.)
     //
     // BARE: PpChartPlot's split gutter prints unitLabel directly above this, so spelling it again
     // put the unit twice in one 40px column. Unclamped and unmasked it printed the FINISH value of
@@ -397,13 +465,46 @@ Item {
     // per series. So each σ is resolved ONCE on a binding that changes with the DATA (the tooltip
     // row's `sig`, the legend chip's `sig`, the plot delegate's `facetSigma`) and passed down.
 
+    // ── THE SPLIT-MODE GUTTER'S "@end" — THE DRAWN LINE, AT THE WINDOW'S LAST SAMPLE ──────
+    //
+    // ⚠ IT WAS A ±15 ms MEDIAN AND IT IS NOW THE MEAN (F6b), and the choice is deliberate rather
+    // than incidental. summaryMasked's `end` is reduceAt — the median of the valid samples within
+    // ±15 ms of the window edge — which made this the THIRD reduction on a panel whose whole claim
+    // after Phase 6 is that it shows one. On a facet 40px tall, beside a trace drawn as the windowed
+    // mean, a number from a different reducer is a number a reader cannot check against anything in
+    // front of them. So it reads the same array the trace strokes, at the last sample in the window.
+    //
+    // WHAT IS GIVEN UP: a median at an INSTANT becomes a mean at a SAMPLE, so on a coarse series the
+    // reading can be up to half a frame's motion from the window edge the brush is sitting on. That
+    // is the crosshair's convention too (PpChartPlot's per-series markers snap to the nearest sample),
+    // and being consistent with the line beside it matters more here than being exact about an
+    // instant nothing is drawn at.
+    //
+    // NO RAW COUNTERPART IN THE GUTTER, unlike @IMPACT's tooltip: this is a 40px column with no hover
+    // surface of its own, and PpChartPlot deliberately imports no Controls (a ToolTip there would pull
+    // the whole module into the hottest component on the panel). The plot's own hover row already
+    // prints the mean and the raw sample together at ANY instant, including this one.
+    //
+    // ⚠ AND IT NO LONGER MARSHALS ANYTHING (F6b). This binding re-evaluates on every frame of a brush
+    // drag, per facet, and it used to run a complete four-reducer summary — the whole series across
+    // the boundary and back — to read one number off the end of it. It is now one JS scan.
     function _facetEndText(s, sigma) {
         if (root._domWinEmpty(s, root.viewStartUs, root.viewEndUs)) return "@end —"
-        return "@end " + cm.formatBare(
-            cm.summaryMasked(s.t_us, s.value, s.valid || [],
-                             root._domWinStart(s, root.viewStartUs),
-                             root._domWinEnd(s, root.viewStartUs, root.viewEndUs)).end,
-            s.unit, sigma)
+        var t = s.t_us
+        if (!t || t.length === 0) return "@end —"
+        var end = root._domWinEnd(s, root.viewStartUs, root.viewEndUs)
+        // The last sample at or before the window end — not the NEAREST, which could sit outside the
+        // window the reader has selected and report a value from beyond their own bracket.
+        var i = -1
+        for (var j = 0; j < t.length; ++j) {
+            if (t[j] > end) break
+            i = j
+        }
+        // "—" where that sample was bridged, out of domain or non-finite: the same rule the hover
+        // readout and the summary card apply. A number printed there would be the value the producer
+        // DREW across a gap, offered as the facet's headline reading.
+        return root._measuredIdx(s, i) ? "@end " + cm.formatBare(root._meanOf(s)[i], s.unit, sigma)
+                                       : "@end —"
     }
 
     // Was this series MEASURED at `t`, or is the value there bridged / outside the domain? Same
@@ -429,13 +530,26 @@ Item {
         }
         return best
     }
-    function _measuredAt(s, t) {
-        if (s.validFromUs !== undefined && s.validToUs !== undefined
-            && s.validToUs > s.validFromUs && (t < s.validFromUs || t > s.validToUs))
+    // THE INDEX FORM IS THE REAL ONE (F3). Everything that re-evaluates with the cursor or the
+    // playhead now resolves the nearest INDEX once per row and asks these; the instant forms below are
+    // wrappers, kept because the probe calls them and because a caller with only a time should not
+    // have to know how the chart finds a sample.
+    //
+    // isFinite is folded in (F5) — the same rule as PpChartPlot._measured and SeriesView::isValid: a
+    // NaN is not a measurement and must not be printed as one.
+    function _measuredIdx(s, i) {
+        if (i < 0) return false
+        if (s.validFromUs !== undefined && s.validToUs !== undefined && s.validToUs > s.validFromUs
+            && (s.t_us[i] < s.validFromUs || s.t_us[i] > s.validToUs))
             return false
+        if (!isFinite(s.value[i])) return false
         if (!s.valid || s.valid.length < (s.t_us ? s.t_us.length : 0)) return true
-        var i = root._nearestIndex(s, t)
-        return i < 0 || s.valid[i] !== 0
+        return s.valid[i] !== 0
+    }
+    function _measuredAt(s, t) {
+        var tt = s.t_us
+        if (!tt || tt.length === 0) return true      // no curve: the caller's own "is there one" test
+        return root._measuredIdx(s, root._nearestIndex(s, t))
     }
     // …and the value there as TEXT, or "—" where there was no measurement. One helper for the
     // hover tooltip and the legend readout, both of which print a number with a unit beside it
@@ -446,10 +560,53 @@ Item {
     // card does for the same reading — a tooltip that reads 11.4 beside a card reading 10 is the
     // "one curve, one number" rule broken at the last inch. `sigma` is PASSED, not derived: this
     // runs per cursor move per visible series (see the note above _facetEndText).
+    // ⚠ AND THESE TAKE AN INDEX (F3). The hover row used to call _measuredAt AND
+    // labels.valueAtNearest, twice over for the mean and the raw value — four whole-series marshals
+    // per row per cursor move, times every visible series, on a binding that fires with the mouse.
+    // The row resolves its nearest index once (`trow.idx`) and these read the arrays in JS: no
+    // marshalling at all, and the four numbers are guaranteed to be about the SAME sample, which two
+    // independent nearest-sample searches only happened to be.
+    function _valueTextAtIdx(s, i, sigma) {
+        return root._measuredIdx(s, i) ? cm.formatValue(root._meanOf(s)[i], s.unit, sigma) : "—"
+    }
+    function _rawTextAtIdx(s, i, sigma) {
+        if (!root._measuredIdx(s, i) || !root._hasMean(s)) return ""
+        return qsTr("raw %1").arg(cm.formatBare(s.value[i], s.unit, sigma))
+    }
     function _valueTextAt(s, t, sigma) {
-        return root._measuredAt(s, t)
-             ? cm.formatValue(labels.valueAtNearest(s.t_us, s.value, t), s.unit, sigma)
-             : "—"
+        return root._valueTextAtIdx(s, root._nearestIndex(s, t), sigma)
+    }
+    // ── WHICH ARRAY IS THE CURVE (Phase 6) ────────────────────────────────────────
+    //
+    // `mean` where _plottable decorated one, the persisted `value` otherwise. A "which array"
+    // choice, not arithmetic, so it stays in QML: putting it in C++ would marshal a whole series to
+    // answer a question about an array's length. The same rule lives in PpChartPlot and
+    // PpSegmentBrush, which are standalone components taking a `series` list from anywhere.
+    //
+    // ⚠ THE FALLBACK IS NOT A SILENT DOWNGRADE. It fires only for a caller that never called
+    // windowedMean, or a curve whose arrays disagree in length — which _plottable already refuses to
+    // plot. In both cases the honest line is the persisted one, which is exactly what every surface
+    // drew before this phase, and the raw dots are then suppressed rather than doubling the stroke.
+    function _hasMean(s) {
+        return !!(s && s.mean && s.t_us && s.mean.length === s.t_us.length)
+    }
+    function _meanOf(s) {
+        return root._hasMean(s) ? s.mean : s.value
+    }
+    // The RAW sample beside the reading, for the hover row — "raw 34" in the dim colour after the
+    // mean. It is what makes drawing a reduction honest rather than quiet: the reader can see the
+    // sample the line declined to follow, at the instant they are pointing at, without a mode, a
+    // toggle or a second chart. "" where nothing was measured there (the reading is already "—", and
+    // a raw number beside a dash would say the value exists and is being withheld) and where there
+    // is no mean at all (the line IS the raw sample; printing it twice says nothing).
+    //
+    // BARE, and step-quantised by the same σ as the reading it sits after: the reading beside it
+    // already carries the unit (rule 2 above — a unit is named once per surface), and a raw sample is
+    // a reading like any other, so §5.3's step governs its digits too. Where the step is coarse
+    // enough that the two print the same, that is worth seeing: it says the reduction moved nothing a
+    // reader could have read off the panel anyway.
+    function _rawTextAt(s, t, sigma) {
+        return root._rawTextAtIdx(s, root._nearestIndex(s, t), sigma)
     }
 
     // What the LEGEND lists — the preset's metrics, not the swing's. Listing every plottable
@@ -501,6 +658,13 @@ Item {
     readonly property real _axisEnd:   (root.startUs > 0 && root.endUs > root.startUs) ? root.endUs   : root._dataEnd
 
     // Shared value range (overlay) / per-series range (split), clipped to the view window.
+    //
+    // ⚠ TAKEN OVER THE RAW SAMPLES, NOT THE MEAN, AND THAT IS THE POINT AFTER PHASE 6. The trace is
+    // the windowed mean, which is strictly inside the raw extremes, so scaling to the mean would
+    // clip the raw dots flat against the axis edge — and a row of dots pinned to the top of the plot
+    // reads as "the data stops here", the same lie the σ ribbon's headroom rule exists to prevent.
+    // Keeping the raw extents also means this phase moved no axis on any chart: the Y range is what
+    // every value is drawn against, and the reduction is meant to change the LINE, not the frame.
     function _rangeFor(arr) {
         var lo = Infinity, hi = -Infinity, sig = 0
         for (var k = 0; k < (arr ? arr.length : 0); ++k) {
@@ -552,10 +716,38 @@ Item {
     // Cursor for the chip readout: the playhead during replay, else impact (else window end).
     readonly property real _readoutUs: root.showPlayhead ? root.playheadUs
                                      : (root.impactUs > 0 ? root.impactUs : root._axisEnd)
+    // The chip's Δ baseline — the reading at the Address landmark.
+    //
+    // ⚠ READ OFF THE DRAWN LINE SINCE PHASE 6, not off the persisted Address phaseSample, and the
+    // two are different numbers. The chip's own value is the windowed mean at the playhead, so a
+    // baseline taken from a raw sample would make its Δ a difference of two different reductions —
+    // arithmetic nobody can check against anything on screen. Both ends now come off the same curve.
+    //
+    // The phase sample still decides WHEN address was (only the producer knows that), and it remains
+    // the fallback for a series with no mean: a persisted reading is better than none, and that is
+    // what this printed before. The P-position DOTS keep their persisted values regardless — they
+    // are the producers' graded readings and moving them onto the mean would restate someone else's
+    // measurement.
+    //
+    // JS all the way, and cached by its caller (the legend chip's `addr`): the Δ readout re-evaluates
+    // on every replay frame, so neither the lookup nor the value may cross the QML boundary here —
+    // _nearestIndex is the same rule labels.valueAtNearest applies, without the marshalling.
     function _addrValue(s) {
         var ps = s.phaseSamples || []
-        for (var i = 0; i < ps.length; ++i) if (ps[i].phase === 0) return ps[i].value  // Address
-        return (s.value && s.value.length) ? s.value[0] : 0
+        var m  = root._meanOf(s)
+        for (var i = 0; i < ps.length; ++i)
+            if (ps[i].phase === 0) {                                          // Address
+                if (!root._hasMean(s)) return ps[i].value
+                // ⚠ AND ONLY IF THAT SAMPLE WAS MEASURED (F6a). The Address sample can be bridged, or
+                // out of the metric's domain, or non-finite — and the mean array carries the RAW value
+                // at such a sample, so reading it blind would silently make the Δ a difference against
+                // a number the producer drew rather than measured. The phaseSample is the better
+                // answer there: it is a reading the producer stands behind, and it is the value of the
+                // dot the reader can see on the plot.
+                var j = root._nearestIndex(s, ps[i].t_us)
+                return root._measuredIdx(s, j) ? m[j] : ps[i].value
+            }
+        return (m && m.length) ? m[0] : 0
     }
 
     // ── Segments (chart-local window presets) ──────────────────────────────────────
@@ -919,6 +1111,19 @@ Item {
                         showDots:      root.showDots
                         showCrosshair: root.showCursor
                         showSigmaBand: root.showSigmaBand      // dark; see root.showSigmaBand
+                        // ── RAW DOTS EVERYWHERE EXCEPT THE COMPACT TILE ──────────────────
+                        //
+                        // On the full panel the dots are not optional: the stroke is a reduction
+                        // (Phase 6) and the samples it reduces have to stay visible, or the change
+                        // is display-only smoothing wearing a better argument.
+                        //
+                        // The compact instance is the ¼× auto-replay transient — a plot a few
+                        // centimetres wide with no legend, no summary and no hover, where 250 dots
+                        // per series overlap into a band and the shape stops being readable at all.
+                        // A picture nobody can read is not a more honest picture, and nothing on
+                        // that tile quotes a number to be checked against them: it shows a shape.
+                        // The full chart, one tap away, is where the samples are.
+                        showRawDots:   !root.compact
                         cursorUs:      root.showCursor ? root._cursorUs : -1
                         yTickCount:    facet ? 3 : 6
                         showFrame:     facet
@@ -978,6 +1183,12 @@ Item {
                             // re-evaluates on every cursor move, and seriesSigma marshals the whole
                             // series. This changes only when the data does.
                             readonly property real sig: cm.seriesSigma(trow.modelData)
+                            // THE SAMPLE THIS ROW IS ABOUT, resolved ONCE (F3). Both readouts below
+                            // and the measured test they share read it, so the row cannot end up
+                            // describing two different samples, and a cursor move costs one JS scan
+                            // instead of four whole-series marshals.
+                            readonly property int idx: root._nearestIndex(trow.modelData,
+                                                                          root._cursorUs)
                             spacing: Theme.sp(8)
                             Rectangle {
                                 width: Theme.sp(8); height: Theme.sp(8); radius: Theme.sp(2)
@@ -992,12 +1203,29 @@ Item {
                                 color: Theme.colorText2
                             }
                             Text {
-                                // "—" where the nearest sample was bridged or lies outside the
-                                // metric's domain — see root._valueTextAt.
-                                text: root._valueTextAt(trow.modelData, root._cursorUs, trow.sig)
+                                // THE MEAN at the nearest sample (Phase 6 — the value the line is
+                                // drawn at and the tiles reduce), or "—" where that sample was
+                                // bridged or lies outside the metric's domain: see
+                                // root._valueTextAt.
+                                text: root._valueTextAtIdx(trow.modelData, trow.idx, trow.sig)
                                 font.family: Theme.fontData; font.pixelSize: Theme.fontSzLabel
                                 font.weight: Font.Medium
                                 color: Theme.colorText
+                            }
+                            Text {
+                                // …and the RAW sample after it, dim. The hover row is where a reader
+                                // asks "what is the actual number here", and since the line is now a
+                                // reduction that question has two answers; showing only the reduced
+                                // one would be the quiet half of display-only smoothing. Empty (and
+                                // so zero-width) where there is no mean or no measurement — see
+                                // root._rawTextAt.
+                                text: root._rawTextAtIdx(trow.modelData, trow.idx, trow.sig)
+                                visible: text.length > 0
+                                // Row lays out x only, so the smaller type is centred against the
+                                // reading rather than sitting on its cap line.
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
+                                color: Theme.colorText3
                             }
                         }
                     }
@@ -1020,12 +1248,23 @@ Item {
                     id: chip
                     required property var modelData
                     readonly property bool on: root._isOn(chip.modelData.key)
-                    readonly property real val: labels.valueAtNearest(chip.modelData.t_us,
-                                                                      chip.modelData.value, root._readoutUs)
+                    // THE MEAN at the playhead (Phase 6): the chip is a readout of the drawn line,
+                    // and a chip that quoted the raw sample while the line beside it sat 10 units
+                    // away would be the "one curve" rule broken at the last inch — the same argument
+                    // that puts the σ step on both halves below.
+                    // The sample at the playhead, resolved ONCE for both readouts (F3): this chip
+                    // re-evaluates on every replay frame, and labels.valueAtNearest marshals the whole
+                    // series per call — twenty chips at 240 fps is not somewhere to spend that.
+                    readonly property int  idx: root._nearestIndex(chip.modelData, root._readoutUs)
+                    readonly property real val: chip.idx >= 0
+                                                ? root._meanOf(chip.modelData)[chip.idx] : 0
                     // Resolved once per chip — it governs the digits of both readouts below, and a
                     // whole-series marshal per replay frame is exactly what ChartMetrics.seriesSigma
                     // must not be asked to do.
                     readonly property real sig: cm.seriesSigma(chip.modelData)
+                    // The Δ baseline, resolved ONCE per chip: it depends on the data alone, and the
+                    // Δ readout below re-evaluates on every replay frame.
+                    readonly property real addr: root._addrValue(chip.modelData)
                     spacing: Theme.sp(4)
                     opacity: chip.on ? 1.0 : 0.4
 
@@ -1047,8 +1286,7 @@ Item {
                         // able to withdraw it. The Δ-from-address goes with it — a difference
                         // against an unmeasured reading is not a smaller claim, it is the same
                         // one arithmetically disguised.
-                        readonly property bool measured:
-                            root._measuredAt(chip.modelData, root._readoutUs)
+                        readonly property bool measured: root._measuredIdx(chip.modelData, chip.idx)
                         // Both halves take the SERIES' step, the Δ included. A difference of two
                         // readings each ±σ is strictly noisier than either (σ√2), so a finer step on
                         // the Δ would be the least defensible digit on the panel; and a Δ printed at
@@ -1056,7 +1294,7 @@ Item {
                         // checked against it by eye. One step per series, everywhere.
                         text: chipVal.measured
                               ? cm.formatValue(chip.val, chip.modelData.unit, chip.sig)
-                                + "  Δ" + cm.formatValue(chip.val - root._addrValue(chip.modelData),
+                                + "  Δ" + cm.formatValue(chip.val - chip.addr,
                                                          chip.modelData.unit, chip.sig)
                               : "—"
                         anchors.verticalCenter: parent.verticalCenter
