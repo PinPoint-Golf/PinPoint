@@ -116,6 +116,13 @@ Item {
                                           ? solver.valueAtNearest(_series0.t_us, _series0.value,
                                                                   shotReplay.positionUs) : 0
     readonly property string _metricUnit: (_series0 && _series0.unit) ? _series0.unit : ""
+    // The bead's reading is a reading like any other, so it is printed no finer than the series'
+    // characterised noise (design metric_presentation_honesty.md §5.3) — the same step rule the
+    // summary card and the legend chip use, so one metric does not change shape between surfaces.
+    // ChartMetrics.seriesSigma resolves absent → 0, which asks for no coarsening at all; and it is
+    // resolved HERE, once per swing, not inside the chip's text binding, which re-evaluates on every
+    // replay frame (the argument marshals the whole series).
+    readonly property real   _metricSigma: _series0 ? chartFmt.seriesSigma(_series0) : 0
 
     // The one value-formatting rule, shared with PpMetricChart and PpChartSummary.
     ChartMetrics { id: chartFmt }
@@ -487,7 +494,8 @@ Item {
                     // print "12% stance width" — the catalogue's full phrase, jammed against the
                     // number with no separator — in a bead chip a few characters wide.
                     visible: root._series0 !== null
-                    text: chartFmt.formatValue(root._metricVal, root._metricUnit)
+                    text: chartFmt.formatValue(root._metricVal, root._metricUnit,
+                                               root._metricSigma)
                     color: Theme.colorText3
                     font.family: Theme.fontData; font.pixelSize: Theme.fontSzLabel
                     anchors.verticalCenter: parent.verticalCenter

@@ -84,6 +84,111 @@ static Lower addressPose()
     return p;
 }
 
+// ── §8's fixtures: a held address with ROUND numbers, and a smoother record to go with it ──
+//
+// Hips 100 px apart and level; ankles 200 px apart and level, on a 1000 px frame. Every σ §8 asserts
+// is then a closed form a reader can check by hand, which is the whole point of the section: a σ that
+// only agrees with the code that produced it has been tested against nothing.
+static Lower sigmaPose()
+{
+    Lower p;
+    p.lHip   = QPointF(0.45, 0.50);   p.rHip   = QPointF(0.55, 0.50);   // hip line 100 px, level
+    p.lKnee  = QPointF(0.44, 0.70);   p.rKnee  = QPointF(0.56, 0.70);
+    p.lAnkle = QPointF(0.40, 0.90);   p.rAnkle = QPointF(0.60, 0.90);   // stance 200 px, level
+    return p;
+}
+
+// The same address with the TRAIL HIP 30 px LOWER — 16.7° of hip tilt on a 100 px line.
+//
+// §8a's fixture is level everywhere and a vertical spine, which leaves two things in the propagation
+// completely untested: `lineTiltSigmaDeg` divides by the line's EUCLIDEAN length, and on a level line
+// that is numerically identical to the |Δx| the tilt itself divides by. A mutation replacing L with
+// |Δx| passes every level case. Here it does not: L = sqrt(100² + 30²) = 104.4031 px, so the two
+// readings differ by 1/cos(16.7°) = 4.40 %.
+//
+// Only the HIP line is tilted. The ankles stay level so feetAlignment is an unchanged control in the
+// same run, which is what shows the σ is computed per LINE from that line's own length rather than
+// once per swing.
+static Lower sigmaPoseTilted()
+{
+    Lower p = sigmaPose();
+    p.rHip = QPointF(0.55, 0.53);      // trail hip (lead is LEFT here) 30 px lower
+    return p;
+}
+
+// The smoother's per-keypoint honesty record for one frame, with a CONSTANT σ on every joint. Tier
+// Meas because that is what a smoothed keypoint inside a confirmed run carries; nothing in the
+// producer reads `tier` (it reads sigma > 0), and that is deliberate — see the note in §8b.
+static PoseKpAux auxWith(double sigmaPx)
+{
+    PoseKpAux a;
+    for (int k = 0; k < kWholeBodyJoints; ++k) {
+        a.tier[size_t(k)]  = uint8_t(PoseTier::Meas);
+        a.sigma[size_t(k)] = float(sigmaPx);
+    }
+    return a;
+}
+
+// A track whose SMOOTHED companion is byte-identical to its raw frames.
+//
+// That identity is load-bearing, not laziness: it makes every emitted value the same number with and
+// without `smoothedAux`, which is exactly what lets §8e assert that adding σ moves nothing. `sigmas`
+// is one entry per frame; EMPTY means no aux at all, i.e. a swing analysed before the smoother
+// existed.
+static PoseTrack2D sigmaTrack(const std::vector<Lower> &poses, const std::vector<double> &sigmas,
+                              int64_t dtUs)
+{
+    PoseTrack2D t;
+    for (size_t i = 0; i < poses.size(); ++i) {
+        const PoseFrame2D f = makeLower(int64_t(i) * dtUs, poses[i]);
+        t.frames.push_back(f);
+        t.smoothed.push_back(f);
+    }
+    for (double sg : sigmas)
+        t.smoothedAux.push_back(auxWith(sg));
+    return t;
+}
+
+// A per-keypoint σ record with a DISTINCT value on every joint the module reads.
+//
+// §8a gives every joint the same σ, which pins no COEFFICIENT: swap the lead and trail ankle in
+// comOverLeadFoot, or read the trail hip where leadKneeDrift wants the lead one, and a constant σ
+// hides it completely. σ is attached to the PHYSICAL keypoint here — left is left whichever side is
+// lead — so running the same fixture with `leadIsLeft` both ways is the test that each point is paired
+// with its own side's σ.
+static PoseKpAux auxPerJoint(double lHip, double rHip, double lKnee, double rKnee,
+                             double lAnk, double rAnk)
+{
+    PoseKpAux a;
+    for (int k = 0; k < kWholeBodyJoints; ++k)
+        a.tier[size_t(k)] = uint8_t(PoseTier::Meas);
+    a.sigma[size_t(kLHip)]   = float(lHip);   a.sigma[size_t(kRHip)]   = float(rHip);
+    a.sigma[size_t(kLKnee)]  = float(lKnee);  a.sigma[size_t(kRKnee)]  = float(rKnee);
+    a.sigma[size_t(kLAnkle)] = float(lAnk);   a.sigma[size_t(kRAnkle)] = float(rAnk);
+    return a;                                  // every other joint stays 0 — this module reads none
+}
+
+// A held track carrying one prebuilt aux record on every frame.
+static PoseTrack2D trackWithAux(const std::vector<Lower> &poses, const PoseKpAux &aux, int64_t dtUs)
+{
+    PoseTrack2D t;
+    for (size_t i = 0; i < poses.size(); ++i) {
+        const PoseFrame2D f = makeLower(int64_t(i) * dtUs, poses[i]);
+        t.frames.push_back(f);
+        t.smoothed.push_back(f);
+        t.smoothedAux.push_back(aux);
+    }
+    return t;
+}
+
+// Relative agreement. C11 asks for 5 %; every case below passes at 1e-5 because BOTH sides are
+// closed forms — the expected value is written out from the fixture's own geometry, never read back
+// out of the producer.
+static bool nearRel(double got, double want, double rel)
+{
+    return std::fabs(got - want) <= rel * std::fabs(want);
+}
+
 static const MetricSeries *findSeries(const std::vector<MetricSeries> &v, const char *key)
 {
     for (const MetricSeries &m : v)
@@ -1007,6 +1112,438 @@ int main()
             CHECK("a ladder with Impact BEFORE Address is refused, not obeyed",
                   backwards.valid.empty() && backwards.phaseSamples.size() == 3);
         }
+    }
+
+    // ── 8) σ propagation (design §5.3, contract C11) ────────────────────────
+    //
+    // WHAT THESE CASES ARE FOR. `MetricSeries::sigma` is 1σ MEASUREMENT noise, and the display layer
+    // rounds every printed digit to it — so a σ that is wrong by a factor makes the chart round to the
+    // wrong place and say so confidently. The arithmetic is therefore pinned per series, from the
+    // fixture's own geometry, with the derivation written out.
+    //
+    // THE ARITHMETIC, once (σ_kp = 2 px on every joint, hips 100 px apart, stance 200 px, mmPerPx 2):
+    //   sqrt(σ_a² + σ_b²) = sqrt(8) = 2.8284271 px is the σ of any DIFFERENCE of two keypoints
+    //   hipLineTilt      sqrt(8)/100  rad→deg  = 1.6205694°   (σ over the line's Euclidean LENGTH)
+    //   feetAlignment    sqrt(8)/200  rad→deg  = 0.8102847°   (twice the lever arm ⇒ half the σ)
+    //   pelvisSway/Lift  0.5·sqrt(8)/200 ·100  = 0.7071068 %  (the 0.5 is the pelvis MIDPOINT)
+    //   leadKneeDrift    sqrt(8)/200 ·100      = 1.4142136 %  (knee MINUS hip: two keypoints, no 0.5)
+    //
+    // THE TWO PROJECTED DISTANCES carry a THIRD term that dominates both of the above, so their
+    // arithmetic is written out separately. Keypoint noise in either ankle ROTATES the stance line by
+    // dφ ≈ σ/L, and a point h px off that line then moves h·dφ ALONG it. Here the hip centre sits
+    // h = 400 px above an L = 200 px ankle line, so h/L = 2 and the rotation terms carry FOUR times the
+    // reference-ankle term. Differentiating the whole expression (see the producer) gives
+    //   comOverLeadFoot  var = 0.25σ² + 0.25σ² + (1 + 4)σ² + 4σ²          = 38 px² ⇒ 6.1644140 px
+    //                    ⇒ 6.1644140 · 100/200                           = 3.0822070 %
+    //   plumbBob         var = 0.25σ² + 0.25σ² + (0.25 + 4)(σ² + σ²)      = 36 px² ⇒ 6.0 px exactly
+    //                    ⇒ 6.0 · 2/25.4                                  = 0.4724409 in
+    // C11 pinned the (h/L) = 0 readings of both — 1.2247449 % and 0.1113554 in — which understate σ by
+    // 2.5× and 4.2×. Design principle 3 rules those out; the full forms are what the producer ships and
+    // what these cases assert.
+    {
+        std::printf("=== 8a) a constant keypoint σ gives each series its closed-form σ ===\n");
+        const std::vector<Lower> poses(12, sigmaPose());
+        const PoseTrack2D pose = sigmaTrack(poses, std::vector<double>(12, 2.0), dt);
+        // Impact ON THE LAST GRID SAMPLE, so the phase-domain tail marks nothing and every frame
+        // contributes: §8d is where the mask does the work.
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      6 * dt },
+                                     { Phase::Impact,  11 * dt } });
+        const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0);
+        CHECK("the fixture resolved as designed (hip line 100 px, stance 200 px)",
+              near(res.addrHipSpanPx, 100.0, 1e-9) && near(res.addrSpanPx, 200.0, 1e-9));
+
+        // THE PARALLELISM INVARIANT. One σ per pushed value, on every channel — the property that
+        // makes a per-sample σ safe to reduce at all. A channel that pushed a value without a σ would
+        // silently pair every later σ with the wrong sample.
+        CHECK("every channel's σ track is parallel to its values",
+              res.kneeDrift.sigma.size()  == res.kneeDrift.t_us.size()
+                  && res.pelvisSway.sigma.size()  == res.pelvisSway.t_us.size()
+                  && res.pelvisLift.sigma.size()  == res.pelvisLift.t_us.size()
+                  && res.hipTilt.sigma.size()     == res.hipTilt.t_us.size()
+                  && res.feetAlign.sigma.size()   == res.feetAlign.t_us.size()
+                  && res.comOverLead.sigma.size() == res.comOverLead.t_us.size()
+                  && res.plumbBob.sigma.size()    == res.plumbBob.t_us.size());
+
+        const auto series = buildLowerBodySeries(res, phases);
+        CHECK("all seven series emitted (the ruler resolved, so plumbBob is present)",
+              series.size() == 7);
+
+        const double q2   = std::sqrt(8.0);            // σ of a difference of two 2 px keypoints
+        const double toDeg = 57.29577951308232;
+        // The projected distances' lever ratio, from the FIXTURE's geometry: the hip centre (y = 500)
+        // sits 400 px above the ankle line (y = 900), which is 200 px long.
+        const double sig2  = 4.0;                      // σ_kp² = (2 px)²
+        const double lever = 400.0 / 200.0;
+        const double lev2  = lever * lever;
+        struct Want { const char *key; double sigma; };
+        const Want wants[] = {
+            { "hipLineTilt",      q2 / 100.0 * toDeg },
+            { "feetAlignment",    q2 / 200.0 * toDeg },
+            { "pelvisSway",       0.5 * q2 / 200.0 * 100.0 },
+            { "pelvisLift",       0.5 * q2 / 200.0 * 100.0 },
+            { "leadKneeDrift",    q2 / 200.0 * 100.0 },
+            // ∂/∂M = û (0.25 per hip); ∂/∂A = −û + (h/L)n̂; ∂/∂B = −(h/L)n̂
+            { "comOverLeadFoot",  std::sqrt(0.25 * sig2 + 0.25 * sig2
+                                            + (1.0 + lev2) * sig2 + lev2 * sig2) / 200.0 * 100.0 },
+            // the stance CENTRE is the reference, so BOTH ankles carry −0.5û as well as ±(h/L)n̂
+            { "plumbBobDistance", std::sqrt(0.25 * sig2 + 0.25 * sig2
+                                            + (0.25 + lev2) * (sig2 + sig2)) * 2.0 / 25.4 },
+        };
+        for (const Want &w : wants) {
+            const MetricSeries *m = findSeries(series, w.key);
+            char label[160];
+            std::snprintf(label, sizeof(label), "%s σ = %.7f (closed form)", w.key, w.sigma);
+            CHECK(label, m && m->sigma.has_value() && nearRel(*m->sigma, w.sigma, 1e-5));
+        }
+        // And the two absolute figures C11 quotes, spelled out so a reader can check them without
+        // re-deriving anything.
+        const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+        const MetricSeries *pb   = findSeries(series, "plumbBobDistance");
+        CHECK("hip tilt over a 100 px line is 1.62° of σ, not 0.02",
+              tilt && tilt->sigma && near(*tilt->sigma, 1.6205694, 5e-5));
+        // Half an inch, not a tenth: the stance line's ROTATION under ankle jitter is what the number
+        // is mostly made of, and C11's 0.1113554 in was that term left out. C12's display step is the
+        // nicest of {1,2,5}×10ⁿ that is not BELOW σ, FLOORED AT ONE UNIT — so σ = 0.47 in does not buy
+        // half-inches, it lands on the floor and the plumb bob prints in WHOLE INCHES. That is the
+        // honest digit for a reading built on a 200 px line with 2 px keypoints, and it is the
+        // difference this whole phase exists to make: the same curve used to print two decimals.
+        CHECK("the plumb bob's σ is 0.472 in — 6.0 px exactly, through the ruler",
+              pb && pb->sigma && near(*pb->sigma, 0.4724409, 5e-5));
+        const MetricSeries *com = findSeries(series, "comOverLeadFoot");
+        CHECK("comOverLeadFoot's σ is 3.08 % of stance — 2.5× what the (h/L)=0 form claimed",
+              com && com->sigma && near(*com->sigma, 3.0822070, 5e-5));
+    }
+
+    // ── 8b) no smoother ⇒ no σ anywhere ────────────────────────────────────
+    //
+    // The field's contract: ABSENT means "not characterised", and every swing analysed before the
+    // smoother existed has no `smoothedAux`. Writing 0 there would claim a perfect measurement, and
+    // the display layer would then print every digit it has.
+    {
+        std::printf("=== 8b) smoothedAux empty ⇒ every sigma UNSET ===\n");
+        const std::vector<Lower> poses(12, sigmaPose());
+        const PoseTrack2D pose = sigmaTrack(poses, {}, dt);      // no aux at all
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      6 * dt },
+                                     { Phase::Impact,  11 * dt } });
+        const auto series = buildLowerBodySeries(
+            trackLowerBody(pose, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+        bool none = series.size() == 7;
+        for (const MetricSeries &m : series)
+            none = none && !m.sigma.has_value();
+        CHECK("no series carries σ — and none carries 0 either", none);
+
+        // A track with a smoothed companion whose σ are all ZERO is the same statement: the smoother
+        // ran and produced nothing for those keypoints (its own sentinel), so there is still no budget.
+        const PoseTrack2D zeros = sigmaTrack(poses, std::vector<double>(12, 0.0), dt);
+        const auto zseries = buildLowerBodySeries(
+            trackLowerBody(zeros, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+        bool zn = zseries.size() == 7;
+        for (const MetricSeries &m : zseries)
+            zn = zn && !m.sigma.has_value();
+        CHECK("σ = 0 on every joint is ABSENT, not a perfect measurement", zn);
+    }
+
+    // ── 8c) one joint unsmoothed ⇒ those frames drop out, the median does not move ──
+    //
+    // The rule this pins is "every joint the value was built from must report a σ". A frame where one
+    // of them did not has an error budget with a hole in it, and a hole is UNKNOWN rather than small —
+    // so the frame contributes nothing rather than an optimistic figure. With a constant σ elsewhere
+    // the median is unchanged, which is the cleanest way to show the frames were dropped and not
+    // merely down-weighted. The channels that never touch that joint keep every frame.
+    {
+        std::printf("=== 8c) frames with a missing joint σ are excluded ===\n");
+        const std::vector<Lower> poses(12, sigmaPose());
+        const double toDeg = 57.29577951308232;
+        const double q2 = std::sqrt(8.0);
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      6 * dt },
+                                     { Phase::Impact,  11 * dt } });
+
+        PoseTrack2D some = sigmaTrack(poses, std::vector<double>(12, 2.0), dt);
+        some.smoothedAux[3].sigma[kLHip] = 0.f;      // lead = LEFT here, so this is the LEAD hip
+        some.smoothedAux[4].sigma[kLHip] = 0.f;
+        const auto sseries = buildLowerBodySeries(
+            trackLowerBody(some, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+        const MetricSeries *tilt = findSeries(sseries, "hipLineTilt");
+        const MetricSeries *feet = findSeries(sseries, "feetAlignment");
+        const MetricSeries *sway = findSeries(sseries, "pelvisSway");
+        CHECK("the median of a constant σ is unmoved by dropping two frames",
+              tilt && tilt->sigma && nearRel(*tilt->sigma, q2 / 100.0 * toDeg, 1e-5)
+                  && sway && sway->sigma && nearRel(*sway->sigma, 0.5 * q2 / 2.0, 1e-5));
+        CHECK("a channel that never reads that joint keeps every frame",
+              feet && feet->sigma && nearRel(*feet->sigma, q2 / 200.0 * toDeg, 1e-5));
+
+        // The same joint dark on EVERY frame: now nothing contributed, so those series carry no σ at
+        // all — while the ankle-only channel still does. Absence is PER SERIES, which is what makes it
+        // informative rather than a global switch.
+        PoseTrack2D all = sigmaTrack(poses, std::vector<double>(12, 2.0), dt);
+        for (PoseKpAux &a : all.smoothedAux) a.sigma[kLHip] = 0.f;
+        const auto aseries = buildLowerBodySeries(
+            trackLowerBody(all, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+        const char *hipKeys[] = { "hipLineTilt", "pelvisSway", "pelvisLift", "leadKneeDrift",
+                                  "comOverLeadFoot", "plumbBobDistance" };
+        bool gone = true;
+        for (const char *k : hipKeys) {
+            const MetricSeries *m = findSeries(aseries, k);
+            gone = gone && m && !m->sigma.has_value();
+        }
+        const MetricSeries *feet2 = findSeries(aseries, "feetAlignment");
+        CHECK("every channel that reads the lead hip loses its σ entirely", gone);
+        CHECK("…and feetAlignment, which does not, keeps its own",
+              feet2 && feet2->sigma.has_value());
+    }
+
+    // ── 8d) the validity mask is honoured: the post-Impact tail does not vote ──
+    //
+    // ⚠ THE PHASE DOMAIN'S TAIL IS THE ONLY WAY A σ ENTRY CAN EXIST AND STILL BE MASKED OUT, which is
+    // why it is the case that tests the mask. A GATED frame and an OVER-BRIDGED frame both leave the
+    // channel with no sample at that instant, so they carry no σ entry to exclude in the first place —
+    // the sparsity does that work. Past impact the sample IS there, is drawn, and is invalid.
+    //
+    // Construction: eight held frames at σ = 2 px, then TWELVE more at σ = 20 px, Impact on frame 7.
+    // The tail is the MAJORITY deliberately — if it voted, the median would be the high value, so the
+    // low answer cannot come from luck. The channels whose domain is the whole swing (feetAlignment,
+    // comOverLeadFoot) are the control: their medians DO move, which shows the exclusion comes from
+    // the mask and not from the code quietly ignoring the tail.
+    {
+        std::printf("=== 8d) masked frames do not enter the median ===\n");
+        const std::vector<Lower> poses(20, sigmaPose());
+        std::vector<double> sigs;
+        for (int k = 0; k < 20; ++k) sigs.push_back(k <= 7 ? 2.0 : 20.0);
+        const PoseTrack2D pose = sigmaTrack(poses, sigs, dt);
+        const auto phases = ladder({ { Phase::Address, 2 * dt },
+                                     { Phase::Top,     5 * dt },
+                                     { Phase::Impact,  7 * dt } });
+        const auto series = buildLowerBodySeries(
+            trackLowerBody(pose, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+
+        const double q2   = std::sqrt(8.0);            // the HEAD's difference-σ (2 px keypoints)
+        const double toDeg = 57.29577951308232;
+        const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+        CHECK("the tail really is masked (so the case is testing what it claims)",
+              tilt && tilt->valid.size() == 20 && tilt->valid[7] == 1u && tilt->valid[8] == 0u);
+        CHECK("hipLineTilt σ is the HEAD's, though the tail is 12 frames of 20",
+              tilt && tilt->sigma && nearRel(*tilt->sigma, q2 / 100.0 * toDeg, 1e-5));
+        const MetricSeries *sway = findSeries(series, "pelvisSway");
+        const MetricSeries *knee = findSeries(series, "leadKneeDrift");
+        const MetricSeries *pb   = findSeries(series, "plumbBobDistance");
+        CHECK("…and so are the other three Address→Impact channels",
+              sway && sway->sigma && nearRel(*sway->sigma, 0.5 * q2 / 2.0, 1e-5)
+                  && knee && knee->sigma && nearRel(*knee->sigma, q2 / 2.0, 1e-5)
+                  // 6.0 px exactly through the ruler — the closed form is written out in §8a.
+                  && pb && pb->sigma && nearRel(*pb->sigma, 6.0 * 2.0 / 25.4, 1e-5));
+
+        // The control. feetAlignment and comOverLeadFoot are whole-swing quantities (design §5.1), so
+        // every frame is valid for them and the 20 px tail is the majority — their σ is TEN times the
+        // head's, because every formula here is homogeneous of degree one in the keypoint σ.
+        const MetricSeries *feet = findSeries(series, "feetAlignment");
+        const MetricSeries *com  = findSeries(series, "comOverLeadFoot");
+        const double sig2 = 4.0, lever = 400.0 / 200.0, lev2 = lever * lever;
+        const double comHead = std::sqrt(0.25 * sig2 + 0.25 * sig2
+                                         + (1.0 + lev2) * sig2 + lev2 * sig2) / 200.0 * 100.0;
+        CHECK("an UNMASKED channel does see the tail — the mask is doing the excluding",
+              feet && feet->sigma && nearRel(*feet->sigma, 10.0 * q2 / 200.0 * toDeg, 1e-5)
+                  && com && com->sigma && nearRel(*com->sigma, 10.0 * comHead, 1e-5));
+    }
+
+    // ── 8e) σ moves no number ──────────────────────────────────────────────
+    //
+    // Design §6: stages 5.1–5.3 change no persisted `value`. This is that promise for this producer,
+    // and it is asserted BITWISE rather than to a tolerance — σ is read off a parallel track and
+    // written to one optional field, so there is no rounding for it to hide behind.
+    {
+        std::printf("=== 8e) value[] and phaseSamples are bit-identical with and without σ ===\n");
+        const std::vector<Lower> poses(12, sigmaPose());
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      6 * dt },
+                                     { Phase::Impact,  11 * dt } });
+        const auto withSig = buildLowerBodySeries(
+            trackLowerBody(sigmaTrack(poses, std::vector<double>(12, 2.0), dt), W, H, true,
+                           2 * dt, {}, /*mmPerPx=*/2.0), phases);
+        const auto without = buildLowerBodySeries(
+            trackLowerBody(sigmaTrack(poses, {}, dt), W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0),
+            phases);
+
+        bool same = withSig.size() == without.size() && !withSig.empty();
+        for (size_t i = 0; same && i < withSig.size(); ++i) {
+            const MetricSeries &a = withSig[i], &b = without[i];
+            same = same && a.key == b.key && a.unit == b.unit
+                   && a.t_us == b.t_us && a.value == b.value && a.valid == b.valid
+                   && a.phaseSamples.size() == b.phaseSamples.size();
+            for (size_t j = 0; same && j < a.phaseSamples.size(); ++j)
+                same = same && a.phaseSamples[j].phase == b.phaseSamples[j].phase
+                       && a.phaseSamples[j].t_us == b.phaseSamples[j].t_us
+                       && a.phaseSamples[j].value == b.phaseSamples[j].value;
+        }
+        CHECK("every key, t_us, value, valid and phaseSample is identical", same);
+        bool onlySigma = true;
+        for (const MetricSeries &m : withSig)  onlySigma = onlySigma && m.sigma.has_value();
+        for (const MetricSeries &m : without)  onlySigma = onlySigma && !m.sigma.has_value();
+        CHECK("…and σ is the ONLY difference between the two runs", onlySigma);
+    }
+
+    // ── 8f) A TILTED line: σ divides by the EUCLIDEAN length, not by |Δx| ──
+    //
+    // §8a cannot see the difference — its lines are level, so L == |Δx| and a mutation swapping one for
+    // the other passes. Tilt the trail hip 30 px (16.7° on a 100 px line) and the two readings separate
+    // by 1/cos(16.7°) = 4.40 %, which this case pins from BOTH sides: the Euclidean value must match,
+    // and the |Δx| value must NOT.
+    //
+    // Only hipLineTilt and feetAlignment are asserted here. Dropping the trail hip also moves the hip
+    // MIDPOINT, so the two projected distances change for a reason that has nothing to do with the
+    // line-tilt question, and asserting them would test two things at once.
+    {
+        std::printf("=== 8f) a tilted line: Euclidean L, not |Δx| ===\n");
+        const std::vector<Lower> poses(12, sigmaPoseTilted());
+        const PoseTrack2D pose = sigmaTrack(poses, std::vector<double>(12, 2.0), dt);
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      6 * dt },
+                                     { Phase::Impact,  11 * dt } });
+        const auto series = buildLowerBodySeries(
+            trackLowerBody(pose, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+
+        const double q2    = std::sqrt(8.0);
+        const double toDeg = 57.29577951308232;
+        const double hipL  = std::hypot(100.0, 30.0);        // 104.4031 px, from the fixture
+        const MetricSeries *tilt = findSeries(series, "hipLineTilt");
+        CHECK("the tilt really is 16.7°, so the case is testing what it claims",
+              tilt && near(std::abs(valueAt(*tilt, 6 * dt)),
+                           std::atan2(30.0, 100.0) * toDeg, 1e-6));
+        CHECK("hipLineTilt σ = sqrt(8)/104.4031 · 180/π = 1.5522239°",
+              tilt && tilt->sigma && nearRel(*tilt->sigma, q2 / hipL * toDeg, 1e-5));
+        CHECK("…and NOT sqrt(8)/|Δx|, which is 4.40 % larger — the ∂θ/∂Δx term is carried",
+              tilt && tilt->sigma && !nearRel(*tilt->sigma, q2 / 100.0 * toDeg, 1e-3));
+        // The control, in the same run: the ankles were not tilted, so their σ is unchanged. σ is a
+        // per-LINE quantity taken from that line's own length, not one number for the swing.
+        const MetricSeries *feet = findSeries(series, "feetAlignment");
+        CHECK("the still-level ankle line is unchanged at 0.8102847°",
+              feet && feet->sigma && nearRel(*feet->sigma, q2 / 200.0 * toDeg, 1e-5));
+    }
+
+    // ── 8g) DISTINCT per-joint σ: the coefficients, and the handedness plumbing ──
+    //
+    // Every case above gives every joint the same σ, which pins no asymmetric COEFFICIENT at all: swap
+    // the lead and trail ankle in comOverLeadFoot, or read the trail hip where leadKneeDrift wants the
+    // lead one, and a constant σ hides it perfectly. σ here is attached to the PHYSICAL keypoint —
+    // left hip 2, right hip 3, left knee 5, right knee 7, left ankle 1, right ankle 4 — and the SAME
+    // fixture is run with `leadIsLeft` both ways, so the two runs are each other's control: any channel
+    // whose σ fails to swap is reading the wrong side.
+    //
+    // ⚠ WHAT THIS CANNOT PIN, stated rather than implied. `leadKneeDrift`'s σ is sqrt(σ_knee² + σ_hip²)
+    // — SYMMETRIC in its two inputs, so no fixture can detect knee and lead-hip being exchanged. There
+    // is nothing there to detect: the two coefficients are genuinely both 1. What IS pinned is the
+    // joint SELECTION, because reading the trail hip (3) instead of the lead hip (2) gives 2.9154759
+    // against 2.6925824. The same applies to every line tilt, and to plumbBobDistance, whose two ankle
+    // coefficients are equal by construction (0.25 + (h/L)² each) — its σ is deliberately asserted to
+    // be the SAME in both runs, which is the honest statement about it.
+    {
+        std::printf("=== 8g) distinct per-joint σ, both handedness ===\n");
+        const std::vector<Lower> poses(12, sigmaPose());
+        const PoseKpAux aux = auxPerJoint(/*lHip=*/2.0, /*rHip=*/3.0, /*lKnee=*/5.0,
+                                          /*rKnee=*/7.0, /*lAnk=*/1.0, /*rAnk=*/4.0);
+        const PoseTrack2D pose = trackWithAux(poses, aux, dt);
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      6 * dt },
+                                     { Phase::Impact,  11 * dt } });
+        const double toDeg = 57.29577951308232;
+        const double lever = 400.0 / 200.0, lev2 = lever * lever;   // as §8a: hips 400 px up, line 200
+        const auto q = [](double a, double b) { return std::sqrt(a * a + b * b); };
+
+        for (int pass = 0; pass < 2; ++pass) {
+            const bool leadIsLeft = (pass == 0);
+            // The σ each ROLE sees, given that the aux is pinned to physical left/right.
+            const double sLHip = leadIsLeft ? 2.0 : 3.0, sTHip = leadIsLeft ? 3.0 : 2.0;
+            const double sLKnee = leadIsLeft ? 5.0 : 7.0;
+            const double sLAnk = leadIsLeft ? 1.0 : 4.0, sTAnk = leadIsLeft ? 4.0 : 1.0;
+            const auto series = buildLowerBodySeries(
+                trackLowerBody(pose, W, H, leadIsLeft, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+
+            struct Want { const char *key; double sigma; };
+            const Want wants[] = {
+                // symmetric in their two inputs ⇒ the same in both passes, which is itself the claim
+                { "hipLineTilt",      q(sLHip, sTHip) / 100.0 * toDeg },
+                { "feetAlignment",    q(sLAnk, sTAnk) / 200.0 * toDeg },
+                { "pelvisSway",       0.5 * q(sLHip, sTHip) / 200.0 * 100.0 },
+                { "pelvisLift",       0.5 * q(sLHip, sTHip) / 200.0 * 100.0 },
+                // asymmetric: the LEAD knee against the LEAD hip, never the trail one
+                { "leadKneeDrift",    q(sLKnee, sLHip) / 200.0 * 100.0 },
+                // asymmetric: the LEAD ankle is the reference (1 + (h/L)²), the trail is pure rotation
+                { "comOverLeadFoot",  std::sqrt(0.25 * (sLHip * sLHip + sTHip * sTHip)
+                                                + (1.0 + lev2) * sLAnk * sLAnk
+                                                + lev2 * sTAnk * sTAnk) / 200.0 * 100.0 },
+                // the two ankles carry EQUAL coefficients here, so this one cannot swap
+                { "plumbBobDistance", std::sqrt(0.25 * (sLHip * sLHip + sTHip * sTHip)
+                                                + (0.25 + lev2) * (sLAnk * sLAnk + sTAnk * sTAnk))
+                                          * 2.0 / 25.4 },
+            };
+            for (const Want &w : wants) {
+                const MetricSeries *m = findSeries(series, w.key);
+                char label[192];
+                std::snprintf(label, sizeof(label), "leadIsLeft=%d  %s σ = %.7f",
+                              leadIsLeft ? 1 : 0, w.key, w.sigma);
+                CHECK(label, m && m->sigma.has_value() && nearRel(*m->sigma, w.sigma, 1e-5));
+            }
+
+            const MetricSeries *knee = findSeries(series, "leadKneeDrift");
+            CHECK("leadKneeDrift does NOT read the trail hip",
+                  knee && knee->sigma && !nearRel(*knee->sigma, q(sLKnee, sTHip) / 2.0, 1e-4));
+            const MetricSeries *com = findSeries(series, "comOverLeadFoot");
+            CHECK("comOverLeadFoot's two ankle coefficients are NOT interchangeable",
+                  com && com->sigma
+                      && !nearRel(*com->sigma,
+                                  std::sqrt(0.25 * (sLHip * sLHip + sTHip * sTHip)
+                                            + (1.0 + lev2) * sTAnk * sTAnk
+                                            + lev2 * sLAnk * sLAnk) / 2.0, 1e-4));
+        }
+        // The headline numbers, so the swap is visible as two figures rather than as an argument:
+        // leadKneeDrift 2.6925824 % → 3.8078866 % and comOverLeadFoot 4.25 % → 4.6703854 % when the
+        // lead side moves, while plumbBobDistance holds at 0.6841790 in.
+        const auto left  = buildLowerBodySeries(
+            trackLowerBody(pose, W, H, true,  2 * dt, {}, 2.0), phases);
+        const auto right = buildLowerBodySeries(
+            trackLowerBody(pose, W, H, false, 2 * dt, {}, 2.0), phases);
+        const MetricSeries *kl = findSeries(left, "leadKneeDrift");
+        const MetricSeries *kr = findSeries(right, "leadKneeDrift");
+        const MetricSeries *pl = findSeries(left, "plumbBobDistance");
+        const MetricSeries *pr = findSeries(right, "plumbBobDistance");
+        CHECK("swapping the lead side MOVES the asymmetric σ …",
+              kl && kr && kl->sigma && kr->sigma && near(*kl->sigma, 2.6925824, 5e-5)
+                  && near(*kr->sigma, 3.8078866, 5e-5));
+        CHECK("… and leaves the symmetric one alone",
+              pl && pr && pl->sigma && pr->sigma && near(*pl->sigma, 0.6841790, 5e-5)
+                  && near(*pr->sigma, 0.6841790, 5e-5));
+    }
+
+    // ── 8h) the parity off-switch withholds σ too ───────────────────────────
+    //
+    // `channel.maxBridgeUs` < 0 means "emit no validity mask at all", and its only purpose is to
+    // reproduce the pre-mask bytes for a parity run. σ has to go with the masks, not beside them: a σ
+    // written with no mask is a median over the gated and post-Impact frames as well — a DIFFERENT
+    // number from the masked one, on a NEW key, in the one run whose whole job is to produce the old
+    // bytes. §6d3 pins the mask half of the same switch.
+    {
+        std::printf("=== 8h) maxBridgeUs < 0 ⇒ no mask AND no σ ===\n");
+        const std::vector<Lower> poses(12, sigmaPose());
+        const PoseTrack2D pose = sigmaTrack(poses, std::vector<double>(12, 2.0), dt);
+        const auto phases = ladder({ { Phase::Address,  2 * dt },
+                                     { Phase::Top,      6 * dt },
+                                     { Phase::Impact,   8 * dt } });   // a real post-Impact tail
+        LowerBodyConfig off; off.maxBridgeUs = -1;
+        const auto series = buildLowerBodySeries(
+            trackLowerBody(pose, W, H, true, 2 * dt, off, /*mmPerPx=*/2.0), phases);
+        bool none = series.size() == 7;
+        for (const MetricSeries &m : series)
+            none = none && m.valid.empty() && !m.sigma.has_value();
+        CHECK("no mask and no σ on any series — the switch restores the old bytes whole", none);
+
+        // The same track WITH the switch on does carry both, so the case is not passing by accident.
+        const auto on = buildLowerBodySeries(
+            trackLowerBody(pose, W, H, true, 2 * dt, {}, /*mmPerPx=*/2.0), phases);
+        bool both = on.size() == 7;
+        for (const MetricSeries &m : on) both = both && m.sigma.has_value();
+        CHECK("…while the default run has σ on every one of them", both);
     }
 
     // ── 7) fromOverrides ───────────────────────────────────────────────────

@@ -35,7 +35,11 @@ Item {
 
     // ── Data (decorated by the parent) ────────────────────────────────────────────
     // series: [{ key, label, unit, t_us:[…], value:[…], phaseSamples:[…], color,
-    //            valid?:[0|1…], validFromUs?, validToUs? }]
+    //            valid?:[0|1…], validFromUs?, validToUs?, sigma? }]
+    //
+    // `sigma` is the series' 1σ MEASUREMENT noise in its own unit (§5.3) and is read by exactly one
+    // thing in here, the ±σ ribbon below. Optional, and ABSENT means never characterised rather
+    // than zero — a series without it simply gets no ribbon.
     //
     // The last three are the HONESTY triple (design metric_presentation_honesty.md §5.1) and all
     // three are OPTIONAL, because absence is the common case and must cost nothing:
@@ -61,6 +65,21 @@ Item {
     property bool showDots:      true
     property bool showCrosshair: true
     property real cursorUs:     -1       // shared hover cursor (−1 = inactive)
+
+    // ── THE ±σ RIBBON — OFF, AND OFF FOR A REASON (design §5.3, §8) ────────────────
+    //
+    // A band of ± the series' own measurement σ around the measured runs of its curve. It is the
+    // only way to SHOW that a wobble is inside the noise rather than telling the reader so in
+    // words, and design §8 lists it among the decisions still open — "keep dark until seen". So it
+    // defaults false, nothing in the app switches it on, and the one thing that does is a probe
+    // setting the property (tools/probes/plumb_bob_chart.qml → PpMetricChart.showSigmaBand). There
+    // is no UI toggle on purpose: a toggle is a shipped visual and a persisted preference, and
+    // neither has been agreed.
+    //
+    // ⚠ IT IS NOT A SMOOTHER AND IT MOVES NOTHING. The stroke still passes through every persisted
+    // sample at its persisted value; the ribbon is drawn BEHIND it (declared before the traces) and
+    // is purely additive. Display-only smoothing is forbidden outright (design §4 principle 1).
+    property bool showSigmaBand: false
 
     // ── Geometry knobs (parent tunes per mode) ────────────────────────────────────
     property int  yTickCount: 4
@@ -204,6 +223,48 @@ Item {
         return out
     }
 
+    // The ±σ ribbon's geometry: per series, its MEASURED runs as { color, sigma, t[], v[] }, or an
+    // empty list when the band is off. Only the measured runs get one, for the same reason the
+    // dashed stroke exists — a bridged sample is not a measurement, so it has no measurement noise
+    // to draw, and a band spanning the bridge would put an error bar on a number nobody measured.
+    // Runs of one sample are dropped: a polygon needs two.
+    //
+    // A series with NO σ contributes nothing at all. Absent means "never characterised" (§5.3), and
+    // the one thing a chart must not do with that is draw a zero-width ribbon, which reads as a
+    // measurement of perfect precision. Nothing drawn is the honest picture of nothing known.
+    //
+    // The whole walk is behind `showSigmaBand`, so the default-off case costs one boolean test per
+    // re-evaluation rather than a pass over every series.
+    readonly property var _sigmaRuns: {
+        var out = []
+        if (!root.showSigmaBand) return out
+        for (var k = 0; k < (root.series ? root.series.length : 0); ++k) {
+            var s = root.series[k]
+            if (!s || !s.t_us || !s.value || s.t_us.length < 2) continue
+            // ChartMetrics.seriesSigma, not a local guard: one implementation of "absent means
+            // absent" (it was three). Called once per series here, on a binding that changes with
+            // the DATA — never per frame; it marshals the whole series.
+            var sg = cm.seriesSigma(s)
+            if (!(sg > 0)) continue
+            var t = [], v = []
+            for (var i = 0; i < s.t_us.length; ++i) {
+                if (root._measured(s, i)) {
+                    t.push(s.t_us[i]); v.push(s.value[i])
+                } else if (t.length > 0) {
+                    if (t.length > 1) out.push({ color: s.color, sigma: sg, t: t, v: v })
+                    t = []; v = []
+                }
+            }
+            if (t.length > 1) out.push({ color: s.color, sigma: sg, t: t, v: v })
+        }
+        return out
+    }
+    // How many ribbon polygons this plot is drawing — 0 whenever the band is off, whenever no
+    // visible series carries a σ, and whenever nothing was measured. Read by the plumb-bob probe
+    // (which duck-types for this property while walking the chart) so a probe run can REPORT that
+    // the ribbon drew rather than assert it from the property being set. Not used by any binding.
+    readonly property int sigmaBandRuns: root._sigmaRuns.length
+
     // ── Y grid + tick labels (absolute coords; gutter holds the labels) ────────────
     Repeater {
         model: cm.niceTicks(root.valueLo, root.valueHi, root.yTickCount)
@@ -317,6 +378,48 @@ Item {
         x: root._plotLeft; y: root._plotTop
         width: root._plotW; height: root._plotH
         clip: true
+
+        // ±σ ribbon — DECLARED FIRST so it paints BEHIND the traces, the dots and the playhead
+        // (QQuickItem paints siblings in declaration order and none of these set z). A band drawn
+        // over the stroke would obscure the one thing on this plot that is a measurement.
+        //
+        // 0.06 opacity: at that weight it is a tint the eye reads as "region", not as a second
+        // curve, and two overlapping series' bands still resolve. See root.showSigmaBand for why
+        // this is off by default and has no control.
+        Repeater {
+            model: root._sigmaRuns
+            delegate: Shape {
+                id: band
+                required property var modelData
+                anchors.fill: parent
+                preferredRendererType: Shape.CurveRenderer
+                opacity: 0.06
+                ShapePath {
+                    // Fill only. A negative strokeWidth is ShapePath's own "do not stroke", and it
+                    // matters here: a 1px outline at this fill weight would be the most visible
+                    // part of the band and would read as two extra curves.
+                    strokeWidth: -1
+                    strokeColor: "transparent"
+                    fillColor:   band.modelData.color
+                    PathPolyline {
+                        // The +σ edge forward, the −σ edge back, then closed on the first point.
+                        // One polygon per measured run, in plot coordinates — so a Y-range change
+                        // or a resize re-runs only this map, not the run splitting above.
+                        path: {
+                            var pts = [], m = band.modelData, n = m.t.length, i
+                            for (i = 0; i < n; ++i)
+                                pts.push(Qt.point(root.xForT(m.t[i]),
+                                                  root.yForV(m.v[i] + m.sigma)))
+                            for (i = n - 1; i >= 0; --i)
+                                pts.push(Qt.point(root.xForT(m.t[i]),
+                                                  root.yForV(m.v[i] - m.sigma)))
+                            if (pts.length > 0) pts.push(pts[0])
+                            return pts
+                        }
+                    }
+                }
+            }
+        }
 
         // Traces — one Shape per RUN (see _traceRuns): a series is one run when everything in it
         // was measured, which is every series that predates the validity mask.

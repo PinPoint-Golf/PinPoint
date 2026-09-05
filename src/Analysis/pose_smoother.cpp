@@ -333,7 +333,23 @@ void smoothKeypoint(const std::vector<double> &zx, const std::vector<double> &zy
             KpResult &r = out[std::size_t(seg.frames[i])];
             r.px = xs[i]; r.py = ys[i];
             r.hasSmoothed = true;
-            // Representative per-axis posterior σ (px): RMS of the two axes.
+            // Per-axis posterior σ (px).
+            //
+            // ⚠ THIS IS AN EQUALITY, NOT AN AVERAGE, and a downstream consumer depends on it. The x and
+            // y tracks are filtered by two Kf3 instances constructed with the SAME q, stepped with the
+            // SAME dt, updated with the SAME R, and — the part that matters — sharing the ACCEPT FLAG:
+            // `acc = kfx->gatePass(...) && kfy->gatePass(...)`, so a keypoint is accepted on both axes
+            // or rejected on both, and `trimTail` trims the identical frames. The covariance recursion
+            // touches none of the measurement VALUES, only q, dt, R and accept — so xv[i] == yv[i]
+            // bit-for-bit, and the mean below is that common variance written the long way. Keep the
+            // segmentation joint if this is ever revisited: split the accept flag per axis and the two
+            // diverge, this scalar stops being a per-axis σ, and every isotropy step downstream becomes
+            // an approximation instead of an identity.
+            //
+            // lower_body_metrics.cpp and upper_body_metrics.cpp read this scalar as a TRUE PER-AXIS σ:
+            // they propagate it through formulas that use only a keypoint's y (a body-line tilt), only
+            // its x (pelvis sway) and projections onto arbitrary unit directions (the plumb bob, the
+            // thorax drift), all without rescaling. That is exact because of the equality above.
             const double var = 0.5 * (std::max(xv[i], 0.0) + std::max(yv[i], 0.0));
             r.sigma = std::sqrt(std::max(var, 1e-9));   // > 0 so 0 stays the "no value" sentinel
         }

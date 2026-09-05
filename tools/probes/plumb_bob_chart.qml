@@ -4,10 +4,13 @@
 //     .../PinPointStudio.app/Contents/MacOS/PinPointStudio \
 //     --probe-qml /abs/path/plumb_bob_chart.qml
 //
-// Verifies Phases 1 and 2 of docs/design/metric_presentation_honesty.md WITHOUT screenshots:
-// Phase 1's validity mask / phase domains / suppressed samples, and Phase 2's shared
-// reducers — the σ on the window a card actually reduces, and the STILL ADDRESS window that
-// design §7 item 2 ("under 2 units per 100 ms on a golfer who has not moved") is judged on.
+// Verifies Phases 1 to 3 of docs/design/metric_presentation_honesty.md WITHOUT screenshots:
+// Phase 1's validity mask / phase domains / suppressed samples, Phase 2's shared reducers —
+// the σ on the window a card actually reduces, and the STILL ADDRESS window that design §7
+// item 2 ("under 2 units per 100 ms on a golfer who has not moved") is judged on — and
+// Phase 3's σ-governed display: each series' σ, the display STEP it buys, the card strings
+// that come out of it (§8 open question 1 is decided by reading those), and whether the ±σ
+// ribbon drew.
 // Every line is prefixed "PBPROBE" so the run can be grepped out of the app log.
 //
 // ── WHAT IT DOES, AND WHY IN THAT ORDER ──────────────────────────────────────────────────
@@ -19,7 +22,10 @@
 //      which is what makes shotReplay.analysisDetail the focused swing's.
 //   4. Feeds that analysisDetail into a PRIVATE PpMetricChart instance and calls its own
 //      _applyPreset("Plumb Bob") — see the note on that below.
-//   5. Reports, per series, everything the chart layer decorates and derives.
+//   5. Reports, per series, everything the chart layer decorates and derives — including the
+//      Phase 3 display step and the exact strings the summary card prints.
+//   6. Reports whether the ±σ ribbon drew, by asking the plots, not by asserting the switch.
+//   7. Walks the live tree read-only to cross-check the on-screen chart.
 //
 // ⚠ WHY A PRIVATE PpMetricChart AND NOT THE ONE ON SCREEN. The on-screen chart is a lazily
 // created panel delegate whose existence depends on the user's persisted View layout
@@ -117,6 +123,12 @@ Item {
         playheadUs: probe.impactUs
         showPlayhead: false
         seekable:   false
+        // ⚠ THE ONE THING IN THE TREE THAT TURNS THE ±σ RIBBON ON. Design §8 keeps it dark until
+        // it has been looked at, so there is no control for it anywhere in the app and this probe
+        // is the switch — see PpChartPlot.showSigmaBand. The report below says how many ribbon
+        // polygons each plot actually drew, which is the question "did it draw" answered by the
+        // drawing code rather than by this line being here.
+        showSigmaBand: true
     }
 
     // Harvests (shotId, swingDir) out of the review model — a QAbstractListModel a probe
@@ -347,6 +359,56 @@ Item {
                 ? probe.num(raw.sigma) + "  (§5.3 / DoD 4)"
                 : "ABSENT — producer did not propagate an error budget"))
 
+        // ── §5.3: WHAT σ DOES TO THE DIGITS ───────────────────────────────────────────────
+        //
+        // The display quantum every printed reading of this series is rounded to. `sg` is the
+        // FORMATTING substitution the QML makes (PpChartSummary._sigma): absent → 0, which asks for
+        // no coarsening and gives back exactly the pre-σ whole-unit rounding. Absent is NOT zero in
+        // the data and nothing here pretends otherwise; this line reports both faces of it.
+        //
+        // A step of 1 on a series that HAS a σ is the answer to design §8 open question 1 being
+        // moot for that metric; a step of 5 or more is the case the question is about, and the
+        // formatted strings a few lines down are what Mark is being asked to look at.
+        // ⚠ THE PROBE KEEPS ITS OWN COPY OF THE absent→0 RULE, on purpose and against the general
+        // "one implementation" grain. The app's copies were collapsed into ChartMetrics.seriesSigma;
+        // a probe that then asked seriesSigma what σ is could never catch seriesSigma being wrong.
+        // So this reads the document directly and the next line CROSS-CHECKS the C++ against it.
+        var sg = (raw.sigma !== undefined && raw.sigma !== null && isFinite(raw.sigma))
+                 ? Number(raw.sigma) : 0
+        var stepv = 1
+        try { stepv = cm.displayStep(sg, raw.unit) } catch (e) { probe.miss("cm.displayStep (" + e + ")") }
+        probe.w("displayStep         = " + probe.num(stepv, 2) + " " + cm.shortUnit(raw.unit)
+                + "   (σ used for display = " + (raw.sigma === undefined ? "0 [ABSENT]" : probe.num(sg))
+                + (stepv > 1 ? "  ⇒ readings COARSENED to multiples of " + probe.num(stepv, 0)
+                             : "  ⇒ whole units, i.e. unchanged from before §5.3") + ")")
+        // ── BOTH ARITIES REACH C++ FROM QML, CHECKED ON EVERY SERIES ──────────────────────
+        //
+        // formatBare/formatValue are ONE method each with a defaulted third argument, so QML calls
+        // the moc CLONE at two arguments and the real method at three (chart_metrics.h explains why a
+        // clone is the safe mechanism and an overload set is not). Both are exercised here rather
+        // than assumed, and the 3-argument line is an ASSERTION, not a print: only a correct
+        // resolution turns (12.6, 2.5) into "+15" — a call that silently dropped the σ would say
+        // "+13", and one that failed to resolve would throw into the catch below. It runs
+        // UNCONDITIONALLY, on every series, including the ones whose own σ is absent, because the
+        // question is about the call path and not about this swing.
+        try {
+            var got3 = cm.formatBare(12.6, raw.unit, 2.5)
+            var deg3 = cm.shortUnit(raw.unit) === "°"
+            probe.w("   arity check         = formatBare(12.6, unit, 2.5) ⇒ '" + got3 + "'  "
+                    + (got3 === (deg3 ? "+15" : "15") ? "PASS (3-arg resolves, step 5 applied)"
+                       : "⛔ FAIL — expected '" + (deg3 ? "+15" : "15") + "'; the σ argument is "
+                         + "not reaching C++")
+                    + "   2-arg: formatBare(12.6, unit) ⇒ '" + cm.formatBare(12.6, raw.unit)
+                    + "'   formatValue(12.6, unit) ⇒ '" + cm.formatValue(12.6, raw.unit) + "'")
+            // And the one helper the app now shares — read against the probe's own copy above, so a
+            // disagreement about what absence means shows up as a mismatch rather than as agreement
+            // by construction.
+            var cppSg = cm.seriesSigma(raw)
+            probe.w("   cm.seriesSigma      = " + probe.num(cppSg)
+                    + (Math.abs(cppSg - sg) < 1e-12 ? "   (agrees with the document)"
+                       : "   ⛔ DISAGREES with the document's σ = " + probe.num(sg)))
+        } catch (e) { probe.miss("formatBare arity / seriesSigma from QML (" + e + ")") }
+
         // ── valid[] ───────────────────────────────────────────────────────────────────────
         // ABSENT is the C4 contract: "every sample valid", which is what every series written
         // before the field existed carries, AND what a series with nothing to mark still
@@ -517,7 +579,82 @@ Item {
         // exactly these. Reading them off the unclamped window would be judging a tile nobody sees.
         var cs = Math.max(ws, p.validFromUs !== undefined ? p.validFromUs : ws)
         var ce = Math.max(cs, Math.min(we, p.validToUs !== undefined ? p.validToUs : we))
-        line("summary CLAMPED    ", sm(cs, ce), cs, ce, true)
+        var csum = sm(cs, ce)
+        line("summary CLAMPED    ", csum, cs, ce, true)
+
+        // ── §5.3 / §8 OPEN QUESTION 1: THE CARD'S OWN STRINGS ─────────────────────────────
+        //
+        // Exactly what PpChartSummary renders for this series on the clamped window, produced by
+        // the same C++ the card calls, so the step rule can be JUDGED on real numbers instead of
+        // described. Design §8 leaves one decision open — "the step rule could feel coarse on the
+        // degrees scale (σ = 2.5° → 5° steps); the alternative is whole units plus the ± chip" — and
+        // these three strings are the evidence for it. Read them next to the raw `peak=` / `rate=`
+        // on the CLAMPED line above: that is the difference the rule makes.
+        //
+        // The ± come from peakSigma / rateSigma (the NOISE of each reduction), not from the series σ,
+        // which has its own chip beside the unit — and PK RATE is deliberately NOT step-quantised,
+        // because its unit is per 100 ms and the series σ is not.
+        if (csum) {
+            var impMeasured = false
+            try { impMeasured = chart._measuredAt(p, probe.impactUs) } catch (e) {}
+            var impV = 0
+            try { impV = labels.valueAtNearest(t, v, Math.round(probe.impactUs)) } catch (e) {}
+            // Its own try: a throw in here must not cost the rest of THIS series' report, and the
+            // step-level safe() wrapper is one level too coarse for that.
+            try {
+                probe.w("§5.3 CARD TEXT      "
+                    + "@IMPACT '" + (impMeasured
+                            ? cm.formatBare(impV, raw.unit, sg) : "—") + "'"
+                    + "   PEAK '" + (csum.edgeOk === false ? "—"
+                            : cm.formatBare(csum.peak, raw.unit, sg) + "  "
+                              + cm.formatUncertainty(csum.peakSigma)) + "'"
+                    + "   PK RATE '" + (csum.rateOk === true
+                            ? Math.round(Math.abs(csum.rate)) + " " + cm.shortUnit(raw.unit) + "/100ms  "
+                              + cm.formatUncertainty(csum.rateSigma)
+                            : "—") + "'"
+                    + "   Δ SEGMENT '" + (csum.edgeOk === false ? "—"
+                            : cm.formatBare(csum.delta, raw.unit, sg)) + "'"
+                    + "   σ CHIP '" + (sg > 0 ? cm.formatUncertainty(sg, cm.shortUnit(raw.unit))
+                                              : "(hidden — no σ)") + "'")
+                // The same reading with and without the rule, side by side — the one line that
+                // answers "how much did the step actually change?" without arithmetic in the
+                // reader's head. The "before" column is the genuine TWO-ARGUMENT call, so this line
+                // also exercises the moc-cloned 2-arg entry from QML (see chart_metrics.h): if that
+                // assumption were wrong, this throws and says so instead of failing silently in the
+                // app's own bindings.
+                // ── §7 ITEM 3: IS THE PEAK TILE A VALUE ON THE DRAWN CURVE? ───────────────
+                //
+                // PEAK is the extremum of a 40 ms windowed MEAN (§5.2), so it is NOT a sample — and
+                // the design's item 3 asks that it still be a value on the curve WITHIN σ. This
+                // prints the persisted value[] at the sample nearest tPeakUs beside the reduced peak
+                // and the string the tile shows, which is the only way to see the three drift apart:
+                // a reduced peak far from the drawn value means the window is averaging across a
+                // feature, and a tile far from the reduced peak means the step is doing too much.
+                var pi = -1, pbd = Infinity
+                for (var q2 = 0; q2 < t.length; ++q2) {
+                    var d2 = Math.abs(t[q2] - csum.tPeakUs)
+                    if (d2 < pbd) { pbd = d2; pi = q2 }
+                }
+                if (pi >= 0)
+                    probe.w("   PEAK on the curve   = value[" + pi + "] @" + probe.ms(t[pi])
+                            + " = " + probe.num(v[pi])
+                            + "   reduced peak = " + probe.num(csum.peak)
+                            + "   |diff| = " + probe.num(Math.abs(v[pi] - csum.peak))
+                            + (sg > 0 ? "  (σ = " + probe.num(sg) + " ⇒ "
+                                        + (Math.abs(v[pi] - csum.peak) <= sg
+                                           ? "WITHIN σ, §7 item 3 holds" : "OUTSIDE σ") + ")"
+                                      : "  (no σ — §7 item 3 not judgeable on this series)")
+                            + "   tile = '" + cm.formatBare(csum.peak, raw.unit, sg) + "'"
+                            + "   nearest sample " + probe.ms(pbd) + " from tPeak")
+                if (stepv > 1)
+                    probe.w("   step rule cost      = PEAK "
+                            + cm.formatBare(csum.peak, raw.unit) + " → "
+                            + cm.formatBare(csum.peak, raw.unit, sg)
+                            + "   @IMPACT " + cm.formatBare(impV, raw.unit) + " → "
+                            + cm.formatBare(impV, raw.unit, sg)
+                            + "   (whole units → multiples of " + probe.num(stepv, 0) + ")")
+            } catch (e) { probe.miss("§5.3 card text (" + e + ")") }
+        }
 
         // ── STILL ADDRESS — the window design §7 item 2 is measured on ────────────────────
         //
@@ -551,7 +688,11 @@ Item {
         probe.w("clamp emptied win?  = " + (function () {
             try { return chart._domWinEmpty(p, ws, we) } catch (e) { return "?" }
         })() + "   facet @end text = '" + (function () {
-            try { return chart._facetEndText(p) } catch (e) { return "?" }
+            // sg, not omitted: the σ is an argument now (the chart hoists it per plot so a per-frame
+            // binding never marshals the series), and leaving it off would hand formatBare an
+            // undefined → NaN → step 1 and quietly print an UNSTEPPED number on the one surface
+            // this decision is being judged from.
+            try { return chart._facetEndText(p, sg) } catch (e) { return "?" }
         })() + "'")
 
         // ── @impact ──────────────────────────────────────────────────────────────────────
@@ -565,7 +706,7 @@ Item {
         probe.w("@impact " + probe.ms(iu) + "     measured = " + measured
                 + " (C++ measuredAt " + refMeasured + ")"
                 + "   value text = '" + (function () {
-                    try { return chart._valueTextAt(p, iu) } catch (e) { return "?" }
+                    try { return chart._valueTextAt(p, iu, sg) } catch (e) { return "?" }
                 })() + "'"
                 + "   band = '" + (function () {
                     try { return cm.bandAtNearest(raw.phaseSamples || [], Math.round(iu)) }
@@ -587,12 +728,108 @@ Item {
         }
     }
 
+    // ── §5.3: DID THE ±σ RIBBON ACTUALLY DRAW? ───────────────────────────────────────────
+    //
+    // "It is the only way to SHOW that the wobble is inside the noise rather than telling the reader
+    // so" (§5.3), and §8 keeps it dark until it has been seen. This probe is the only thing that
+    // turns it on, so it also has to be the thing that says whether it drew — asking the DRAWING
+    // CODE (PpChartPlot.sigmaBandRuns, the length of the run list the Repeater is instantiating)
+    // rather than inferring it from showSigmaBand being true, which would prove only that the
+    // property was set.
+    //
+    // Zero polygons is a legitimate answer with three different meanings and they are reported apart:
+    // no plot exists (the preset drew nothing), no visible series carries a σ (absence, not zero —
+    // W1's propagation has not reached these metrics), or a plot has σ and still drew nothing, which
+    // is a defect in the run splitting.
+    function reportSigmaBand() {
+        probe.w("")
+        probe.w("═══ 6. THE ±σ RIBBON (design §5.3 / §8 — dark by default) ═══")
+        probe.w("chart.showSigmaBand = " + chart.showSigmaBand
+                + "   (nothing in the app turns this on; this probe is the only switch)")
+
+        var plots = [], guard = 0
+        function walk(it) {
+            if (!it || guard++ > 8000) return
+            // Duck-typed on the property rather than matched on a type name: PpChartPlot is a
+            // module-local QML type with nothing for `instanceof` to test from out here, and
+            // sigmaBandRuns exists on exactly one component.
+            if (it.sigmaBandRuns !== undefined) plots.push(it)
+            var kids = it.children || []
+            for (var i = 0; i < kids.length; ++i) walk(kids[i])
+        }
+        try { walk(chart) } catch (e) { probe.miss("walk for PpChartPlot (" + e + ")") }
+
+        var withSigma = []
+        try {
+            for (var j = 0; j < chart._visible.length; ++j) {
+                var s = chart._visible[j]
+                if (s && s.sigma !== undefined && s.sigma !== null && isFinite(s.sigma) && s.sigma > 0)
+                    withSigma.push(s.key + " σ=" + probe.num(s.sigma))
+            }
+        } catch (e) { probe.miss("chart._visible (" + e + ")") }
+        probe.w("visible series with σ = " + (withSigma.length ? withSigma.join(", ") : "NONE"))
+
+        var total = 0
+        probe.w("PpChartPlot instances = " + plots.length)
+        for (var i2 = 0; i2 < plots.length; ++i2) {
+            var pl = plots[i2]
+            var n = 0
+            try { n = pl.sigmaBandRuns } catch (e) {}
+            total += n
+            // ── IS THE BAND CLIPPED? (F4) ─────────────────────────────────────────────
+            //
+            // The ribbon reaches σ past the curve on both sides, so a plot whose Y extents were
+            // computed from the curve alone clips it FLAT at the axis edge — and a flat-topped noise
+            // band claims the uncertainty stops there, which is worse than drawing none.
+            // PpMetricChart._rangeFor therefore adds the largest visible σ to its padding WHEN THE
+            // FLAG IS ON. This line is the check: headroom is what the axis grants beyond the drawn
+            // extremum, and it must be at least maxσ for the band to close.
+            var maxSg = 0, dLo = Infinity, dHi = -Infinity
+            try {
+                for (var q = 0; q < (pl.series ? pl.series.length : 0); ++q) {
+                    var ps2 = pl.series[q]
+                    if (!ps2 || !ps2.value) continue
+                    var s2 = cm.seriesSigma(ps2)
+                    if (s2 > maxSg) maxSg = s2
+                    for (var r = 0; r < ps2.value.length; ++r) {
+                        if (ps2.t_us[r] < pl.domStartUs || ps2.t_us[r] > pl.domEndUs) continue
+                        if (ps2.value[r] < dLo) dLo = ps2.value[r]
+                        if (ps2.value[r] > dHi) dHi = ps2.value[r]
+                    }
+                }
+            } catch (e) {}
+            var headLo = (dLo === Infinity) ? 0 : (dLo - pl.valueLo)
+            var headHi = (dHi === -Infinity) ? 0 : (pl.valueHi - dHi)
+            probe.w("   plot[" + i2 + "] facet='" + (pl.facetName || "(overlay)")
+                    + "'  series=" + ((pl.series && pl.series.length) || 0)
+                    + "  ribbon polygons=" + n
+                    + "   maxσ=" + probe.num(maxSg)
+                    + "   headroom lo/hi=" + probe.num(headLo) + "/" + probe.num(headHi)
+                    + (maxSg > 0
+                       ? (Math.min(headLo, headHi) >= maxSg - 1e-9
+                          ? "   band CLOSES (headroom ≥ maxσ)"
+                          : "   ⛔ band CLIPPED FLAT at the axis edge (headroom < maxσ)")
+                       : ""))
+        }
+        if (total > 0)
+            probe.w("RIBBON DREW         = YES — " + total + " polygon(s) at 0.06 opacity, one per "
+                    + "MEASURED run (bridged runs get none: no measurement, no error band)")
+        else if (plots.length === 0)
+            probe.w("RIBBON DREW         = no — this preset instantiated no plot at all")
+        else if (withSigma.length === 0)
+            probe.w("RIBBON DREW         = no — no visible series carries a σ. ABSENT, not zero: a "
+                    + "zero-width ribbon would claim perfect precision, so nothing is drawn.")
+        else
+            probe.w("RIBBON DREW         = ⛔ NO, and it should have — σ is present and the band is "
+                    + "on, so the run splitting in PpChartPlot._sigmaRuns is at fault")
+    }
+
     // ── The live on-screen chart, read-only ──────────────────────────────────────────────
     // Not the subject of the report — just a cross-check that the real panel exists and is
     // sitting on the same vocabulary. It is absent unless the user's View layout has the
     // Charts panel on for this mode; that absence is reported, never corrected.
     function reportLiveChart() {
-        probe.w("═══ 6. THE ON-SCREEN CHART (read-only cross-check) ═══")
+        probe.w("═══ 7. THE ON-SCREEN CHART (read-only cross-check) ═══")
         var root = probe
         var guard = 0
         while (root.parent && guard++ < 64) root = root.parent
@@ -660,7 +897,8 @@ Item {
             case 3: probe.safe("collectDetail", probe.stepCollectDetail); break
             case 4: probe.safe("applyPreset",   probe.stepApplyPreset);   break
             case 5: probe.safe("report",        probe.stepReport);        break
-            case 6: probe.safe("liveChart",     probe.reportLiveChart);   break
+            case 6: probe.safe("sigmaBand",     probe.reportSigmaBand);   break
+            case 7: probe.safe("liveChart",     probe.reportLiveChart);   break
             default:
                 probe.w("═══ DONE ═══")
                 Qt.quit()

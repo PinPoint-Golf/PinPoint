@@ -59,6 +59,16 @@ Item {
     property bool showDots:    true
     property bool showCursor:  true
 
+    // ── σ RIBBON — DARK, AND FORWARDED ONLY (design §5.3, §8 open question 3) ──────
+    //
+    // Passed straight through to every PpChartPlot, which owns the drawing and documents the shape
+    // of it. Default FALSE and there is deliberately NO CONTROL for it anywhere: design §8 leaves
+    // it "dark until seen", so the only thing that turns it on today is a probe setting the property
+    // (tools/probes/plumb_bob_chart.qml). Adding a toolbar toggle would ship an unreviewed visual
+    // to every reader and would also make it a persisted user preference, which is a decision
+    // nobody has taken.
+    property bool showSigmaBand: false
+
     // Click/drag on a plot seeks the replay to that time — the host wires these to
     // shotReplay (seekToUs / beginScrub / endScrub) so the video, overlay, timeline
     // and every other panel scrub together. Off by default: the chart stays prop-
@@ -373,12 +383,27 @@ Item {
     // BARE: PpChartPlot's split gutter prints unitLabel directly above this, so spelling it again
     // put the unit twice in one 40px column. Unclamped and unmasked it printed the FINISH value of
     // a metric that stops meaning anything at impact, in the gutter, as the facet's headline.
-    function _facetEndText(s) {
+    // ── THE SERIES' σ, FOR FORMATTING ONLY (design §5.3) ───────────────────────────
+    //
+    // There is no `_sigma()` helper here any more: the absent→0 substitution is ChartMetrics
+    // .seriesSigma, one implementation in C++ where it can be tested, replacing the three copies of
+    // a four-clause guard that had grown here, in PpChartSummary and inside PpChartPlot._sigmaRuns.
+    //
+    // ⚠ BUT IT IS NEVER CALLED FROM A PER-FRAME BINDING, and that is why the two functions below
+    // TAKE the σ instead of deriving it. seriesSigma's argument is a QVariantMap, so every call
+    // marshals the whole series (t_us, value, valid, phaseSamples) across the QML boundary — the
+    // same cost measuredAt() carries its own warning about. The hover tooltip re-evaluates on every
+    // cursor move and the facet gutter on every frame of a brush drag; both would pay it per frame
+    // per series. So each σ is resolved ONCE on a binding that changes with the DATA (the tooltip
+    // row's `sig`, the legend chip's `sig`, the plot delegate's `facetSigma`) and passed down.
+
+    function _facetEndText(s, sigma) {
         if (root._domWinEmpty(s, root.viewStartUs, root.viewEndUs)) return "@end —"
         return "@end " + cm.formatBare(
             cm.summaryMasked(s.t_us, s.value, s.valid || [],
                              root._domWinStart(s, root.viewStartUs),
-                             root._domWinEnd(s, root.viewStartUs, root.viewEndUs)).end, s.unit)
+                             root._domWinEnd(s, root.viewStartUs, root.viewEndUs)).end,
+            s.unit, sigma)
     }
 
     // Was this series MEASURED at `t`, or is the value there bridged / outside the domain? Same
@@ -417,9 +442,13 @@ Item {
     // and so both make the same claim. Printing the bridged number is the confident absurdity
     // this whole design exists to stop; a blank or a "0" would each read as a measurement
     // instead of as its absence.
-    function _valueTextAt(s, t) {
+    // The σ step goes on this one too, so the hover row and the legend chip say the same digits the
+    // card does for the same reading — a tooltip that reads 11.4 beside a card reading 10 is the
+    // "one curve, one number" rule broken at the last inch. `sigma` is PASSED, not derived: this
+    // runs per cursor move per visible series (see the note above _facetEndText).
+    function _valueTextAt(s, t, sigma) {
         return root._measuredAt(s, t)
-             ? cm.formatValue(labels.valueAtNearest(s.t_us, s.value, t), s.unit)
+             ? cm.formatValue(labels.valueAtNearest(s.t_us, s.value, t), s.unit, sigma)
              : "—"
     }
 
@@ -473,7 +502,7 @@ Item {
 
     // Shared value range (overlay) / per-series range (split), clipped to the view window.
     function _rangeFor(arr) {
-        var lo = Infinity, hi = -Infinity
+        var lo = Infinity, hi = -Infinity, sig = 0
         for (var k = 0; k < (arr ? arr.length : 0); ++k) {
             var s = arr[k]
             if (!s || !s.t_us || !s.value) continue   // skip transient/torn-down entries
@@ -482,9 +511,25 @@ Item {
                 if (t[j] < root.viewStartUs || t[j] > root.viewEndUs) continue
                 if (v[j] < lo) lo = v[j]; if (v[j] > hi) hi = v[j]
             }
+            // ── RIBBON HEADROOM, AND ONLY WHEN THE RIBBON IS ON ──────────────────────
+            //
+            // The ±σ band reaches σ past the curve on both sides, so on a series whose extremum sits
+            // at the axis edge the band is CLIPPED FLAT against it — and a flat-topped noise band is
+            // the most misleading thing it could draw: it says the uncertainty stops there. So the
+            // extents grow by the largest σ among the series in THIS plot (per plot, because split
+            // mode scales each facet on its own).
+            //
+            // ⚠ GATED ON showSigmaBand, which is dark by default, so no shipped axis moves. That
+            // matters beyond tidiness: the Y range is what every value is drawn against, and quietly
+            // widening it would change the look of every chart in the app for a feature nobody can
+            // see yet. When the flag is off this costs one boolean test per series.
+            if (root.showSigmaBand) {
+                var ss = cm.seriesSigma(s)
+                if (ss > sig) sig = ss
+            }
         }
         if (lo === Infinity) { lo = 0; hi = 1 }
-        var pad = Math.max((hi - lo) * 0.14, 2)
+        var pad = Math.max((hi - lo) * 0.14, 2) + sig
         return { lo: lo - pad, hi: hi + pad }
     }
 
@@ -849,6 +894,10 @@ Item {
                         readonly property var  plotSeries: modelData ? modelData.series : []
                         readonly property bool facet: modelData ? modelData.facet : false
                         readonly property var  facetSeries: (facet && plotSeries.length > 0) ? plotSeries[0] : null
+                        // The facet's σ, resolved once here rather than inside facetEndText: that
+                        // binding re-evaluates on every frame of a brush drag (it depends on the view
+                        // window) and seriesSigma marshals the whole series.
+                        readonly property real facetSigma: facetSeries ? cm.seriesSigma(facetSeries) : 0
                         readonly property var  rng: root._rangeFor(plotSeries)
 
                         Layout.fillWidth: true
@@ -869,6 +918,7 @@ Item {
                         showPlayhead:  root.showPlayhead
                         showDots:      root.showDots
                         showCrosshair: root.showCursor
+                        showSigmaBand: root.showSigmaBand      // dark; see root.showSigmaBand
                         cursorUs:      root.showCursor ? root._cursorUs : -1
                         yTickCount:    facet ? 3 : 6
                         showFrame:     facet
@@ -878,7 +928,7 @@ Item {
                         facetName:     facetSeries ? root._name(facetSeries) : ""
                         // Domain-clamped, mask-aware, and "—" on an emptied window — see
                         // root._facetEndText, which states why for all three.
-                        facetEndText:  facetSeries ? root._facetEndText(facetSeries) : ""
+                        facetEndText:  facetSeries ? root._facetEndText(facetSeries, plot.facetSigma) : ""
 
                         onHoverMoved: (t) => root._cursorUs =
                             Math.max(root.viewStartUs, Math.min(root.viewEndUs, t))
@@ -924,6 +974,10 @@ Item {
                         delegate: Row {
                             id: trow
                             required property var modelData
+                            // Resolved per ROW, not inside the readout binding below: that one
+                            // re-evaluates on every cursor move, and seriesSigma marshals the whole
+                            // series. This changes only when the data does.
+                            readonly property real sig: cm.seriesSigma(trow.modelData)
                             spacing: Theme.sp(8)
                             Rectangle {
                                 width: Theme.sp(8); height: Theme.sp(8); radius: Theme.sp(2)
@@ -940,7 +994,7 @@ Item {
                             Text {
                                 // "—" where the nearest sample was bridged or lies outside the
                                 // metric's domain — see root._valueTextAt.
-                                text: root._valueTextAt(trow.modelData, root._cursorUs)
+                                text: root._valueTextAt(trow.modelData, root._cursorUs, trow.sig)
                                 font.family: Theme.fontData; font.pixelSize: Theme.fontSzLabel
                                 font.weight: Font.Medium
                                 color: Theme.colorText
@@ -968,6 +1022,10 @@ Item {
                     readonly property bool on: root._isOn(chip.modelData.key)
                     readonly property real val: labels.valueAtNearest(chip.modelData.t_us,
                                                                       chip.modelData.value, root._readoutUs)
+                    // Resolved once per chip — it governs the digits of both readouts below, and a
+                    // whole-series marshal per replay frame is exactly what ChartMetrics.seriesSigma
+                    // must not be asked to do.
+                    readonly property real sig: cm.seriesSigma(chip.modelData)
                     spacing: Theme.sp(4)
                     opacity: chip.on ? 1.0 : 0.4
 
@@ -991,10 +1049,15 @@ Item {
                         // one arithmetically disguised.
                         readonly property bool measured:
                             root._measuredAt(chip.modelData, root._readoutUs)
+                        // Both halves take the SERIES' step, the Δ included. A difference of two
+                        // readings each ±σ is strictly noisier than either (σ√2), so a finer step on
+                        // the Δ would be the least defensible digit on the panel; and a Δ printed at
+                        // a different coarseness from the value it is a difference of cannot be
+                        // checked against it by eye. One step per series, everywhere.
                         text: chipVal.measured
-                              ? cm.formatValue(chip.val, chip.modelData.unit)
+                              ? cm.formatValue(chip.val, chip.modelData.unit, chip.sig)
                                 + "  Δ" + cm.formatValue(chip.val - root._addrValue(chip.modelData),
-                                                         chip.modelData.unit)
+                                                         chip.modelData.unit, chip.sig)
                               : "—"
                         anchors.verticalCenter: parent.verticalCenter
                         font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro

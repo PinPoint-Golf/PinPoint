@@ -43,7 +43,10 @@
 #include "swing_analysis.h"          // MetricSeries, PhaseEvent, Phase
 #include "../Core/pp_tuned_constants.h"   // tuned::channel:: (the bridge allowance)
 
+#include <QtGlobal>                 // Q_ASSERT — see medianSigmaOverValid on why not ppWarn
+
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -227,6 +230,121 @@ inline int nearestIndex(const std::vector<int64_t> &grid, int64_t t)
     const int hi = int(it - grid.begin());
     const int lo = hi - 1;
     return (t - grid[lo] <= grid[hi] - t) ? lo : hi;
+}
+
+// ── σ PROPAGATION PRIMITIVES ────────────────────────────────────────────────────────────────
+//
+// Shared by lower_body_metrics.cpp and upper_body_metrics.cpp, which measure the same four body
+// lines between them (hips, ankles, shoulders, elbows) under one sign convention — so they get one
+// uncertainty convention too, from one place.
+//
+// THE ONE FACT EVERYTHING BELOW RESTS ON: `PoseKpAux::sigma` is a TRUE PER-AXIS σ, not a radial one
+// and not an average of two different numbers. pose_smoother.cpp filters a keypoint's x and y with
+// two Kalman/RTS passes that share q, dt, R AND the accept flag — a keypoint is rejected on both axes
+// or neither — so their posterior variances are equal bit-for-bit and sqrt(0.5·(var_x + var_y)) is
+// just that common σ written the long way (the invariant is pinned by a comment at the site). Every
+// step below that treats the noise as ISOTROPIC is therefore exact rather than approximate: a formula
+// reading only a keypoint's y, only its x, or a projection onto an arbitrary direction all use the
+// same scalar unchanged.
+
+// sqrt(a² + b²) — the first-order combination of two INDEPENDENT σ — and 0 when EITHER input is
+// missing. Half an error budget is not a smaller one, it is an unknown one, so a quantity with one
+// uncharacterised input reports no σ rather than an optimistic one. 0 in, 0 out, all the way up.
+inline double quad2(double a, double b)
+{
+    return (a > 0.0 && b > 0.0) ? std::sqrt(a * a + b * b) : 0.0;
+}
+
+// σ (deg) of a body-line tilt — `atan2(Δy, |Δx|)`, the one convention lower_body_metrics' hip and
+// ankle lines and upper_body_metrics' shoulder and elbow lines all share.
+//
+// EXACT to first order rather than a small-angle stand-in, and that is why it divides by the line's
+// EUCLIDEAN length where the tilt itself divides by |Δx|. With Δ a difference of two independent
+// keypoints, var(Δx) = var(Δy) = σ_a² + σ_b² (per-axis σ, see above), and the partials
+//     ∂θ/∂Δy = |Δx| / (Δx² + Δy²)        ∂θ/∂Δx = −Δy / (Δx² + Δy²)
+// combine in quadrature to
+//     σ_θ = sqrt(σ_a² + σ_b²) · sqrt(Δx² + Δy²) / (Δx² + Δy²) = sqrt(σ_a² + σ_b²) / L
+// with L the Euclidean length — a keypoint σ divided by the LEVER ARM it acts through. Radians, so
+// ×180/π to report degrees. Same shape as body_rotation.cpp's foreshortening σ.
+//
+// ⚠ THE ∂θ/∂Δx TERM IS THE WHOLE DIFFERENCE BETWEEN L AND |Δx|. Dropping it — reading the formula as
+// "the y noise over the span" — is right only while the line is LEVEL, and understates σ by
+// L/|Δx| = 1/cos(tilt) as the line steepens: 15 % at 30° of tilt, 41 % at 45°. Keeping it costs one
+// multiply and is the honest answer at every tilt, so there is no version of this that omits it.
+inline double lineTiltSigmaDeg(const QPointF &lead, const QPointF &trail,
+                               double sigLead, double sigTrail)
+{
+    constexpr double kRadToDeg = 57.29577951308232;
+    const double q = quad2(sigLead, sigTrail);
+    if (q <= 0.0) return 0.0;                       // one end uncharacterised ⇒ no σ for the line
+    const double dx = trail.x() - lead.x(), dy = trail.y() - lead.y();
+    const double L  = std::sqrt(dx * dx + dy * dy);
+    if (L <= 1e-9) return 0.0;                      // coincident ends: no lever arm, no σ
+    return q / L * kRadToDeg;
+}
+
+// THE SERIES' σ: the median of a channel's per-sample σ over the samples the FINAL validity mask
+// still calls measurements, or nullopt when none of them did. Lives here beside channelValidityMask
+// because it is that mask's reader — the two are one rule seen from either end.
+//
+// TAKES THE BUILT SERIES, not a grid and a mask as two loose vectors. The first cut of this took
+// (grid, channelT, channelSigma, valid) and the first two were both `vector<int64_t>` sitting next to
+// each other — swap them at one of two call sites and every σ silently becomes the median over
+// whichever frames happened to line up, with no symptom a test would notice. `m` carries both the grid
+// (`m.t_us`) and the mask (`m.valid`) and cannot be transposed with `channelT`, whose meaning is
+// different and whose length is not the grid's.
+//
+// `channelSigma` is PARALLEL to `channelT`: one propagated σ per pushed value, in the channel's own
+// unit, 0 meaning "no σ for this sample". 0 is PoseKpAux::sigma's own sentinel and it stays one — the
+// smoother produced no posterior for at least one joint the value was built from, and a partial error
+// budget is UNKNOWN rather than small.
+//
+// ⚠ nullptr MEANS "THIS CHANNEL PROPAGATES NO σ BY DESIGN" and is a normal, silent answer — the
+// upper-body `leadArmToTorso` is the case, and there will be others. A NON-null vector of the WRONG
+// LENGTH is a different thing entirely: a producer that pushed a value without pushing its σ, so every
+// σ after that point describes the wrong sample. That is a programming error, it is asserted, and the
+// release build degrades to "no σ" rather than to a plausible wrong one. Passing an empty vector to
+// mean "none" is exactly the ambiguity this signature exists to remove; pass nullptr.
+//
+// Q_ASSERT rather than ppWarn deliberately: this header is included by targets that link NO log at all
+// (pp_log_stream.cpp's own note — six suites, including the two face-on producer suites, satisfy the
+// linker with a stub or nothing), so a log line here would be a link-time dependency on every consumer,
+// and reaching for qWarning() instead would put the one log on a second channel. A desync is a bug in
+// the producer, not a condition in the data, and an assert is the instrument for that.
+//
+// ⚠ CALL THIS AFTER EVERY MASK, NOT DURING THE CHANNEL PASS. A gated run (refused geometry), a bridge
+// longer than the budget and the post-Impact phase-domain tail are all frames no reducer may read —
+// and they are also the frames whose geometry is most degenerate and whose propagated σ is largest, so
+// averaging them in would bias the number the chart rounds by in the one direction that matters.
+// `m.valid` EMPTY means every sample is valid, per MetricSeries::valid's contract, not "no samples".
+//
+// The MEDIAN, not the mean, for the reason body_rotation.cpp takes one: a few frames where the
+// smoother had just re-acquired a keypoint carry a σ an order of magnitude above the rest, and a mean
+// would let them set the display step for the whole swing.
+//
+// nullopt, never 0: MetricSeries::sigma absent means "not characterised" and 0 would mean "measured
+// perfectly", which is never true. Callers write the field only when this returns a value.
+inline std::optional<double> medianSigmaOverValid(const MetricSeries &m,
+                                                  const std::vector<int64_t> &channelT,
+                                                  const std::vector<double> *channelSigma)
+{
+    if (!channelSigma || channelT.empty())
+        return std::nullopt;                // no σ track by design, or nothing was measured
+    Q_ASSERT(channelSigma->size() == channelT.size());   // a desync is a producer bug — see above
+    if (channelSigma->size() != channelT.size())
+        return std::nullopt;                // …and in release it withholds σ rather than guessing
+    std::vector<double> keep;
+    keep.reserve(channelT.size());
+    for (size_t i = 0; i < channelT.size(); ++i) {
+        if (!((*channelSigma)[i] > 0.0))
+            continue;                   // no smoothed σ for some joint this sample was built from
+        if (!m.valid.empty() && m.valid[size_t(nearestIndex(m.t_us, channelT[i]))] == 0u)
+            continue;                   // gated, over-bridged or out of domain — not a reading
+        keep.push_back((*channelSigma)[i]);
+    }
+    if (keep.empty())
+        return std::nullopt;
+    return medianOfCopy(keep);
 }
 
 // The phases every face-on curve carries as `phaseSamples`.

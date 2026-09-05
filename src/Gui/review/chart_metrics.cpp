@@ -159,6 +159,19 @@ double interpValid(const ValidSamples &s, qint64 pos)
     return vLo + (vHi - vLo) * f;
 }
 
+// The finest step any reading in this unit may be printed in, whatever σ says — the FLOOR of
+// ChartMetrics::displayStep. One unit for every unit today, which is exactly the rounding this class
+// did before σ existed, and the reason the σ rule can only ever COARSEN a number: a σ of 0.1 in must
+// not buy the plumb bob a decimal place, because the step rule is about honesty at the coarse end,
+// not about promoting a small σ into extra precision. Keyed on the DISPLAY token so the four
+// "% of something" units cannot disagree. Named and separate so a unit that one day wants a
+// different floor (a millimetre reading, say) has one place to say so rather than a special case
+// buried in the formatter.
+double unitStepFloor(const QString &)
+{
+    return 1.0;
+}
+
 } // namespace
 
 QVariantList ChartMetrics::segments(const QVariantList &phases, qint64 spanUs) const
@@ -552,10 +565,58 @@ QString ChartMetrics::shortUnit(const QString &unit) const
     return unit;
 }
 
-QString ChartMetrics::formatBare(double v, const QString &unit) const
+double ChartMetrics::seriesSigma(const QVariantMap &series) const
+{
+    // Absent, null, non-finite or ≤ 0 all mean the same thing to a formatter: make no claim, print
+    // what we printed before §5.3. See the header for why this substitution is legitimate here and
+    // nowhere else — and why it is one function rather than the three QML copies it replaces.
+    const auto it = series.constFind(QStringLiteral("sigma"));
+    if (it == series.constEnd() || !it->isValid() || it->isNull()) return 0.0;
+    bool ok = false;
+    const double s = it->toDouble(&ok);
+    if (!ok || !std::isfinite(s) || s <= 0.0) return 0.0;
+    return s;
+}
+
+double ChartMetrics::displayStep(double sigma, const QString &unit) const
+{
+    const double floorStep = unitStepFloor(shortUnit(unit));
+    // ABSENT and 0 arrive here as the same value on purpose — see the header. So do the three broken
+    // ones: NaN, +INFINITY (a producer that divided by a zero span, not a demand for infinitely
+    // coarse digits) and a negative σ. An unusable error budget is indistinguishable from an
+    // unstated one, and the honest display of either is the floor, which claims nothing extra.
+    if (!(sigma > 0.0) || !std::isfinite(sigma)) return floorStep;
+    // ⚠ RETURNS ≥ floorStep (≥ 1) ON EVERY PATH. The formatters llround to an integer, so a sub-unit
+    // step would collapse back to 1 unnoticed; the floor makes that explicit instead of accidental.
+    if (sigma <= floorStep) return floorStep;
+
+    // The smallest {1,2,5}×10ⁿ that is NOT BELOW σ. The epsilon is for the exact powers of ten,
+    // where log10/pow round-trip a hair either side of 1.0 and would otherwise promote σ = 100 to a
+    // step of 200.
+    const double mag  = std::pow(10.0, std::floor(std::log10(sigma)));
+    const double norm = sigma / mag;                       // in [1, 10)
+    const double eps  = 1e-9;
+    const double nice = norm <= 1.0 + eps ? 1.0
+                      : norm <= 2.0 + eps ? 2.0
+                      : norm <= 5.0 + eps ? 5.0
+                      :                     10.0;
+    return std::max(floorStep, nice * mag);
+}
+
+QString ChartMetrics::formatBare(double v, const QString &unit, double sigma) const
 {
     const QString u = shortUnit(unit.isEmpty() ? QStringLiteral("°") : unit);
-    const long long r = std::llround(v);
+    const double step = displayStep(sigma, unit);
+    // ROUND TO THE NEAREST MULTIPLE OF THE STEP, TIES AWAY FROM ZERO. That is llround's own rule,
+    // and at step 1 (σ absent or ≤ 1 unit) `llround(v/1)*1` is bit-for-bit the `llround(v)` this
+    // function did before σ existed — which is what keeps every uncharacterised series' display
+    // unchanged. At step 5: 12.4 → 10, 12.6 → 15, −7.4 → −5, 2.5 → 5 (away from zero, not to even).
+    //
+    // ⚠ displayStep FLOORS AT ≥ 1 AND THAT IS LOAD-BEARING HERE, not just a display opinion: the
+    // result is llround'ed to an integer, so a sub-unit step (0.5, 0.1) would be collapsed straight
+    // back to whole units with the caller none the wiser. The step is therefore always an integer
+    // ({1,2,5}×10ⁿ, n ≥ 0) and the multiplication is exact.
+    const long long r = std::llround(std::llround(v / step) * step);
     // The leading "+" is a DEGREES-ONLY convention and is deliberately not generalised: these are
     // signed deviations from a reference posture, where the sign is the reading. A "+75 mph" or a
     // "+2 in" would be decoration on a quantity whose sign nobody is asking about.
@@ -563,12 +624,37 @@ QString ChartMetrics::formatBare(double v, const QString &unit) const
            + QString::number(r);
 }
 
-QString ChartMetrics::formatValue(double v, const QString &unit) const
+QString ChartMetrics::formatValue(double v, const QString &unit, double sigma) const
 {
     const QString u = shortUnit(unit.isEmpty() ? QStringLiteral("°") : unit);
     // Degrees close up against the number, everything else takes a space. "12°" is one token to a
     // reader and "12mph" is a typo.
-    return formatBare(v, unit) + (u == QStringLiteral("°") ? QString() : QStringLiteral(" ")) + u;
+    return formatBare(v, unit, sigma)
+           + (u == QStringLiteral("°") ? QString() : QStringLiteral(" ")) + u;
+}
+
+QString ChartMetrics::formatUncertainty(double err, const QString &unit) const
+{
+    // NaN or ±inf — a fit that degenerated. Nothing at all rather than "± nan" or "± inf".
+    if (!std::isfinite(err)) return QString();
+
+    const double e = std::fabs(err);          // an uncertainty has no direction
+    // QUOTED, NOT QUANTISED, and there is no displayStep call in this function on purpose — the
+    // header states the rule and the three defects that came of coupling the two.
+    //
+    // The 0.05 cut is where one decimal stops being able to say anything: below it the honest
+    // statement is a BOUND, and "± <0.1" is a bound that is always true — including for an err of
+    // exactly 0, which is a degenerate window (one sample, or an exact fit) rather than evidence of a
+    // perfect measurement. "± 0.0" and "± 0" both read as that evidence, so neither is ever printed.
+    const QString num = (e < 0.05) ? QStringLiteral("<0.1") : QString::number(e, 'f', 1);
+
+    // The unit token, with formatValue's spacing so a ± does not change shape between the chip and
+    // the tiles. EMPTY = no token (the card names the unit above the tile) — the opposite of
+    // formatBare/formatValue's empty-means-degrees, which is why the header spells it out.
+    if (unit.isEmpty()) return QStringLiteral("± ") + num;
+    const QString u = shortUnit(unit);
+    return QStringLiteral("± ") + num
+           + (u == QStringLiteral("°") ? QString() : QStringLiteral(" ")) + u;
 }
 
 // ── Chart metric presets ────────────────────────────────────────────────────────

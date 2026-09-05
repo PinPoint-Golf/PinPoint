@@ -85,6 +85,11 @@ ColumnLayout {
     function _unit(unit) {
         return cm.shortUnit((unit === undefined || unit === null || unit === "") ? "°" : unit)
     }
+    // The series' σ for FORMATTING is ChartMetrics.seriesSigma — one implementation of the
+    // absent→0 substitution, in C++ where it can be tested, replacing what used to be a
+    // four-clause guard copied into this file, PpMetricChart and PpChartPlot. Resolved once per
+    // card (`card.sig`) because a QVariantMap argument marshals the whole series.
+
     // "" ⇒ NO VERDICT, tinted like any other unlabelled value. This used to fall through to
     // colorGood, and combined with bandAtNearest's old "good" default that meant a series with no
     // phaseSample anywhere near impact showed its @impact reading in PASS GREEN — a grade invented
@@ -226,6 +231,17 @@ ColumnLayout {
                                                   root.impactUs > 0 ? root.impactUs : root.endUs)
                 readonly property string nm:  cm.shortLabel(card.modelData.key)
                                               || card.modelData.label || card.modelData.key
+                // This series' measurement noise, resolved ONCE for the card: it governs the digits
+                // of every READING printed below (ChartMetrics.displayStep) and it is what the chip
+                // beside the unit quotes. Re-deriving it per tile would be four chances to disagree
+                // about how coarse this card is, and four whole-series marshals per repaint.
+                // 0 = uncharacterised, which asks for no coarsening — ChartMetrics::seriesSigma.
+                //
+                // ⚠ IT GOVERNS THE READINGS AND NOTHING ELSE. The three ± on this card are QUOTED,
+                // not quantised (ChartMetrics::formatUncertainty says why at length): an uncertainty
+                // is read against the value beside it, so a step chosen for the value would inflate
+                // a small error to a whole step and round a smaller one to a false zero.
+                readonly property real   sig: cm.seriesSigma(card.modelData)
 
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1            // equal columns
@@ -271,12 +287,22 @@ ColumnLayout {
                             // Resolved once, because `visible` does not gate a binding: QML
                             // evaluates `text` whether or not the item is shown, so a series
                             // with no σ reached .toFixed() on undefined and warned per frame.
-                            readonly property real sigma:
-                                (card.modelData.sigma !== undefined
-                                 && card.modelData.sigma !== null) ? card.modelData.sigma : 0
+                            //
+                            // ⚠ QUOTED, NOT QUANTISED, and through the same ChartMetrics call as the
+                            // other two ± on this card — which is the whole reason it stopped being
+                            // a local `.toFixed(1)` here. Two bugs went with the copy. It printed
+                            // "± 0.0in" for the plumb bob, whose σ is 0.03–0.06 in: a chip whose one
+                            // job is to deny exactness, claiming it. And it jammed the unit against
+                            // the number with no separator, the same defect formatValue exists to
+                            // prevent ("12mph"). Now: "± <0.1 in", "± 2.5°".
+                            //
+                            // It could not be step-quantised in any case — σ is the number that SET
+                            // the step, so quantising it would state the noise as the coarseness it
+                            // chose (a σ of 2.5° as "± 5°") and make the chip circular.
+                            readonly property real sigma: card.sig
                             visible: sigmaChip.sigma > 0
-                            text: "± " + sigmaChip.sigma.toFixed(1)
-                                       + root._unit(card.modelData.unit)
+                            text: cm.formatUncertainty(sigmaChip.sigma,
+                                                       root._unit(card.modelData.unit))
                             font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                             font.letterSpacing: Theme.trackingData
                             color: Theme.colorText3
@@ -344,9 +370,15 @@ ColumnLayout {
                                    color: Theme.colorText3 }
                             // "—" where impact was not measured on this series, in the neutral
                             // colour: a band tint on a withheld reading would still claim a verdict.
+                            // σ GOVERNS THE DIGITS: formatBare rounds to displayStep(σ, unit), so
+                            // a card whose series carries a 2.5° noise floor prints multiples of
+                            // 5° here. NO ± beside this tile — @IMPACT is a reading of the curve at
+                            // an instant, and the only uncertainty on it is the series σ already
+                            // stated in the header chip. A second ± would double-count it.
                             Text { Layout.fillWidth: true; elide: Text.ElideRight
                                    text: card.impMeasured
-                                         ? cm.formatBare(card.impVal, card.modelData.unit) : "—"
+                                         ? cm.formatBare(card.impVal, card.modelData.unit, card.sig)
+                                         : "—"
                                    font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData
                                    color: card.impMeasured ? root._bandColor(card.bnd)
@@ -361,10 +393,42 @@ ColumnLayout {
                                    color: Theme.colorText3 }
                             Text { Layout.fillWidth: true; elide: Text.ElideRight
                                    text: card.valueOk
-                                         ? cm.formatBare(card.st.peak, card.modelData.unit) : "—"
+                                         ? cm.formatBare(card.st.peak, card.modelData.unit, card.sig)
+                                         : "—"
                                    font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData
                                    color: card.valueOk ? Theme.colorText : Theme.colorText3 }
+                            // ── ± ON THE PEAK, AND WHY IT IS ITS OWN LINE ────────────────────
+                            //
+                            // summaryMasked's `peakSigma`: the standard error of the winning 40 ms
+                            // window's mean about a LOCAL STRAIGHT LINE through it, so a clean ramp
+                            // reports 0 rather than reporting its own slope as uncertainty. Design
+                            // §5.3 puts it here because PEAK and PK RATE are where a reader's trust
+                            // in this panel is decided — a peak with no error bar is the one number
+                            // on the card that invites over-reading.
+                            //
+                            // ⚠ NO UNIT ARGUMENT (the card names it above) AND NO σ ARGUMENT: this
+                            // is QUOTED at one decimal, never quantised to the value's step. For
+                            // peakSigma that distinction is the difference between a number and
+                            // nothing — it is about σ/√k for a k-sample window, so it is SMALLER
+                            // than the series σ by construction and a step chosen from σ rounded it
+                            // to zero on essentially every card.
+                            //
+                            // ⚠ ON ITS OWN LINE, for the reason the PARTIAL chip above is: this
+                            // cell is one of four in a card that can be 150px wide, and a second
+                            // fixed-width token on the value's row leaves the value and the ± both
+                            // elided into ellipses. A caveat that is illegible is worse than absent.
+                            //
+                            // Hidden with the value, not merely dimmed: `valueOk` false means the
+                            // series carries no valid sample at all and peakSigma came back 0 out of
+                            // nothing, and "± 0" under an em dash claims a measured exactness.
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   visible: card.valueOk
+                                   text: cm.formatUncertainty(card.st.peakSigma)
+                                   font.family: Theme.fontData
+                                   font.pixelSize: Theme.fontSzMicro
+                                   font.letterSpacing: Theme.trackingData
+                                   color: Theme.colorText3 }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -373,9 +437,15 @@ ColumnLayout {
                                    text: qsTr("Δ SEGMENT"); font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzMicro; font.letterSpacing: Theme.trackingData
                                    color: Theme.colorText3 }
+                            // Same step rule; NO ±, per design §5.3 as pinned in C12. A Δ is a
+                            // difference of two ±15 ms edge medians, whose combined error is not
+                            // `peakSigma` and is not `rateSigma` — the reducers do not produce one,
+                            // and inventing σ√2 here would be this file deriving an error budget,
+                            // which is the analysis layer's job and nobody has done it yet.
                             Text { Layout.fillWidth: true; elide: Text.ElideRight
                                    text: card.valueOk
-                                         ? cm.formatBare(card.st.delta, card.modelData.unit) : "—"
+                                         ? cm.formatBare(card.st.delta, card.modelData.unit, card.sig)
+                                         : "—"
                                    font.family: Theme.fontData
                                    font.pixelSize: Theme.fontSzData
                                    color: card.valueOk ? Theme.colorText : Theme.colorText3 }
@@ -408,6 +478,16 @@ ColumnLayout {
                                 // Printing "-291" here would silently redefine the tile mid-phase.
                                 // The signed value stays available in the map (the plumb-bob probe
                                 // prints it), and tRateUs says where it was.
+                                //
+                                // ⚠ AND IT IS NOT PUT THROUGH THE σ STEP RULE, deliberately. This
+                                // tile's quantity is units PER 100 ms, and the series' σ is in the
+                                // metric's own unit — quantising a slope to a step derived from a
+                                // position's noise is a category error, and at σ = 2.5° it would
+                                // round a rate of 291°/100 ms to 290 for a reason that has nothing
+                                // to do with how well the slope was determined. What DOES say that
+                                // is `rateSigma`, on the line below, and it is in the rate's unit.
+                                // Math.round for the same reason a rate has never carried a decimal
+                                // here: three digits of °/100ms is already more than the cell holds.
                                 Text { id: rateVal
                                        Layout.alignment: Qt.AlignBaseline
                                        Layout.fillWidth: true
@@ -432,6 +512,33 @@ ColumnLayout {
                                        font.family: Theme.fontData
                                        font.pixelSize: Theme.fontSzMicro; color: Theme.colorText3 }
                             }
+                            // ── ± ON THE RATE ────────────────────────────────────────────────
+                            //
+                            // summaryMasked's `rateSigma`: the standard error of the FITTED SLOPE,
+                            // so an exact fit reports 0 and a slope fitted through noise reports
+                            // the width of the family of lines that would have done as well. On the
+                            // corpus's still-address window that number is the whole story — a
+                            // "rate" of 1.8 per 100 ms with a ± of 1.5 is visibly not motion.
+                            //
+                            // Its unit is the rate's (per 100 ms), which the token above already
+                            // names for the value it sits under; that is why the ± carries no unit
+                            // of its own and why it is on this line rather than crowding that row
+                            // (see the PEAK note). Hidden with the value on `rateOk` false: no
+                            // window qualified, so rateSigma is 0 out of nothing.
+                            //
+                            // ⚠ AND IT DOES NOT TAKE THE SERIES σ. It briefly did, and a fitted-slope
+                            // standard error of 3.0 printed "± 5" because the σ had chosen a 5-unit
+                            // step — two thirds of inflation borrowed from a quantity in a different
+                            // unit. Quoted, it prints 3.0. This is the tile the still-address gate is
+                            // read on (§7 item 2), where the ± IS the finding, so it has to be the
+                            // number the reducer produced.
+                            Text { Layout.fillWidth: true; elide: Text.ElideRight
+                                   visible: card.rateOk
+                                   text: cm.formatUncertainty(card.st.rateSigma)
+                                   font.family: Theme.fontData
+                                   font.pixelSize: Theme.fontSzMicro
+                                   font.letterSpacing: Theme.trackingData
+                                   color: Theme.colorText3 }
                         }
                     }
                 }

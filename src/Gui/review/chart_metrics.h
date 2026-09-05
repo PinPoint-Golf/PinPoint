@@ -249,15 +249,126 @@ public:
     // way to TEST it — chart_metrics_test can assert "-8°" and "12 %"; a QML function cannot be
     // asserted anywhere.
     //
+    // ── σ GOVERNS THE DIGITS (design metric_presentation_honesty.md §5.3, principle 3) ───────────
+    //
+    // "A reading is shown no finer than its characterised noise." displayStep is that rule as one
+    // number: the DISPLAY QUANTUM a value of a series with measurement noise `sigma` may be printed
+    // in — the smallest of {1, 2, 5}×10ⁿ that is NOT BELOW sigma, floored at one unit.
+    //
+    //   σ 0 → 1    σ 0.3 → 1    σ 1.4 → 2    σ 2.5 → 5    σ 6 → 10    σ 12 → 20    σ 30 → 50
+    //
+    // ⚠ σ ≤ 0 AND σ ABSENT ARE THE SAME ANSWER HERE, 1, AND ONLY HERE. `MetricSeries::sigma` is
+    // optional and absent means "never characterised", which is emphatically not "zero" — nothing
+    // in the DATA path may substitute one for the other. But a formatter has to print SOMETHING,
+    // and the only honest fallback for an uncharacterised series is the rounding we already did
+    // before σ existed: whole units. So the bridge's "no sigma key" becomes a 0 at the QML call
+    // site (seriesSigma() below), and that 0 means "no claim", not "exact".
+    //
+    // ⚠ AND +INFINITY IS ALSO ABSENT. A σ of inf is not "infinitely coarse, print one digit for the
+    // whole swing" — it is a producer that divided by a zero span, i.e. a broken error budget, and
+    // an unusable σ is indistinguishable from an unstated one. NaN goes the same way, and a NEGATIVE
+    // σ likewise: all four collapse to the floor, which is the display that claims nothing extra.
+    //
+    // ⚠ IT FLOORS AT 1 AND ONLY EVER RETURNS ≥ 1 — this rule can coarsen a reading and can never
+    // sharpen one. Two reasons, and the second is mechanical: a plumb bob with σ = 0.1 in has not
+    // earned a decimal (its noise being small is no evidence the projection and calibration agree to
+    // a hundredth of an inch); and the formatters llround to an INTEGER, so a sub-unit step could not
+    // survive the round trip anyway — 0.5 would collapse straight back to 1 and the caller would
+    // never know it had been ignored. `unit` is consulted for the floor (unitStepFloor in the .cpp)
+    // so a unit that one day wants a coarser one has one place to say so.
+    Q_INVOKABLE double displayStep(double sigma, const QString &unit) const;
+
+    // The series' σ as a DISPLAY number — `series` is one entry of analysisDetail.series (the QML
+    // bridge's map), and the answer is its `sigma` when the producer characterised one and 0 when it
+    // did not. 0 asks displayStep for no coarsening at all, so an uncharacterised series prints
+    // exactly as it did before §5.3 existed.
+    //
+    // ⚠ THE ABSENT→0 SUBSTITUTION LIVES HERE AND NOWHERE ELSE, and this function exists because it
+    // was living in three places: a `_sigma()` copy in PpChartSummary, another in PpMetricChart, and
+    // an inline expression inside PpChartPlot._sigmaRuns. Three copies of a four-clause guard
+    // (undefined / null / non-finite / ≤ 0) is three chances to disagree about what absence means,
+    // which is precisely the confusion the field's contract exists to prevent. It is also the only
+    // form that can be tested.
+    //
+    // The substitution is legitimate ONLY at the display boundary: a reading with no characterised
+    // noise is printed at the precision we always printed it, and a 0 out of here means "no claim",
+    // never "exact". Nothing that touches DATA may call this to fill in a missing σ.
+    //
+    // ⚠ NOT FOR PER-FRAME BINDINGS, for the reason measuredAt() carries the same warning: a
+    // QVariantMap argument marshals the WHOLE series (t_us, value, valid, phaseSamples) across the
+    // QML boundary. Every caller resolves it once per card / chip / row / plot, on a binding that
+    // changes with the DATA, and passes the resulting number down to the per-frame formatters.
+    Q_INVOKABLE double seriesSigma(const QVariantMap &series) const;
+
     // formatValue = the number and its unit, for a surface with no header to lean on (legend
     // chips, the hover tooltip, the transit bead). Degrees keep the signed-deviation convention
     // ("+12°", closed up); every other unit takes a space ("75 mph", "12 %").
-    Q_INVOKABLE QString formatValue(double v, const QString &unit) const;
+    //
+    // `sigma` (the series' measurement noise, 0 = uncharacterised) rounds the number to
+    // displayStep(sigma, unit) instead of to whole units: at σ = 2.5° a reading of 12.6° prints
+    // "+15°", and at σ = 0 the output is byte-identical to the pre-σ formatter.
+    //
+    // ⚠ A DEFAULT ARGUMENT, NOT AN OVERLOAD, and the difference is what makes it safe to call at
+    // either arity from QML. moc emits a CLONED method entry per default argument (QMetaMethod::
+    // MethodCloned; QQmlPropertyData::isCloned() carries it into the QML property cache), so
+    // `cm.formatValue(v, unit)` binds to a distinct 2-argument entry rather than resolving an
+    // overload set — the thing that is fragile. Verified against shipping call sites in this Qt
+    // 6.11.1 build, deliberately at BOTH arities, because a clone being reachable says nothing about
+    // the full form still being reachable beside it:
+    //   · SHORT form  — PpDetectCluster.qml:145 `shotController.triggerShot()`, none of its two
+    //                   defaulted arguments; DiagnosticModel.qml:594 `browser.createObject(type)`,
+    //                   one of two.
+    //   · FULL form   — DiagnosticModel.qml:242 and :1664 `browser.rows(type, filters)` against
+    //                   `rows(const QString &, const QVariantMap & = {})`, i.e. the same method
+    //                   called at full arity elsewhere in the same file.
+    // The probe pins the full form for THESE methods unconditionally: tools/probes/plumb_bob_chart
+    // prints `formatBare(12.6, unit, 2.5)` and only a correct 3-argument resolution gives "+15".
+    // So the names stay ONE name each (this class's whole point is one rule, one implementation)
+    // instead of gaining a parallel …Sigma pair.
+    Q_INVOKABLE QString formatValue(double v, const QString &unit, double sigma = 0.0) const;
 
     // formatBare = the number ALONE, for a surface whose container already names the unit — the
     // summary card's header, the split-mode gutter. Same sign convention as formatValue, so one
-    // reading does not change shape depending on where it is shown.
-    Q_INVOKABLE QString formatBare(double v, const QString &unit) const;
+    // reading does not change shape depending on where it is shown. Same `sigma` rule, and the
+    // same default-argument note above.
+    Q_INVOKABLE QString formatBare(double v, const QString &unit, double sigma = 0.0) const;
+
+    // Every "± x" on the panel: the series σ chip beside the card's unit, and the ± beside PEAK
+    // (summaryMasked's `peakSigma`) and PK RATE (`rateSigma`). Returns the whole displayed string,
+    // "± " included, so what a reader sees is one testable value; unsigned, because an uncertainty
+    // has no direction. `unit` appends a display token with formatValue's spacing (degrees close up,
+    // everything else spaced); EMPTY means no token, which is what the two tiles want because the
+    // card names their unit above them — note that this is the OPPOSITE of formatBare/formatValue,
+    // where an empty unit falls back to degrees.
+    //
+    // ── READINGS ARE QUANTISED, UNCERTAINTIES ARE QUOTED ────────────────────────────────────────
+    //
+    // The rule, and the one line to remember: displayStep governs READINGS. It has no business
+    // touching a ±. An uncertainty is not a reading of the athlete taken at some precision, it is
+    // the statement of how far the reading can be trusted, and it is only ever read AGAINST the
+    // value beside it — so it is QUOTED at a fixed one decimal and never quantised:
+    //   · one decimal, always ("± 2.4", "± 12.4");
+    //   · "± <0.1" below 0.05, which is also where an exactly-zero `err` goes;
+    //   · never "± 0.0", and never "± 0".
+    //
+    // Three concrete things went wrong when the step DID govern this, all found in review:
+    //   · PK RATE — a fitted-slope standard error of 3.0 printed "± 5" on a series whose σ chose a
+    //     5-unit step, inflating the stated uncertainty by two thirds for a reason belonging to
+    //     another quantity entirely (the σ is in the metric's unit; a slope's error is per 100 ms).
+    //   · PEAK — peakSigma is about σ/√k for a k-sample window, so it is SMALLER than σ by
+    //     construction and a step chosen from σ rounded it to nothing on essentially every card;
+    //     the "fall back to one decimal" branch was the only one that ever ran, and a rule whose
+    //     main branch is unreachable is a rule that is not doing what it says.
+    //   · THE σ CHIP — the plumb bob's own σ is 0.03–0.06 in, so quantising it printed "± 0.0in",
+    //     which claims exactness in the one place on the card whose entire job is to deny it.
+    // Quoting removes all three at once, and removes the discontinuity with them: an err of 2.4 and
+    // an err of 2.6 now print "± 2.4" and "± 2.6" instead of jumping "± 0" → "± 5" across half a
+    // step. There is no `sigma` parameter, deliberately — not an ignored one, an absent one, so a
+    // future caller cannot reintroduce the coupling by passing it.
+    //
+    // An empty string for a non-finite `err` (NaN, or a ±inf from a degenerate fit), which the
+    // caller renders as nothing rather than as "± nan".
+    Q_INVOKABLE QString formatUncertainty(double err, const QString &unit = QString()) const;
 
     // "Nice" Y-axis tick values across [lo, hi] at a 1/2/5×10ⁿ step chosen so there are
     // about `maxTicks` of them. Returns the tick values (doubles) the chart labels + grids.

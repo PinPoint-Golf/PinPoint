@@ -176,25 +176,25 @@ display precision on every authored measure.
 
 ---
 
-## Phase 3 — σ propagation and σ-governed display `[ ]`
+## Phase 3 — σ propagation and σ-governed display `[x]`
 
-- [ ] **3.1** `lower_body_metrics.cpp`: `LowerBodyState` gains per-keypoint σ (px) read from
+- [x] **3.1** `lower_body_metrics.cpp`: `LowerBodyState` gains per-keypoint σ (px) read from
       `pose.smoothedAux[frame].sigma[k]`; `trackLowerBody` takes `const PoseTrack2D&` already,
       so no signature change. Propagate per design §5.3, median over valid frames, set
       `m.sigma` only where at least one frame had a smoothed σ (tier ≠ Off). Same in
       `upper_body_metrics.cpp` for the three lines and side bend.
-- [ ] **3.2** Tests: a synthetic track with a known constant keypoint σ gives the closed-form
+- [x] **3.2** Tests: a synthetic track with a known constant keypoint σ gives the closed-form
       series σ within 5 %; a track with `smoothedAux` empty leaves `sigma` unset.
-- [ ] **3.3** `ChartMetrics::formatBare(v, unit, sigma = 0)`: step = the nicest of
+- [x] **3.3** `ChartMetrics::formatBare(v, unit, sigma = 0)`: step = the nicest of
       {1, 2, 5}×10ⁿ not below σ, floored at 1. `formatValue` likewise. Every QML caller
       passes the series' sigma (the summary card, the legend chip, the hover tooltip in
       `PpMetricChart.qml`). Test: σ = 2.5 → step 5; σ = 0.3 → step 1; σ = 0 → today's
       behaviour exactly.
-- [ ] **3.4** `PpChartSummary.qml`: "± σ" beside PEAK, "± σ_rate" beside PK RATE (from 2.1's
+- [x] **3.4** `PpChartSummary.qml`: "± σ" beside PEAK, "± σ_rate" beside PK RATE (from 2.1's
       standard error). Keep the existing unit-side chip and its tooltip.
-- [ ] **3.5** (dark, optional) `PpChartPlot.qml`: a ±σ ribbon as a filled `ShapePath` at
+- [x] **3.5** (dark, optional) `PpChartPlot.qml`: a ±σ ribbon as a filled `ShapePath` at
       0.06 opacity behind each curve, behind a `showSigmaBand` property defaulting to false.
-- [ ] **3.6** Gate: `parity_diff.py` shows only `sigma` keys appearing; design §7 item 4 holds
+- [x] **3.6** Gate: `parity_diff.py` shows only `sigma` keys appearing; design §7 item 4 holds
       (every lower-body and body-line series carries σ on every swing the smoother ran on).
       Look at the Plumb Bob preset with the step rule on and decide the open question in
       design §8 (step rule vs chip alone). Record the decision.
@@ -399,3 +399,36 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   on a window the golfer is actually still in. Open design flags carried forward: the
   least-squares rate is not spike-proof (Theil–Sen / residual gate would be), and the
   reduce.* keys have no runtime override plumbing yet.
+
+- **2026-09-04 (Phase 3 built and probed; review of the propagation pending)** — σ propagated
+  first-order from the smoother's per-keypoint posterior (`PoseKpAux::sigma` = RMS of the x and y
+  posterior variances, used unchanged for one-axis formulas) through each channel's own formula,
+  median over VALID frames after the full mask; 14 of 15 body series carry σ (`leadArmToTorso`
+  unset: an unsigned acos has no symmetric ±). The contract's forms for the three projected-
+  distance channels understated by 2.5–4.2× (they dropped the ankle-line rotation term h·dφ);
+  the full gradient is implemented and the tests re-derived (plumb bob 0.111 → 0.472 in on the
+  fixture). Display: readings are QUANTISED to the step (nicest of 1/2/5×10ⁿ ≥ σ, floor 1
+  unit), uncertainties are QUOTED (one decimal, "± <0.1" below 0.05, never "± 0.0") — the
+  review showed a step-quantised ± inflated a 3.0 slope error to "± 5" and that PEAK's step
+  branch was unreachable (peakSigma ≈ σ/√k). `seriesSigma` is the one σ-at-the-boundary rule;
+  the ribbon is dark (`showSigmaBand`) and extends the axis by max σ when on. Subset pass:
+  values untouched, only `sigma` keys appear (15 series). Probe on the re-analysed 08-18
+  swing_0001: sway σ 0.88 % (step 1), hip tilt 1.87° (step 2), plumb bob 0.35 in (step 1),
+  shoulder plane 1.35° (step 2); card text e.g. hip tilt `PEAK +16 ± 0.2`, `PK RATE 23 °/100ms
+  ± 1.0`, chip `± 1.9°`; ribbon drew and closes inside the axis on all three facets.
+  **§8 open question 1 answered by the data:** the step rule costs multiples of 2° on the
+  body-line angles and nothing on the lateral metrics — recommend keeping it; Mark to confirm
+  with one windowed look (the ribbon stays dark until seen).
+
+- **2026-09-04 (Phase 3 CLOSED)** — Adversarial review re-derived all eleven propagations and
+  found them exact; it established that the smoother's per-keypoint scalar IS σ_x = σ_y
+  bit-for-bit (both axis filters share q, dt, R and the accept flag), now pinned as a comment in
+  pose_smoother.cpp. Fixes landed: σ behind the `maxBridgeUs < 0` parity off-switch; tilted
+  fixtures pin Euclidean L and the √(1+s²) factor (4.4 % discriminators); distinct per-joint σ
+  run under both handednesses pin every asymmetric coefficient; the σ primitives (quad2,
+  lineTiltSigmaDeg, medianSigmaOverValid) live once in metric_channel.h with an explicit
+  "no σ track" pointer. Correction to my own note: dropping the address-reference σ costs
+  ≈12 % at N_eff ≈ 6 (autocorrelated residuals), not 0.3 % — recorded in the code. 11 suites
+  green. Uncertainties are quoted, readings quantised; `formatUncertainty` takes no step.
+  Carry-forward: the ribbon stays dark until Mark sees it windowed; the step rule is
+  recommended kept (costs multiples of 2° on body-line angles only).

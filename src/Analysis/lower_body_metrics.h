@@ -223,13 +223,60 @@ struct LowerBodyState {
     QPointF leadHipPx,  trailHipPx;
     QPointF leadKneePx, trailKneePx;
     QPointF leadAnklePx, trailAnklePx;
+
+    // ── Smoother posterior σ, PIXELS, for the joints the channels below actually read ───────
+    //
+    // Copied straight from `PoseTrack2D::smoothedAux[frame].sigma[k]`, and it needs no rescaling
+    // because it is already in the SAME pixel domain as the points above: pose_smoother.cpp filters
+    // kp.x·frameW / kp.y·frameH, and computeState de-normalizes by the same two numbers.
+    //
+    // ONE SCALAR IS A TRUE PER-AXIS σ, and what makes it one is an EQUALITY, not an average.
+    // pose_smoother.cpp writes it as sqrt(0.5·(var_x + var_y)), which reads like an RMS of two
+    // different numbers — it is not, and the RMS reading would only ever be an approximation. The two
+    // axis filters share q, dt and R, and share the ACCEPT FLAG (`gatePass` must pass on x AND y or
+    // the frame is rejected on both), so they run identical recursions and var_x == var_y bit-for-bit.
+    // The invariant is pinned by a comment at the site in pose_smoother.cpp.
+    //
+    // So every step below that treats the noise as ISOTROPIC is EXACT rather than approximate: a
+    // formula reading only a keypoint's y (a line tilt), only its x (sway), or a projection onto an
+    // arbitrary direction all use this scalar unchanged. Dividing by sqrt(2) anywhere would be wrong.
+    //
+    // 0 MEANS ABSENT, never "no error": it is PoseKpAux::sigma's own sentinel for "the smoother
+    // produced no value for that keypoint on that frame, the output kp is the raw passthrough". A
+    // channel's per-frame σ is computed only when EVERY joint it uses reports one, because an error
+    // budget with a hole in it is unknown rather than small.
+    //
+    // There is deliberately NO trail-knee entry. No channel here reads that point (leadKneeDrift is
+    // lead knee minus lead hip — see the header), and a σ nothing propagates would be one more piece
+    // of state to keep in step for nothing.
+    double  leadHipSigPx   = 0.0, trailHipSigPx   = 0.0;
+    double  leadKneeSigPx  = 0.0;
+    double  leadAnkleSigPx = 0.0, trailAnkleSigPx = 0.0;
+
     float   conf       = 0.f;     // mean of the contributing confidences
 };
 
-// One sparse address-referenced channel (valid-subset t_us, ascending).
+// One sparse address-referenced channel (valid-subset t_us, ascending), and the 1σ MEASUREMENT
+// NOISE propagated into each of its samples IN THE CHANNEL'S OWN UNIT.
+//
+// `sigma` is PARALLEL to t_us — one entry per pushed value, always, which is why `push` takes all
+// three together: a σ that could fall out of step with its value would be worse than no σ at all.
+//
+// 0 means NO σ FOR THIS SAMPLE, the same sentinel PoseKpAux::sigma uses and for the same reason
+// (see LowerBodyState above). Those entries are skipped when the series' σ is reduced; they never
+// become a zero σ on the series, because MetricSeries::sigma absent means "not characterised" and
+// zero would mean "measured perfectly".
 struct LowerBodyChannel {
     std::vector<int64_t> t_us;
     std::vector<double>  value;
+    std::vector<double>  sigma;
+
+    void push(int64_t t, double v, double s)
+    {
+        t_us.push_back(t);
+        value.push_back(v);
+        sigma.push_back(s);
+    }
 };
 
 struct LowerBodyResult {
@@ -297,6 +344,14 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
 // bridge budget covers a quantity that did not exist), or when the resample had to
 // bridge more than cfg.maxBridgeUs across frames the DETECTOR lost; neither is a
 // place a phase reading can be taken from.
+//
+// Each series also carries MetricSeries::sigma when the smoother's per-keypoint posterior was
+// available: the keypoint σ propagated through THAT channel's own geometry, per frame, then the
+// MEDIAN over the frames the final mask still calls measurements (so a gated run, an over-long
+// bridge and the post-Impact tail cannot set it). ABSENT — not 0 — on a track with no
+// `smoothedAux`, which is every swing analysed before the smoother existed. Same pattern as
+// body_rotation.cpp's `sigmaDeg`.
+//
 // UNSCORED here (the corridors live in the diagnostics norm set, not
 // in the producer). Empty when the address reference is unresolved or the stance
 // span is unusable.

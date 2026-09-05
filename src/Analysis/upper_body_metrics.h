@@ -200,6 +200,31 @@ struct UpperBodyReference {
     double  hipDxPx        = 0.0;
 };
 
+// The 1σ MEASUREMENT NOISE propagated into each channel's samples, IN THAT CHANNEL'S OWN UNIT and
+// PARALLEL to that channel's `t_us` — one entry per pushed value, always.
+//
+// ⚠ A SEPARATE STRUCT RATHER THAN A FIELD ON MetricChannel, deliberately. That type lives in
+// metric_channel.h and is shared with producers that have no error budget to carry, so widening it
+// would hang an empty vector off every one of them and invite the next producer to leave it empty
+// and mean something by that. Here the pairing is enforced at the push site instead (see `pushS` in
+// trackUpperBody), which is the only place the two can fall out of step.
+//
+// 0 MEANS NO σ FOR THAT SAMPLE — the same sentinel PoseKpAux::sigma uses, and for the same reason:
+// the smoother produced no posterior for at least one joint the value was built from, and a partial
+// error budget is UNKNOWN rather than small. Those entries are skipped when the series' σ is reduced
+// and never become a zero on MetricSeries::sigma, whose absence means "not characterised".
+struct UpperBodySigma {
+    std::vector<double> axisTilt, sideBend, thoraxDrift, shoulderPlane, elbowLine;
+    std::vector<double> trailElbowHeight, leadHandWidth, leadArmGap;
+    // ⚠ THERE IS NO leadArmToTorso ENTRY, and that is a decision with a reason rather than an
+    // omission — the block above that channel's push in trackUpperBody carries it in full. In short:
+    // the reported value is an UNSIGNED angle, so near the small angles a hanging arm actually
+    // produces the published number is E|Δ| rather than Δ and a symmetric ±σ around it would be a
+    // misstatement of what the folded quantity is; and `Neck` shares the LEAD SHOULDER with the arm
+    // vector, so the naive quadrature sum of two direction-angle σ ignores a covariance of known
+    // sign. UNSET is the honest answer, per C11's "never guess".
+};
+
 // Every channel this module produces, sparse (valid frames only) and already in its final unit.
 struct UpperBodyResult {
     std::vector<int64_t> grid;      // one entry per input frame, time order — the resample target
@@ -227,6 +252,9 @@ struct UpperBodyResult {
     std::vector<int64_t> gatedElbowLine;      // elbowAlignment
     std::vector<int64_t> gatedSideBend;       // spineSideBend — EITHER line refused
 
+    // Per-sample σ, parallel to the channels above. See UpperBodySigma.
+    UpperBodySigma sigma;
+
     UpperBodyReference ref;
     int64_t maxBridgeUs = tuned::channel::kMaxBridgeUs;  // carried from the config for the builder
     double  bridgeSpacingFactor = tuned::channel::kBridgeSpacingFactor;   // likewise
@@ -251,6 +279,13 @@ UpperBodyResult trackUpperBody(const PoseTrack2D &pose, int frameW, int frameH, 
 // whatever the bridge budget — a refused line has no value to hold) and 0 where the resample had to
 // bridge more than res.maxBridgeUs across frames the DETECTOR lost; empty when neither happened. AN
 // INVALID INSTANT EMITS NO PHASE SAMPLE, the same rule an unsegmented phase already obeys.
+//
+// Eight of the nine also carry MetricSeries::sigma when the smoother's per-keypoint posterior was
+// available: the keypoint σ propagated through THAT channel's own geometry, per frame, then the
+// MEDIAN over the frames the final mask still calls measurements — so a gated run, an over-long
+// bridge and the post-Impact tail cannot set it. ABSENT (never 0) on a track with no `smoothedAux`,
+// which is every swing analysed before the smoother existed, and absent on `leadArmToTorso` always
+// (see UpperBodySigma). Same pattern as body_rotation.cpp's `sigmaDeg`.
 std::vector<MetricSeries> buildUpperBodySeries(const UpperBodyResult &res,
                                                const std::vector<PhaseEvent> &phases);
 

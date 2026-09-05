@@ -46,6 +46,24 @@ double medianOf(std::vector<double> v)
     return (n & 1u) ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
 }
 
+// ── σ helpers ───────────────────────────────────────────────────────────────────────────────
+//
+// One keypoint's smoother posterior σ (px), or 0 when there is none. 0 is PoseKpAux::sigma's own
+// "no smoothed value" sentinel and it stays a sentinel all the way through: nothing below ever
+// treats it as a measured zero.
+double sigAt(const PoseKpAux *aux, int idx)
+{
+    if (!aux) return 0.0;
+    const double v = double(aux->sigma[size_t(idx)]);
+    return v > 0.0 ? v : 0.0;
+}
+
+// `quad2`, `lineTiltSigmaDeg` and `medianSigmaOverValid` all live in metric_channel.h, beside
+// channelValidityMask whose output the last of them reads, and this file owns no copy of any of them.
+// The line-tilt σ in particular is shared with upper_body_metrics on purpose: the two files measure
+// four body lines between them under ONE sign convention (`lineTiltDeg`, spelled the same way in
+// both), so they take one uncertainty convention too.
+
 // Signed angle (deg) of a body line, POSITIVE when the trail end sits above the lead end.
 // Image y grows downward, so "trail higher" is trailY < leadY and the numerator is leadY − trailY.
 // The denominator is the ABSOLUTE horizontal separation, which is what makes the sign independent
@@ -63,9 +81,12 @@ double lineTiltDeg(const QPointF &lead, const QPointF &trail)
     return std::atan2(lead.y() - trail.y(), dx) * kRadToDeg;
 }
 
-// Per-frame lower-body state from hips / knees / ankles.
+// Per-frame lower-body state from hips / knees / ankles. `aux` is the smoother's per-keypoint
+// honesty record for THIS frame, or nullptr on a track that was never smoothed — in which case every
+// σ below stays 0 and every channel's σ stays absent, which is the pre-smoother behaviour and the
+// only honest one (we have no error budget, so we claim none).
 LowerBodyState computeState(const PoseFrame2D &f, int frameW, int frameH, double confMin,
-                            bool leadIsLeft)
+                            bool leadIsLeft, const PoseKpAux *aux)
 {
     LowerBodyState s;
     s.t_us = f.t_us;
@@ -92,6 +113,15 @@ LowerBodyState computeState(const PoseFrame2D &f, int frameW, int frameH, double
     s.trailKneePx  = pxOf(trailKneeIdx);
     s.leadAnklePx  = pxOf(leadAnkIdx);
     s.trailAnklePx = pxOf(trailAnkIdx);
+
+    // The smoother's posterior σ for exactly the five joints the channels read. Indexed by the same
+    // lead/trail resolution as the points, so a mirrored camera or a left-handed golfer cannot pair a
+    // point with the other side's σ.
+    s.leadHipSigPx   = sigAt(aux, leadHipIdx);
+    s.trailHipSigPx  = sigAt(aux, trailHipIdx);
+    s.leadKneeSigPx  = sigAt(aux, leadKneeIdx);
+    s.leadAnkleSigPx = sigAt(aux, leadAnkIdx);
+    s.trailAnkleSigPx = sigAt(aux, trailAnkIdx);
 
     s.hipsValid    = ok(leadHipIdx) && ok(trailHipIdx);
     s.leadLegValid = ok(leadHipIdx) && ok(leadKneeIdx);
@@ -131,9 +161,18 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
     if (frames.empty())
         return res;
 
+    // THE SMOOTHER'S σ IS ATTACHED ONLY WHERE IT DESCRIBES THE CURVE WE ARE ABOUT TO MEASURE.
+    // `smoothedAux` is documented as parallel to `pose.smoothed`, and smoothPoseTrack fills the two
+    // arrays together, so `frames` IS the track the σ belongs to exactly when `smoothed` is
+    // non-empty. Requiring both is not defensive noise: a hand-built track carrying an aux array and
+    // no smoothed track would otherwise stamp a smoother's posterior onto raw passthrough values,
+    // which is a confident statement about a curve nobody drew.
+    const bool haveAux = !pose.smoothed.empty() && pose.smoothedAux.size() == frames.size();
+
     res.states.reserve(frames.size());
-    for (const PoseFrame2D &f : frames)
-        res.states.push_back(computeState(f, frameW, frameH, cfg.confMin, leadIsLeft));
+    for (size_t i = 0; i < frames.size(); ++i)
+        res.states.push_back(computeState(frames[i], frameW, frameH, cfg.confMin, leadIsLeft,
+                                          haveAux ? &pose.smoothedAux[i] : nullptr));
 
     // Robust (median) address reference: prefer the confident frames inside the Address-event
     // window; if none (or no event), fall back to the first N usable frames. Same shape as the two
@@ -238,23 +277,59 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
         if (s.leadLegValid) {
             const double dKnee = s.leadKneePx.x() - addrLeadKneeX;
             const double dHip  = s.leadHipPx.x()  - addrLeadHipX;
-            res.kneeDrift.t_us.push_back(s.t_us);
-            res.kneeDrift.value.push_back(res.leadSign * (dKnee - dHip) * toPct);
+            // σ: the channel is leadSign·((kneeX − addrKneeX) − (hipX − addrHipX))·100/addrSpanPx.
+            // Two independent x-coordinates differenced, so
+            //     σ = sqrt(σ_knee² + σ_hip²) · 100/addrSpanPx
+            // and leadSign, being ±1, cannot change a magnitude.
+            //
+            // ⚠ THE ADDRESS REFERENCE'S OWN NOISE IS OMITTED, and "negligible by √N" OVERCLAIMS it.
+            // The reference is a component-wise MEDIAN over the window's frames, σ = 1.253·σ_kp/√N_eff
+            // — and N_eff is NOT the frame count, because the smoother's residuals are autocorrelated
+            // over roughly its own window (≈40 ms at the base sigmaJerk, per the derivation block in
+            // pose_smoother.cpp), so a 250 ms address window buys about 250/40 ≈ 6 independent looks
+            // rather than the ~30 frames it may contain. The offset enters in quadrature, so the σ
+            // above is LOW by
+            //     sqrt(1 + 1.571/N_eff) − 1
+            // ≈ 3.9 % at N_eff = 20, ≈ 12 % at N_eff ≈ 6, ≈ 33 % at N_eff ≈ 2.
+            //
+            // WHERE THE MARGIN GOES: there is none to spare. It is single-digit percent only while the
+            // window stays wide, and it degrades as 1/√N_eff the moment `lowerBody.addrWindowUs` is
+            // narrowed, or the address region is posed sparsely — `addressStride` 15 is ≈100 ms at
+            // 150 fps (pose_runner.h), already past the residual correlation time, so a short window
+            // there can hold two or three independent looks and this term becomes a third of the
+            // answer. It is left out because the reference is shared by three channels and its
+            // correlation with each frame's own estimate is not characterised; it is the next term to
+            // add, and a real one, not a rounding.
+            //
+            // The DENOMINATOR's noise is the smaller cousin of the same thing, and that one genuinely
+            // is small: a multiplicative 1.253·sqrt(σ_lAnk² + σ_tAnk²)/(√N_eff·addrSpanPx) ≈ 0.7 % at
+            // N_eff = 6 on §8's fixture.
+            res.kneeDrift.push(s.t_us, res.leadSign * (dKnee - dHip) * toPct,
+                               quad2(s.leadKneeSigPx, s.leadHipSigPx) * toPct);
         }
         if (s.hipsValid) {
             const double midX = 0.5 * (s.leadHipPx.x() + s.trailHipPx.x());
             const double midY = 0.5 * (s.leadHipPx.y() + s.trailHipPx.y());
-            res.pelvisSway.t_us.push_back(s.t_us);
-            res.pelvisSway.value.push_back(res.leadSign * (midX - addrMidX) * toPct);
+            // σ: both channels are ±(mid − addrMid)·100/addrSpanPx with mid = 0.5·(lead + trail), so
+            // the 0.5 carries straight through the derivative:
+            //     σ = 0.5·sqrt(σ_lead² + σ_trail²) · 100/addrSpanPx.
+            // Averaging two independent estimates is why the pelvis CENTRE is quieter than either
+            // hip on its own, and it is the same factor the anatomy vocabulary's midpoints get.
+            // ONE number for both channels because one is the x of that midpoint and the other is
+            // the y of it, and the smoother's σ is per-axis (LowerBodyState).
+            const double sigMidPct = 0.5 * quad2(s.leadHipSigPx, s.trailHipSigPx) * toPct;
+            res.pelvisSway.push(s.t_us, res.leadSign * (midX - addrMidX) * toPct, sigMidPct);
             // Positive UP, so the address height minus the current one (image y grows downward).
-            res.pelvisLift.t_us.push_back(s.t_us);
-            res.pelvisLift.value.push_back((addrMidY - midY) * toPct);
+            res.pelvisLift.push(s.t_us, (addrMidY - midY) * toPct, sigMidPct);
         }
         // ABSOLUTE, not address-referenced — see the header. Gated on the hip LINE rather than on
         // hipsValid: both hips can be perfectly confident and still not describe a line.
         if (s.hipLineValid) {
-            res.hipTilt.t_us.push_back(s.t_us);
-            res.hipTilt.value.push_back(lineTiltDeg(s.leadHipPx, s.trailHipPx));
+            // σ: see lineTiltSigmaDeg — sqrt(σ_lead² + σ_trail²) over the line's Euclidean length,
+            // which is the exact first-order answer for an atan2 of a difference of two keypoints.
+            res.hipTilt.push(s.t_us, lineTiltDeg(s.leadHipPx, s.trailHipPx),
+                             lineTiltSigmaDeg(s.leadHipPx, s.trailHipPx,
+                                              s.leadHipSigPx, s.trailHipSigPx));
         } else if (s.hipsValid) {
             // Confident hips, refused geometry: record the instant as GATED, not merely missing. The
             // resample may bridge a detector dropout; it must never bridge this.
@@ -262,8 +337,12 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
         }
         // feetAlignment — the ankle line, absolute, in the same convention as the hip line.
         if (s.anklesValid) {
-            res.feetAlign.t_us.push_back(s.t_us);
-            res.feetAlign.value.push_back(lineTiltDeg(s.leadAnklePx, s.trailAnklePx));
+            // σ: the same line-tilt rule, on the ankle line and its own length. The stance line is
+            // the LONGEST line this module measures a tilt on, so this is also the quietest angle
+            // here — the lever arm is the denominator.
+            res.feetAlign.push(s.t_us, lineTiltDeg(s.leadAnklePx, s.trailAnklePx),
+                               lineTiltSigmaDeg(s.leadAnklePx, s.trailAnklePx,
+                                                s.leadAnkleSigPx, s.trailAnkleSigPx));
         }
         // comOverLeadFoot — how far the pelvis centre sits from the lead ankle ALONG the stance
         // line. Unsigned: "further from the lead ankle" is the fault whether the golfer is still
@@ -278,8 +357,58 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
                 const double midY = 0.5 * (s.leadHipPx.y() + s.trailHipPx.y());
                 const double along = ((midX - s.leadAnklePx.x()) * ux
                                       + (midY - s.leadAnklePx.y()) * uy) / ul;
-                res.comOverLead.t_us.push_back(s.t_us);
-                res.comOverLead.value.push_back(std::abs(along) * toPct);
+                // ── σ: THE FULL FIRST-ORDER PROPAGATION, and its DOMINANT term is a rotation ──
+                //
+                // `along` = (M − A)·û, with M the hip centre, A the LEAD ankle, B the trail ankle and
+                // û = (A − B)/L the unit stance vector. Every input is a keypoint coordinate and the
+                // expression is smooth in all of them, so the honest thing is to differentiate the
+                // WHOLE expression rather than add term-by-term guesses. That also settles the
+                // correlation question outright: a keypoint that enters twice enters ONCE in its own
+                // gradient, so there is nothing left to correlate.
+                //
+                //   ∂/∂M = û                        |·|² = 1        (M is 0.5 per hip ⇒ 0.25 each)
+                //   ∂/∂A = −û + (h/L)·n̂             |·|² = 1 + (h/L)²
+                //   ∂/∂B =      −(h/L)·n̂            |·|² = (h/L)²
+                //
+                // n̂ is the unit normal and h = (M − A)·n̂ is the hip centre's PERPENDICULAR offset from
+                // the ankle line. The lead ankle enters TWICE — it is the origin the distance is
+                // measured from AND an endpoint of the line it is measured along — and the two act
+                // along PERPENDICULAR directions (û and n̂), so they add in quadrature with no cross
+                // term. Nothing is assumed away there; it falls out.
+                //
+                // With an isotropic per-axis σ per keypoint the squared gradients weight the variances
+                // directly:
+                //   var = 0.25σ_lHip² + 0.25σ_tHip² + (1 + (h/L)²)σ_lAnk² + (h/L)²σ_tAnk²
+                //   σ   = sqrt(var) · 100/addrSpanPx
+                //
+                // WHY THE ROTATION TERM IS THE WHOLE STORY: keypoint noise in either ankle ROTATES the
+                // stance line by dφ ≈ σ/L, and a point h px off that line then moves h·dφ ALONG it. The
+                // hips sit about TWO stance widths above the ankles, so h/L ≈ 2 and the two rotation
+                // terms carry ~4× the reference-ankle term and ~16× each hip's. It is not a correction.
+                //
+                // ⚠ WHAT C11 PINNED, AND WHY IT UNDERSTATED. The contract gives
+                // `sqrt(σ_mid² + σ_lAnk²)·100/addrSpanPx`, σ_mid = 0.5·sqrt(σ_lHip² + σ_tHip²) — the
+                // (h/L) = 0 case, i.e. a hip centre lying ON the ankle line. On §8's fixture that reads
+                // 1.22 % where the full form reads 3.08 %, a factor of 2.5 LOW. Design principle 3 does
+                // not permit shipping the smaller number, so the full form is what ships.
+                //
+                // h/L, from the 2D cross product: |r × u| / L² with r = M − A. Exact, and no normal
+                // vector has to be constructed.
+                const double lever = std::abs((midX - s.leadAnklePx.x()) * uy
+                                              - (midY - s.leadAnklePx.y()) * ux) / (ul * ul);
+                const double lev2  = lever * lever;
+                double sigCom = 0.0;
+                if (s.leadHipSigPx > 0.0 && s.trailHipSigPx > 0.0
+                    && s.leadAnkleSigPx > 0.0 && s.trailAnkleSigPx > 0.0) {
+                    sigCom = std::sqrt(0.25 * (s.leadHipSigPx * s.leadHipSigPx
+                                               + s.trailHipSigPx * s.trailHipSigPx)
+                                       + (1.0 + lev2) * s.leadAnkleSigPx * s.leadAnkleSigPx
+                                       + lev2 * s.trailAnkleSigPx * s.trailAnkleSigPx) * toPct;
+                }
+                // The reported value is |along|, and |·| is not differentiable at 0 — but the hip
+                // centre sits the better part of a stance width from the lead ankle on every real
+                // swing, so away from that point the σ of |x| IS the σ of x.
+                res.comOverLead.push(s.t_us, std::abs(along) * toPct, sigCom);
 
                 // plumbBobDistance — the SIGNED twin of the reading above, taken about the stance
                 // CENTRE rather than the lead ankle, and in inches rather than a fraction of the
@@ -293,8 +422,43 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
                     const double cx = 0.5 * (s.leadAnklePx.x() + s.trailAnklePx.x());
                     const double cy = 0.5 * (s.leadAnklePx.y() + s.trailAnklePx.y());
                     const double off = ((midX - cx) * ux + (midY - cy) * uy) / ul;
-                    res.plumbBob.t_us.push_back(s.t_us);
-                    res.plumbBob.value.push_back(off * mmPerPx / kMmPerInch);
+                    // ── σ: the same full propagation, with the stance CENTRE as the reference ──
+                    //
+                    // `off` = (M − C)·û with C = 0.5(A + B). C is a function of BOTH ankles, so each of
+                    // them now carries a −0.5û reference term ALONGSIDE its ±(h/L)n̂ rotation term:
+                    //
+                    //   ∂/∂M = û                     |·|² = 1        (0.25 per hip, as above)
+                    //   ∂/∂A = −0.5û + (h/L)·n̂        |·|² = 0.25 + (h/L)²
+                    //   ∂/∂B = −0.5û − (h/L)·n̂        |·|² = 0.25 + (h/L)²
+                    //   var  = 0.25σ_lHip² + 0.25σ_tHip² + (0.25 + (h/L)²)(σ_lAnk² + σ_tAnk²)
+                    //   σ    = sqrt(var) · mmPerPx / 25.4
+                    //
+                    // h is the SAME perpendicular offset comOverLeadFoot uses: C lies on the ankle
+                    // line, so subtracting it or the lead ankle leaves the same normal component. The
+                    // reference and rotation terms again act along perpendicular directions and add in
+                    // quadrature — the shared ankle σ needs no covariance term because each ankle was
+                    // differentiated once, as a whole.
+                    //
+                    // ⚠ WHAT C11 PINNED, AND WHY IT UNDERSTATED. The contract gives
+                    // `0.5·sqrt(σ_lHip² + σ_tHip²)·mmPerPx/25.4` — the hip centre alone, dropping the
+                    // stance centre's own noise AND the rotation. On §8's fixture that reads 0.111 in
+                    // where the full form reads 0.472 in, a factor of 4.2 LOW.
+                    //
+                    // Still NOT in here, and deliberately: the ball ruler's own scale uncertainty. It
+                    // is calibrated at the ball's ground-plane depth and read at hip height (see the
+                    // header), which is a BIAS, and a bias does not belong in a 1σ noise figure —
+                    // widening σ would not make a systematically wrong inch reading right.
+                    double sigPb = 0.0;
+                    if (s.leadHipSigPx > 0.0 && s.trailHipSigPx > 0.0
+                        && s.leadAnkleSigPx > 0.0 && s.trailAnkleSigPx > 0.0) {
+                        sigPb = std::sqrt(0.25 * (s.leadHipSigPx * s.leadHipSigPx
+                                                  + s.trailHipSigPx * s.trailHipSigPx)
+                                          + (0.25 + lev2)
+                                                * (s.leadAnkleSigPx * s.leadAnkleSigPx
+                                                   + s.trailAnkleSigPx * s.trailAnkleSigPx))
+                                * mmPerPx / kMmPerInch;
+                    }
+                    res.plumbBob.push(s.t_us, off * mmPerPx / kMmPerInch, sigPb);
                 }
             }
         }
@@ -370,6 +534,30 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
         // not restore the old bytes, which is the only thing it is for.
         if (res.maxBridgeUs >= 0 && p1toP7Domain)
             applyPhaseDomainMask(m, phases);
+
+        // ── The series' σ, LAST, because it is a median over what survived the masks above ────
+        //
+        // Both masks have now run, so `m.valid` is final and medianSigmaOverValid can skip exactly
+        // the frames no reducer will read. Set only when at least one frame contributed: an absent
+        // MetricSeries::sigma means "not characterised" and a 0 would mean "measured perfectly",
+        // which is never true — the same discipline body_rotation.cpp's IMU tier follows when it
+        // leaves sigma unset rather than claiming a budget it never propagated.
+        //
+        // ⚠ σ NEVER TOUCHES value[] OR phaseSamples. It is read off a parallel track that the value
+        // pass filled and it writes one optional field; a swing whose track has no `smoothedAux`
+        // serialises exactly as it did before this existed.
+        //
+        // ⚠ BEHIND THE SAME OFF-SWITCH AS BOTH MASKS, and that is not tidiness. `channel.maxBridgeUs`
+        // < 0 means "emit no validity mask at all", and its ONLY purpose is to restore the pre-mask
+        // bytes for a parity run. A σ written with no mask would be a median over the gated and
+        // post-Impact frames too — a DIFFERENT number from the masked one, on a NEW key, in the one run
+        // whose whole job is to reproduce the old bytes. Half-restoring is not restoring, so σ goes
+        // with them: negative budget ⇒ no mask, no domain marking, no σ.
+        if (res.maxBridgeUs >= 0) {
+            if (const std::optional<double> sg = medianSigmaOverValid(m, ch.t_us, &ch.sigma))
+                m.sigma = *sg;
+        }
+
         // Address / Top / Impact by default, the same three every other frontal-plane channel
         // samples. Top is P4 — the reading the knee-drift and hip-tilt corridors are both keyed on.
         // The caller may ask for more: comOverLeadFoot is read at the FINISH, which nothing sampled

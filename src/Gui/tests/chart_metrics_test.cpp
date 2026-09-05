@@ -36,6 +36,15 @@
 // absent rather than merely down-weighted. The fixtures below are sized in real TIME (8 ms and
 // 27 ms sampling) because every one of those reducers is defined by a time window; the pre-Phase-2
 // fixtures were 1 ms apart and shorter end to end than the smallest window in the design.
+//
+// AND, since Phase 3, the σ-GOVERNED DISPLAY — displayStep, the two formatters' step rounding, and
+// the "± x" beside the PEAK and PK RATE tiles. Those are string rules and this is the only place
+// they can be asserted at all: the alternative home is a QML binding, which no test can reach. Two
+// of the assertions below are load-bearing beyond their own rule. One is that σ = 0 (which is what
+// an ABSENT σ becomes at the display boundary, and what most series still carry) reproduces the
+// pre-Phase-3 strings byte for byte, because that is what makes the whole phase safe to ship on a
+// corpus whose producers have not propagated σ yet. The other is that the step is never finer than
+// one unit, because a rule meant to remove false precision must not be able to manufacture it.
 
 #include "chart_metrics.h"
 
@@ -46,6 +55,7 @@
 #include <QVariantMap>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 static int g_fail = 0;
 
@@ -416,6 +426,224 @@ int main()
         // deviations from a reference posture, where the sign IS the reading. "+75 mph" would be
         // decoration on a quantity whose sign nobody is asking about.
         checkStr("no + on a speed",   cm.formatBare(75.2,   QStringLiteral("mph")), "75");
+    }
+
+    // ── σ GOVERNS THE DIGITS (design §5.3, principle 3) ───────────────────────────
+    //
+    // "A ±3° reading printed as 11° is honest; the same reading printed as 11.37° is not." The rule
+    // has one number in it, displayStep, and two properties worth defending in a test rather than in
+    // a comment: it can only ever COARSEN a reading (so no series gains precision from having been
+    // characterised), and at σ = 0 — which is what an ABSENT σ becomes at the display boundary — it
+    // is bit-for-bit the formatter that shipped before any of this existed. The second is what makes
+    // Phase 3 safe on the hundreds of series whose producers do not propagate σ yet.
+    {
+        std::printf("displayStep — the nicest {1,2,5}×10ⁿ not below σ\n");
+        const QString deg = QStringLiteral("°");
+        // The table pinned in C12. The interesting entries are the ones that do NOT round to the
+        // nearest nice number but to the nearest nice number AT OR ABOVE σ: 2.5 → 5 (not 2), 6 → 10
+        // (not 5), 30 → 50 (not 20). A step below σ would print a digit the noise does not support,
+        // which is the whole thing being prevented.
+        checkEqD("σ 0   ⇒ 1  (absent, or uncharacterised)", cm.displayStep(0.0,  deg), 1.0);
+        checkEqD("σ 0.3 ⇒ 1  (floored at one unit)",        cm.displayStep(0.3,  deg), 1.0);
+        checkEqD("σ 1.4 ⇒ 2",                               cm.displayStep(1.4,  deg), 2.0);
+        checkEqD("σ 2.5 ⇒ 5  (not 2 — 2 is below σ)",       cm.displayStep(2.5,  deg), 5.0);
+        checkEqD("σ 6   ⇒ 10 (not 5)",                      cm.displayStep(6.0,  deg), 10.0);
+        checkEqD("σ 12  ⇒ 20",                              cm.displayStep(12.0, deg), 20.0);
+        checkEqD("σ 30  ⇒ 50 (not 20)",                     cm.displayStep(30.0, deg), 50.0);
+
+        // On a boundary the step EQUALS σ — "not below" is inclusive, so a σ of exactly 2 does not
+        // get promoted to 5. And the exact powers of ten are the float trap in the rule: without the
+        // epsilon in the implementation, log10/pow round-trip 100 to a hair over 1.0×10² and promote
+        // it to 200, doubling the coarseness of every reading of a σ = 100 series.
+        checkEqD("σ 2   ⇒ 2   (inclusive)",  cm.displayStep(2.0,   deg), 2.0);
+        checkEqD("σ 5   ⇒ 5   (inclusive)",  cm.displayStep(5.0,   deg), 5.0);
+        checkEqD("σ 10  ⇒ 10  (power of 10)", cm.displayStep(10.0, deg), 10.0);
+        checkEqD("σ 100 ⇒ 100 (power of 10)", cm.displayStep(100.0, deg), 100.0);
+
+        // ⚠ NEVER BELOW ONE UNIT, whatever σ says, because the rule exists to coarsen a reading and
+        // never to sharpen one. A plumb bob with σ = 0.08 in has NOT earned a decimal place: its
+        // noise being small is not evidence that the projection, the calibration and the smoother
+        // agree to a hundredth of an inch, and printing "1.63 in" because σ was 0.08 would be this
+        // design manufacturing exactly the false precision it was written to remove.
+        checkEqD("σ 0.08 in ⇒ 1  (no decimal earned)", cm.displayStep(0.08, QStringLiteral("in")), 1.0);
+        checkEqD("σ 0.001  ⇒ 1",                       cm.displayStep(0.001, deg), 1.0);
+        // A broken error budget is no claim at all, not a claim of zero: all three go to the floor.
+        // +INFINITY is the one worth spelling out — it is NOT "infinitely coarse, print one digit for
+        // the whole swing", it is a producer that divided by a zero span, and an unusable σ is
+        // indistinguishable from an unstated one. A step of inf would also make llround undefined
+        // behaviour in the formatter, so this clause is load-bearing and not merely tidy.
+        checkEqD("σ negative ⇒ 1", cm.displayStep(-3.0, deg), 1.0);
+        checkEqD("σ NaN      ⇒ 1", cm.displayStep(std::nan(""), deg), 1.0);
+        checkEqD("σ +inf     ⇒ 1 (treated as absent)",
+                 cm.displayStep(std::numeric_limits<double>::infinity(), deg), 1.0);
+        // The floor is keyed on the DISPLAY token (unitStepFloor), so the four "% of something"
+        // units cannot disagree with each other or with degrees about how coarse a step 1 is.
+        checkEqD("percent, same rule", cm.displayStep(2.5, QStringLiteral("% stance width")), 5.0);
+        checkEqD("empty unit, same rule", cm.displayStep(2.5, QString()), 5.0);
+    }
+
+    {
+        std::printf("formatBare/formatValue with σ — the step in the printed string\n");
+        const QString deg = QStringLiteral("°");
+        // σ = 2.5° ⇒ step 5. ROUND TO THE NEAREST MULTIPLE OF THE STEP, TIES AWAY FROM ZERO (this is
+        // llround's rule, not banker's rounding — 2.5 goes to 5, not to 0). This is the case design
+        // §8 open question 1 is about: on the degrees scale it may read as coarse, and the fallback
+        // if it does is whole units plus the ± chip. The rule is implemented so the probe can show
+        // Mark what it looks like on the Plumb Bob preset.
+        checkStr("step 5: 12.4 ⇒ +10", cm.formatBare(12.4,  deg, 2.5), "+10");
+        checkStr("step 5: 12.6 ⇒ +15", cm.formatBare(12.6,  deg, 2.5), "+15");
+        checkStr("step 5: −7.4 ⇒ -5",  cm.formatBare(-7.4,  deg, 2.5), "-5");
+        checkStr("step 5: tie 2.5 away from zero",  cm.formatBare(2.5,  deg, 2.5), "+5");
+        checkStr("step 5: tie −2.5 away from zero", cm.formatBare(-2.5, deg, 2.5), "-5");
+        // σ = 1.4° ⇒ step 2: 3.1 goes to 4 and 2.9 to 2, because those are the nearest MULTIPLES OF
+        // THE STEP — the step is what quantises a reading, not the digit count. The two assertions
+        // above are the ones that separate ties-away-from-zero from banker's rounding: at step 5,
+        // 2.5 is an exact half-step, and nearest-EVEN would send it to 0 and print "0" — a reading
+        // suppressed by a rounding convention rather than by its own noise.
+        checkStr("step 2: 3.1 ⇒ +4", cm.formatBare(3.1, deg, 1.4), "+4");
+        checkStr("step 2: 2.9 ⇒ +2", cm.formatBare(2.9, deg, 1.4), "+2");
+        // A value smaller than half a step reads as 0 — and prints "0", not "-0": that is the whole
+        // point of the rule (a wobble inside the noise is not a reading) and "-0" would be a sign
+        // claimed off rounding noise.
+        checkStr("step 5: −0.4 ⇒ 0 (no -0)", cm.formatBare(-0.4, deg, 2.5), "0");
+        // The unit-carrying form takes the same step and keeps its own spacing convention.
+        checkStr("value form, step 5",      cm.formatValue(12.6, deg, 2.5), "+15°");
+        checkStr("percent, step 5, spaced", cm.formatValue(12.4, QStringLiteral("% stance width"), 2.5), "10 %");
+
+        // ── THE 2-ARG FORMS ARE UNCHANGED, BYTE FOR BYTE ──────────────────────────
+        //
+        // This is the assertion Phase 3 rests on: every series whose producer has not propagated a
+        // σ (which is most of them, and every series in every swing.json written before W1's work)
+        // must display EXACTLY as it did before. Both the explicit 0.0 and the defaulted call are
+        // checked, because the two reach the formatter by different routes — the second through the
+        // moc-generated CLONE of the method, which is also the route every QML caller that has not
+        // been updated takes.
+        // Every string the pre-Phase-3 block above asserts, re-asserted at σ = 0 — the whole
+        // pre-σ surface, not a sample of it, because "unchanged" is a claim about all of it.
+        checkStr("2-arg degrees",  cm.formatValue(12.4, deg),  "+12°");
+        checkStr("σ=0 == 2-arg",   cm.formatValue(12.4, deg, 0.0), "+12°");
+        checkStr("2-arg negative", cm.formatBare(-8.2, deg),   "-8");
+        checkStr("σ=0 == 2-arg, bare", cm.formatBare(-8.2, deg, 0.0), "-8");
+        checkStr("2-arg inches",   cm.formatValue(1.6, QStringLiteral("in")), "2 in");
+        checkStr("σ=0 inches",     cm.formatValue(1.6, QStringLiteral("in"), 0.0), "2 in");
+        // The three that exercise the OTHER branches of the sign and spacing rules, so a σ argument
+        // cannot have quietly changed one of them: a speed (space, no "+"), a percent (short token),
+        // and the empty unit that falls back to degrees and so DOES take a "+".
+        checkStr("σ=0 mph, spaced, no +", cm.formatValue(75.2, QStringLiteral("mph"), 0.0), "75 mph");
+        checkStr("σ=0 mph bare",          cm.formatBare(75.2,  QStringLiteral("mph"), 0.0), "75");
+        checkStr("σ=0 percent short token",
+                 cm.formatValue(12.4, QStringLiteral("% stance width"), 0.0), "12 %");
+        checkStr("σ=0 percent bare",
+                 cm.formatBare(12.4, QStringLiteral("% stance width"), 0.0), "12");
+        checkStr("σ=0 empty unit ⇒ degrees", cm.formatValue(3.0, QString(), 0.0), "+3°");
+        // σ present but under a unit changes nothing either: the floor is doing its job.
+        checkStr("σ 0.3 ⇒ today's string", cm.formatBare(12.4, deg, 0.3), "+12");
+        checkStr("σ 0.3 mph ⇒ today's string",
+                 cm.formatValue(75.2, QStringLiteral("mph"), 0.3), "75 mph");
+    }
+
+    // ── READINGS ARE QUANTISED, UNCERTAINTIES ARE QUOTED ──────────────────────────
+    //
+    // Every "± x" on the panel goes through this one function: the series σ chip beside the card's
+    // unit, the ± beside PEAK (peakSigma) and the ± beside PK RATE (rateSigma). It has NO σ
+    // parameter, and that absence is the thing under test. displayStep governs READINGS; an
+    // uncertainty is not a reading, it is the statement of how far the reading can be trusted, and it
+    // is only ever read against the value beside it — so it is quoted at one fixed decimal.
+    //
+    // Three defects came of coupling the two, all found in review, and the assertions below are
+    // written against them by name.
+    {
+        std::printf("formatUncertainty — quoted, never quantised\n");
+        const QString deg = QStringLiteral("°");
+        // One decimal, always. No step can round these to a whole number or to nothing.
+        checkStr("0.4",  cm.formatUncertainty(0.4),  "± 0.4");
+        checkStr("12.4", cm.formatUncertainty(12.4), "± 12.4");
+        checkStr("1.5",  cm.formatUncertainty(1.5),  "± 1.5");
+        checkStr("3.0",  cm.formatUncertainty(3.0),  "± 3.0");
+
+        // ⚠ NO DISCONTINUITY ACROSS HALF A STEP — the assertion the review asked for. On a series
+        // with σ = 2.5 (step 5) the old step-quantised rule sent 2.4 to "± 0" and 2.6 to "± 5": two
+        // uncertainties 8 % apart printed as nothing and as a whole step, a cliff sitting exactly
+        // where a reader is least able to see it. Quoted, they differ by what they differ by. There
+        // is no σ argument to pass any more, which is what makes the cliff unreachable rather than
+        // merely unused.
+        checkStr("2.4 (σ 2.5, old step 5)", cm.formatUncertainty(2.4), "± 2.4");
+        checkStr("2.6 (σ 2.5, old step 5)", cm.formatUncertainty(2.6), "± 2.6");
+        // F1, by its numbers: a fitted-slope standard error of 3.0 on a series whose σ chose a
+        // 5-unit step printed "± 5" — two thirds of inflation borrowed from a quantity in another
+        // unit entirely (σ is in the metric's unit, a slope's error is per 100 ms).
+        checkStr("PK RATE 3.0 is not ± 5", cm.formatUncertainty(3.0), "± 3.0");
+        // F2: peakSigma is about σ/√k for a k-sample window, so it is SMALLER than σ by
+        // construction — a step chosen from σ rounded it to zero on essentially every card, which is
+        // why the step branch was effectively unreachable and only the fallback ever ran.
+        checkStr("PEAK 0.6 on a step-5 card", cm.formatUncertainty(0.6), "± 0.6");
+
+        // Below 0.05 one decimal can say nothing true, so the honest statement is a BOUND. "± 0.0"
+        // is never printed: it reads as exactness, in the one place on the card whose whole job is to
+        // deny it. Exactly 0 goes here too — a zero standard error is a degenerate window (one
+        // sample, or an exact fit), not evidence of a perfect measurement, and "<0.1" is a bound
+        // that is true of it.
+        checkStr("0.04 ⇒ a bound",      cm.formatUncertainty(0.04), "± <0.1");
+        checkStr("0.049 ⇒ a bound",     cm.formatUncertainty(0.049), "± <0.1");
+        checkStr("0.05 ⇒ one decimal",  cm.formatUncertainty(0.05), "± 0.1");
+        checkStr("exactly 0 ⇒ a bound", cm.formatUncertainty(0.0),  "± <0.1");
+
+        // F3, the σ chip: the plumb bob's own σ is 0.03–0.06 in, and the local `.toFixed(1)` this
+        // replaced printed "± 0.0in" — false exactness AND the unit jammed against the number, the
+        // same defect formatValue exists to prevent. The unit token takes formatValue's spacing:
+        // degrees close up, everything else spaced.
+        checkStr("chip: plumb bob σ 0.04 in", cm.formatUncertainty(0.04, QStringLiteral("in")), "± <0.1 in");
+        checkStr("chip: plumb bob σ 0.06 in", cm.formatUncertainty(0.06, QStringLiteral("in")), "± 0.1 in");
+        checkStr("chip: degrees close up",    cm.formatUncertainty(2.5,  deg), "± 2.5°");
+        checkStr("chip: percent short token", cm.formatUncertainty(1.2, QStringLiteral("% stance width")),
+                 "± 1.2 %");
+        // ⚠ AN EMPTY UNIT MEANS NO TOKEN HERE, the opposite of formatBare/formatValue's
+        // empty-means-degrees — the two tiles want no token because the card names their unit above
+        // them. Pinned because the inversion is surprising and a caller passing an unresolved unit
+        // through would otherwise silently lose a "°".
+        checkStr("empty unit ⇒ no token", cm.formatUncertainty(2.5), "± 2.5");
+
+        // Direction is not a property of an uncertainty. (summaryMasked's `rate` is signed, and a
+        // caller handing this its error must not be able to print "± -2".)
+        checkStr("negative reads as magnitude", cm.formatUncertainty(-2.0), "± 2.0");
+        // A degenerate fit renders as nothing at all — the caller draws an empty label rather than
+        // "± nan" or "± inf". +inf is the one a real reducer can produce (a zero-variance basis).
+        checkStr("NaN ⇒ nothing",  cm.formatUncertainty(std::nan("")), "");
+        checkStr("+inf ⇒ nothing", cm.formatUncertainty(std::numeric_limits<double>::infinity()), "");
+    }
+
+    // ── seriesSigma: ONE implementation of "absent means absent" ──────────────────
+    //
+    // This was a four-clause guard copied into PpChartSummary, PpMetricChart and PpChartPlot — three
+    // chances to disagree about what an absent σ means, in the one part of this design where the
+    // distinction between "not characterised" and "zero" is the whole point. Now one C++ function,
+    // which is also the only form that can be asserted.
+    {
+        std::printf("seriesSigma — the absent→0 display substitution, in one place\n");
+        auto withSigma = [](const QVariant &s) {
+            QVariantMap m{ { QStringLiteral("key"), QStringLiteral("hipLineTilt") } };
+            if (s.isValid()) m.insert(QStringLiteral("sigma"), s);
+            return m;
+        };
+        checkEqD("a characterised σ comes through", cm.seriesSigma(withSigma(2.5)), 2.5);
+        // ABSENT ⇒ 0, which asks displayStep for no coarsening — the series then prints exactly as
+        // it did before §5.3. The 0 means "no claim", never "exact", and nothing that touches DATA
+        // may call this.
+        checkEqD("no sigma key ⇒ 0", cm.seriesSigma(withSigma(QVariant())), 0.0);
+        checkEqD("null sigma ⇒ 0",   cm.seriesSigma(withSigma(QVariant::fromValue(nullptr))), 0.0);
+        // A broken budget is not a small one: none of these may become a step.
+        checkEqD("NaN ⇒ 0",      cm.seriesSigma(withSigma(std::nan(""))), 0.0);
+        checkEqD("+inf ⇒ 0",     cm.seriesSigma(withSigma(std::numeric_limits<double>::infinity())), 0.0);
+        checkEqD("negative ⇒ 0", cm.seriesSigma(withSigma(-1.0)), 0.0);
+        checkEqD("zero ⇒ 0",     cm.seriesSigma(withSigma(0.0)), 0.0);
+        checkEqD("empty map ⇒ 0", cm.seriesSigma(QVariantMap{}), 0.0);
+        // A σ that arrived as a JSON number in a string (which a hand-edited swing.json can produce)
+        // still reads — toDouble's `ok` only rejects what is not a number at all.
+        checkEqD("numeric string reads", cm.seriesSigma(withSigma(QStringLiteral("2.5"))), 2.5);
+        checkEqD("non-numeric string ⇒ 0", cm.seriesSigma(withSigma(QStringLiteral("wide"))), 0.0);
+        // And the round trip the whole rule rests on: an absent σ leaves the display untouched.
+        checkEqD("absent ⇒ step 1",
+                 cm.displayStep(cm.seriesSigma(withSigma(QVariant())), QStringLiteral("°")), 1.0);
     }
 
     // ── shortLabel reads the manifest, so a new metric is short-named on arrival ──
