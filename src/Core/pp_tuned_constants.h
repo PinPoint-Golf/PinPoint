@@ -312,6 +312,37 @@ inline constexpr double kFcHz            = 6.0;     // pose.wristAngles.fcHz
 // is the one the detector produced, with σ saying how much of it is noise.
 inline constexpr bool   kFilterCurve     = false;   // pose.wristAngles.filterCurve
 } // namespace wristAngles
+
+// Offline RTS pose smoother — the LEGS group (metric_presentation_honesty.md §5.4,
+// phase 4.1; consumed by PoseSmootherConfig in src/Analysis/pose_smoother.h via the
+// "poseSmooth.*" dotted keys). Multiplicative scales on the measurement-σ constants
+// (measSigBasePx AND measSigSlopePx) and on σ_jerk, applied to the COCO body
+// keypoints 11–16 (L/R hip, knee, ankle) ONLY. Keypoints 0–10 keep the frozen
+// values, exactly as the feet/face/hand tail scales leave the body alone.
+//
+// Why the group exists: ONE σ_jerk (2.0e5 px/s³) is shared by every body keypoint and
+// it was tuned on a WRIST — the derivation block in pose_smoother.cpp puts its
+// effective smoothing window at ≈33 ms at 150 fps. A hip does nothing at that
+// timescale, so the hips inherit the wrist's window and every hip-derived series
+// (pelvisSway, hipLineTilt, plumbBobDistance, leadKneeDrift) carries keypoint noise
+// the smoother could have averaged away: p95 frame-to-frame jitter of 3.1° on
+// hipLineTilt and a whole-swing PK RATE of 291°/100 ms on the motivating swing.
+//
+// The window scales as σ_jerk^(−1/3) (the Wiener-cutoff argument in pose_smoother.cpp,
+// and `legWindowMsForJerkScale` in pose_smoother.h computes it), so a jerk scale of
+// ≈0.05 lands the 80–100 ms the design targets and ≈0.1 lands ≈71 ms.
+//
+// ⚠ BOTH SHIP AT 1.0 AND THAT IS DELIBERATE. ×1.0 is exact in IEEE-754, so with these
+// defaults every keypoint of every frame is byte-identical to the pre-phase-4 tree and
+// no persisted value[] moves. Changing a default here is phase 4.3: Mark's decision
+// after a corpus before/after WITH a control run (pose is non-deterministic — ~20
+// metrics differ at 1e-14 between identical runs), because it is the only phase of
+// this design that moves value[], and the P4 corridor content was seeded on the
+// current smoothing (docs/design/norm_shapes.md).
+namespace smoother {
+inline constexpr double kLegsSigmaScale = 1.0;   // poseSmooth.legsSigmaScale — × measSigBasePx/measSigSlopePx, kp 11–16
+inline constexpr double kLegsJerkScale  = 1.0;   // poseSmooth.legsJerkScale  — × sigmaJerk, kp 11–16
+} // namespace smoother
 } // namespace pose
 
 // --- Head tracking (WB2 — src/Analysis/head_track.h) --------------------------

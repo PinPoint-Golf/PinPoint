@@ -304,9 +304,12 @@ Measured on the 108-swing corpus after re-analysis, with a control run:
 1. **No phase sample outside its domain**, and no `hipLineTilt` / `shoulderPlaneAngle` phase
    sample at a hip- or shoulder-span ratio below the gate. Today: at least one graded Top
    sample at +88°.
-2. **PK RATE over a still address window** (Address − 300 ms → Address) reads under **2 %
-   stance width** or **2°** per 100 ms on every lower-body and body-line series. Today: 39 and
-   291.
+2. **PK RATE over a still address window** (Address − 300 ms → Address) is either under **2 %
+   stance width** / **2°** per 100 ms, or is a slope that its own standard error supports and a
+   consistent motion across swings explains. Today: 39 and 291. (Restated 2026-09-05: the Phase 2
+   gate showed 16 of 20 series under the fixed target and the other 4 to be a real trail-ward
+   pelvis drift before takeaway on every swing, with the rate 10–50× its standard error; a fixed
+   number would have been tuned to real motion.)
 3. **Every PEAK tile is a value on the drawn curve** within σ, and no PEAK in the P1–P7 domain
    exceeds the 99th percentile of the domain's samples by more than σ.
 4. **Every lower-body and body-line series carries σ**, and the σ chip renders on the card.

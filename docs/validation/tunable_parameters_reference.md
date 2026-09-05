@@ -54,6 +54,7 @@ visible in a scorecard check (§4).
 | `filter.*` | `RefuseConfig` (`orientation_refuser.h`) | `filter::` | C1→C2→C3 | wrist angles → `xmodal.imu_vision_corr`, `diag.*`, `filter.impact_continuity` |
 | `seed.*` (status **code**) | `kInit*` (`imu_base.h`) | `seed::` | C1 | live filter convergence (offline-unreachable) |
 | `pose.intraOpThreads` | `ShotAnalysisRunnerOptions` / `PoseEstimatorViTPose::load` (`pose_runner.cpp`) | `pp_tuned_constants.h` `pose::` | perf | offline ViTPose ORT intra-op pool → compute wall-time (default 0 = legacy heuristic) |
+| `poseSmooth.legsSigmaScale` / `poseSmooth.legsJerkScale` | `PoseSmootherConfig` (`pose_smoother.h`, via `fromOverrides` in `PoseSmoothStage`) | `pp_tuned_constants.h` `pose::smoother::` | C1 | the RTS smoother's effective window on keypoints 11–16 → residual jitter and PK RATE of every hip/knee series (`pelvisSway`, `hipLineTilt`, `plumbBobDistance`, `leadKneeDrift`) (**both DARK at 1.0** — ×1.0 is exact, so the shipped defaults are byte-identical; the only keys in this table that move persisted `value[]`) |
 | `shaft.onsetReturn*` / `shaft.onsetRunBridgeFrames` / `shaft.onsetBridgeMinNetFrac` / `shaft.emitTakeaway` | `ShaftV3Config` (`shaft_track_assembly.h`) | `pp_tuned_constants.h` `shaft::` | C1 | `truth.p1_address`, `seg.tempo_ratio`, Address→Top duration (camera-only fidget swings; **ALL FROZEN ON** — box 7 / gap 15 / bridge 10 / Takeaway on (2026-07-17), m3gate 0.2 (2026-07-18); 0 disables each) |
 | `ball.clubActivity` / `ball.activity*` / `positions.p1ClubQuietSigma` / `ball.tk0AddressOverride` | `BallActivityConfig` (`ball_runner.cpp`) / `PositionsConfig` (`shaft_positions.h`) / `applyBallAnchor` (`ball_anchor.cpp`) | `pp_tuned_constants.h` `ball::activity`, `ball::`, `positions::` | C1 | `truth.p1_address`, Address→Top duration (camera-only club-bob fidget swings; activity **FROZEN ON 2026-07-18** with `refine.enabled` — `false` still darks it out, byte-identical; tk0 override **FROZEN OFF 2026-07-17**) |
 | `refine.*` | `EventRefineConfig` (`event_refine.h`) | `pp_tuned_constants.h` `refine::` | C1 | `truth.p1_address`, Takeaway vs truth (late-pipeline event refinement; **FROZEN ON 2026-07-18**, minConf 0.8 — `refine.enabled=false` restores the byte- and code-path-identical pre-refine ladder) |
@@ -647,6 +648,68 @@ The At reducer takes no new key: it is `sampler.windowHalfUs` (±15 ms) and
 entry covers them. The chart adopting that median in place of a linear interpolation at one instant
 is the other half of "the card and the engine cannot disagree", and it is a behaviour change on the
 chart only.
+
+### 2.18 `poseSmooth.legsSigmaScale` / `poseSmooth.legsJerkScale` — the legs smoother window (2026-09-05)
+
+Two keys from phase 4 of [`metric_presentation_honesty.md`](../design/metric_presentation_honesty.md)
+§5.4. They are the fourth per-group scale on the offline RTS pose smoother
+(`PoseSmootherConfig`, `src/Analysis/pose_smoother.{h,cpp}`), over the **COCO body keypoints 11–16**
+— left/right hip, knee and ankle. `legsSigmaScale` multiplies both measurement-σ constants
+(`measSigBasePx` **and** `measSigSlopePx`); `legsJerkScale` multiplies `sigmaJerk`. They are applied
+exactly as the existing feet/face/hand tail scales are, in the same `for (k < kWholeBodyJoints)`
+branch chain, and they touch **no other keypoint**: 0–10 and 17–132 keep the frozen constants, which
+a test pins by byte-comparing every kp/conf/tier/σ of every frame.
+
+**Both ship at 1.0 and phase 4.1 changes no default.** ×1.0 is exact in IEEE-754, so every keypoint
+of every frame — and therefore every persisted `value[]` — is byte-identical to the pre-phase-4 tree.
+
+**Why the group exists.** One `sigmaJerk` (2.0e5 px/s³) is shared by every body keypoint and it was
+tuned on a **wrist**: the derivation block in `pose_smoother.cpp` measures its effective smoothing
+window at **≈33 ms at 150 fps** (≈42 ms at 30 fps — a fixed σ_jerk with variable dt auto-adapts). A
+hip does nothing at that timescale, so the hips inherit the wrist's window and every hip-derived
+series carries keypoint noise the smoother could have averaged away. On the motivating swing that is
+a p95 frame-to-frame jitter of 3.1° on `hipLineTilt` and a whole-swing PK RATE of 291°/100 ms. The
+design targets **80–100 ms** on the hips.
+
+**The window as a function of the scale.** Treating the filter as its steady-state Wiener equivalent
+— a 3rd-order integrated-white-noise signal (spectrum q/ω⁶) observed with noise density σ_m²·dt —
+gives a cutoff at `ω_c = (σ_jerk²/(σ_m²·dt))^(1/6)`, so
+
+* the window `T = 1/ω_c` scales as **σ_jerk^(−1/3)** at fixed dt, and as dt^(1/6) at fixed σ_jerk;
+* on a **stationary** point, where the residual is pure noise averaging (`σ_out = σ_in/√(T/dt)`), the
+  residual σ scales as **σ_jerk^(+1/6)**.
+
+So `legsJerkScale = 0.1` predicts a window ×2.15 (**≈71 ms** at 150 fps) and a residual σ ×0.681;
+`0.05` predicts ×2.71 (**≈90 ms**) and ×0.61. The law reproduces the derivation block's measured
+1e5→2e5 step to within 1 % and its 150→30 fps step to within 3 %, and overestimates the 3e5 window by
+≈12 % — it is a **chooser of sweep points, not a measurement**. `legWindowMsForJerkScale(scale)` in
+`pose_smoother.h` is that arithmetic, and `pose_smoother_test.cpp` asserts both the 0.681 residual
+ratio (within 25 %) and that a 0.5 Hz / 40 px hip excursion — the order of a P1→P4 sway — keeps its
+amplitude within 5 % at scale 0.1.
+
+⚠ **`legsSigmaScale` is registered, not motivated.** The design asks only for the window, and the
+window is `legsJerkScale`. The σ scale is here because the two are the same knob viewed from either
+side (the cutoff depends on σ_jerk²/σ_m², so raising σ_m widens the window too, but it *also* widens
+the 3σ gate and the published posterior σ, which the jerk scale does not) and because a sweep that
+can move only one of them cannot tell those apart. Nothing has yet been measured with it at anything
+but 1.0.
+
+⚠ **No shoulder/thorax scale, deliberately.** The shoulders move fast through transition and the
+wrist-tuned window is nearer right for them; the design's words are "measure before assuming".
+
+⚠ **The rest of `PoseSmootherConfig` is deliberately unreachable from a sweep.** `fromOverrides`
+applies these two keys and nothing else. The frozen fields were validated *together* — σ_jerk was
+nudged up from the pure best-window value for 3σ-gate robustness on fast joints — and a sweep that
+moved one of them alone would break that balance silently.
+
+**Promotion is phase 4.3 and it is Mark's decision, not a sweep's.** The gate is a corpus
+before/after **with a control run** (pose is non-deterministic: ~20 metrics differ at 1e-14 between
+identical runs, so a diff without a control attributes nothing), judged on residual jitter of the hip
+series, the amplitude of the P1→P4 sway excursion (it must not shrink beyond the control's spread) and
+the P4/P7 phase samples (they must move by less than σ). It is the only change in this design that
+moves persisted `value[]`, and the P4 corridor content was seeded on the current smoothing, so a
+systematic shift at P4 puts [`norm_shapes.md`](../design/norm_shapes.md) in scope rather than being
+absorbed silently.
 
 ## 3. The frozen-defaults header — the single freeze edit-point
 

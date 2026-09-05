@@ -67,10 +67,25 @@
 // function; no class, no factory (the segmented KF is a private .cpp helper).
 
 #include "swing_analysis.h"   // PoseFrame2D, PoseKpAux, PoseTier (Qt-only)
+#include "analysis_tuning.h"  // tuning::apply (header-only, Qt types only)
+#include "../Core/pp_tuned_constants.h"   // tuned::pose::smoother::
 
+#include <QVariantMap>
+
+#include <cmath>
 #include <vector>
 
 namespace pinpoint::analysis {
+
+// The LEGS group: COCO body keypoints 11–16 (L/R hip, knee, ankle). swing_analysis.h
+// owns the wholebody-TAIL boundaries (kFootFirstKp / kFaceFirstKp / kLeftHandFirstKp);
+// this pair names a range INSIDE the 17 COCO body joints, so it lives with the only
+// code that treats it as a group. Shoulders/arms (0–10) are deliberately not a group —
+// they move fast through transition and the wrist-tuned window is nearer right for them
+// (metric_presentation_honesty.md §5.4: "measure before assuming").
+inline constexpr int kLegFirstKp = 11;   // left_hip
+inline constexpr int kLegLastKp  = 16;   // right_ankle
+inline constexpr bool isLegKeypoint(int k) { return k >= kLegFirstKp && k <= kLegLastKp; }
 
 // The full smoother parameter set. Every field defaults to a validated constant;
 // see pose_smoother.cpp for how sigmaJerk was derived (the effective-bandwidth /
@@ -113,16 +128,72 @@ struct PoseSmootherConfig {
     // move much faster than hips through impact; the face barely moves), so
     // each non-body group gets a multiplicative scale on the measurement-σ
     // constants (measSigBasePx AND measSigSlopePx) and on sigmaJerk. Body
-    // keypoints (0–16) ALWAYS use the frozen base values above — the scales
-    // never apply to them, and ×1.0 is exact in IEEE-754, so the defaults
-    // leave every keypoint's output byte-identical to a pre-scale run.
+    // keypoints 0–10 ALWAYS use the frozen base values above — no scale ever
+    // applies to them — and ×1.0 is exact in IEEE-754, so the defaults leave
+    // every keypoint's output byte-identical to a pre-scale run. (Body 11–16
+    // gained the legs group below in phase 4.1, on the same ×1.0-default terms.)
     double feetSigmaScale = 1.0;    // × measSigBasePx/measSigSlopePx, kp 17–22
     double faceSigmaScale = 1.0;    // × measSigBasePx/measSigSlopePx, kp 23–90
     double handSigmaScale = 1.0;    // × measSigBasePx/measSigSlopePx, kp 91–132
     double feetJerkScale  = 1.0;    // × sigmaJerk, kp 17–22
     double faceJerkScale  = 1.0;    // × sigmaJerk, kp 23–90
     double handJerkScale  = 1.0;    // × sigmaJerk, kp 91–132
+
+    // ── legs group (COCO BODY kp 11–16: hips, knees, ankles) ─────────────────
+    // The one exception to "body 0–16 always runs the frozen base constants",
+    // and it exists because those constants were tuned on a WRIST: the ≈33 ms
+    // window at 150 fps (see the derivation block in the .cpp) is far shorter
+    // than anything a pelvis does, so the hip-derived series (pelvisSway,
+    // hipLineTilt, plumbBobDistance, leadKneeDrift) keep keypoint noise the
+    // smoother could have averaged away — metric_presentation_honesty.md §5.4.
+    // Applied EXACTLY like the tail scales above: × measSigBasePx AND
+    // measSigSlopePx, and × sigmaJerk, for keypoints 11–16 only. Keypoints
+    // 0–10 and the wholebody tail are untouched.
+    //
+    // Both default to 1.0 (from the frozen constants header, the single
+    // edit-point for the phase-4.3 flip): ×1.0 is exact in IEEE-754, so the
+    // shipped defaults leave every keypoint byte-identical to the pre-phase-4
+    // tree. `legWindowMsForJerkScale` below turns a candidate jerk scale into
+    // the window it buys.
+    double legsSigmaScale = pinpoint::tuned::pose::smoother::kLegsSigmaScale;
+    double legsJerkScale  = pinpoint::tuned::pose::smoother::kLegsJerkScale;
+
+    // SwingLab dark keys — the ONLY smoother parameters registered for a sweep.
+    // Every other field above is frozen and deliberately unreachable from an
+    // override map: they were validated together (window vs 3σ-gate robustness)
+    // and a sweep that moved one of them alone would break that balance without
+    // saying so. Empty map ⇒ the frozen defaults, byte-identical.
+    static PoseSmootherConfig fromOverrides(const QVariantMap &ov)
+    {
+        PoseSmootherConfig c;
+        tuning::apply(ov, "poseSmooth.legsSigmaScale", c.legsSigmaScale);
+        tuning::apply(ov, "poseSmooth.legsJerkScale",  c.legsJerkScale);
+        return c;
+    }
 };
+
+// Predicted effective smoothing window (ms) for a candidate `legsJerkScale` — the
+// sweep helper for phase 4.2, which is picking the scale that lands the 80–100 ms
+// the design targets on the hips.
+//
+// The scaling is the Wiener-cutoff argument spelled out in the .cpp's derivation
+// block: for a 3rd-order (white-JERK) process observed at spacing dt with
+// measurement noise σ_m, the smoother's cutoff is ω_c = (σ_jerk²/(σ_m²·dt))^(1/6),
+// so the window T = 1/ω_c ∝ σ_jerk^(−1/3) at fixed dt and σ_m. A scale s therefore
+// multiplies the window by s^(−1/3) — and, on a stationary noisy point where the
+// residual is pure noise averaging (σ_out = σ_in/√(T/dt)), divides the residual σ by
+// s^(−1/6), i.e. multiplies it by s^(1/6).
+//
+// `baseWindowMs` is the MEASURED window at the current default, and 33 ms (150 fps,
+// σ_jerk = 2e5) is the number the derivation block reports; pass 42.0 for a 30 fps
+// track. This is a predictor for choosing sweep points, NOT a measurement: the law
+// reproduces the measured 1e5→2e5 step to within 1 % and the 150→30 fps step to
+// within 3 %, but overestimates the 3e5 window by ≈12 %. Judge a scale by the
+// corpus, never by this function.
+inline double legWindowMsForJerkScale(double scale, double baseWindowMs = 33.0)
+{
+    return (scale > 0.0) ? baseWindowMs * std::pow(scale, -1.0 / 3.0) : 0.0;
+}
 
 // Parallel outputs, both sized == frames.size(): a smoothed PoseFrame2D per input
 // frame (same t_us grid) and its per-keypoint honesty aux (tier + posterior σ).

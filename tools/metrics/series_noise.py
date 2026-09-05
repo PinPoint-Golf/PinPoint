@@ -486,6 +486,8 @@ def main(argv=None):
                     help="comma-separated metric keys (default: the lower-body and body-line set)")
     ap.add_argument("--out", default=None, help="CSV path (default: stdout)")
     ap.add_argument("--only", default=None, help="only swings whose path contains this substring")
+    ap.add_argument("--file", default="swing.json",
+                    help="document file name to read (swinglab run roots hold result.json)")
     args = ap.parse_args(argv)
 
     keys = [k.strip() for k in args.keys.split(",") if k.strip()]
@@ -494,8 +496,8 @@ def main(argv=None):
     paths = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-        if "swing.json" in filenames:
-            p = os.path.join(dirpath, "swing.json")
+        if args.file in filenames:
+            p = os.path.join(dirpath, args.file)
             if args.only is None or args.only in p:
                 paths.append(p)
     paths.sort()

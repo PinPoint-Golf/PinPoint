@@ -204,21 +204,21 @@ is finer than the series' σ.
 
 ---
 
-## Phase 4 — Smoother window for slow joints `[ ]`
+## Phase 4 — Smoother window for slow joints `[x]`
 
 The only phase that moves `value[]`. Separate commit, separate gate.
 
-- [ ] **4.1** `pose_smoother.h/.cpp`: `legsSigmaScale` / `legsJerkScale` over keypoints
+- [x] **4.1** `pose_smoother.h/.cpp`: `legsSigmaScale` / `legsJerkScale` over keypoints
       11–16, default 1.0 (byte-identical). Dark keys `poseSmooth.legsJerkScale`,
       `poseSmooth.legsSigmaScale` through the existing tuning path in `PoseSmoothStage`.
       `pose_smoother_test.cpp`: scale 1.0 is byte-identical; scale 0.1 on a noisy stationary
       hip reduces residual σ and keeps a 0.5 Hz sinusoid's amplitude within 5 %.
-- [ ] **4.2** Sweep on the corpus: `legsJerkScale` ∈ {1, 0.3, 0.1, 0.05, 0.02}. Metrics:
+- [x] **4.2** Sweep on the corpus: `legsJerkScale` ∈ {1, 0.3, 0.1, 0.05, 0.02}. Metrics:
       residual jitter (0.1's script) on the hip series, amplitude of the P1→P4 sway excursion
       (must not shrink beyond the control's spread; if it does the window is too long), and
       the phase-sample values at P4/P7 (must move by less than σ). Pick the largest window
       that preserves the excursion.
-- [ ] **4.3** Promote the default only with a before/after + control table in the Log and
+- [-] **4.3** (DECIDED 2026-09-05: NOT promoted, default stays 1.0 — see the Log) Promote the default only with a before/after + control table in the Log and
       Mark's approval; the corridor content was seeded on the current smoothing and a
       systematic shift at P4 would need the norms looked at (`docs/design/norm_shapes.md`).
 
@@ -432,3 +432,34 @@ excursion preserved, or the sweep shows it cannot be and the phase is closed as 
   green. Uncertainties are quoted, readings quantised; `formatUncertainty` takes no step.
   Carry-forward: the ribbon stays dark until Mark sees it windowed; the step rule is
   recommended kept (costs multiples of 2° on body-line angles only).
+
+- **2026-09-05 (Phase 4.1 built, 4.2 swept — 4.3 NOT promoted, Mark's call)** — `legsSigmaScale` /
+  `legsJerkScale` over keypoints 11–16, default 1.0, dark keys `poseSmooth.legs*`; parity at 1.0
+  byte-identical (11/11), and the params path is inert at 1.0 (11/11). Sweep on the 11-swing
+  subset (`tools/metrics/sweep_legs_scale.sh`, data in `docs/validation/data/legs_scale_sweep/`),
+  medians over swings:
+
+  | scale | sway p95 jitter | sway σ | sway P1–P7 excursion | sway P4 | **sway P7** | hip tilt excursion | hip tilt P7 |
+  |---|---|---|---|---|---|---|---|
+  | 1.0 | 2.08 % | 0.87 | 38.7 | −22.6 | 12.7 | 23.2° | −7.4 |
+  | 0.3 | 1.74 | 0.71 | 39.4 | −22.6 | 14.2 | 22.7 | −7.4 |
+  | 0.1 | 1.39 | 0.60 | 41.2 | −22.6 | **16.2** | 21.5 | −6.2 |
+  | 0.05 | 1.37 | 0.53 | 41.7 | −22.7 | 16.3 | 20.7 | −6.0 |
+  | 0.02 | 1.31 | 0.46 | 42.6 | −22.8 | 16.7 | 19.9 | −5.8 |
+
+  Jitter falls as the window law predicts (σ ∝ scale^(1/6)) and P4 is stable to 0.2 units at
+  every scale, but the **P7 (impact) samples move by 3–4 σ at 0.1** (sway +3.5 %, knee drift
+  −3.1 %, lift −1.7 %, plumb bob +0.6 in) and the hip-tilt excursion shrinks 7 %: the hips move
+  fast through impact, a 70 ms window blends the post-impact rotation into the impact frame, and
+  the corridors are seeded at P7. So a global legs scale cannot buy jitter without biasing the
+  impact reading; the honest lever would be a motion-adaptive window, out of scope. 0.3 is the
+  only defensible candidate (jitter −16 %, P7 moves ≤ 1.7 σ on sway, < 1 σ elsewhere).
+  **Recommendation: keep 1.0 (no promotion) and close Phase 4 as measured.** Mark to decide.
+
+- **2026-09-05 (Phase 4 CLOSED, plan complete)** — Mark accepted the recommendation: default stays
+  1.0, the dark keys and the sweep tooling ship. Design §7 item 2 restated (rate judged against its
+  own standard error). Carry-forward, none blocking: one windowed look at the dashed runs, the
+  step rule and the dark ribbon; a spike-proof rate (Theil–Sen or residual gate) if a spike ever
+  shows in a PK RATE tile; runtime override plumbing for `reduce.*`; a full-corpus confirmation of
+  Phases 1–3 on GOLFSIMPC when a Windows build is next made; a motion-adaptive smoother window
+  as the honest route to less hip jitter.

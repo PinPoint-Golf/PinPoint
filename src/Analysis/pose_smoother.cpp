@@ -110,6 +110,31 @@ inline Mat3 makeF(double dt)
 // Off); 2e5 held (0 Off) at a <0.2 px residual cost on realistic speeds. 2e5 is
 // the robust knee — its window still lands in-band at the sparse phases (where
 // noise averaging matters) and tightens automatically in the dense impact burst.
+//
+// ── the window as a FUNCTION of σ_jerk (what the legs scale buys) ─────────────
+// The measurements above are three points on a law, and phase 4.1 needs the law
+// to choose a legsJerkScale. Treat the filter as its steady-state Wiener
+// equivalent: a 3rd-order integrated-white-noise signal (spectrum q/ω⁶) observed
+// with noise of spectral density σ_m²·dt gives H(ω) = 1/(1 + σ_m²·dt·ω⁶/q), i.e. a
+// cutoff at
+//        ω_c = (q / (σ_m²·dt))^(1/6) = (σ_jerk² / (σ_m²·dt))^(1/6),
+// so the effective window is
+//        T = 1/ω_c ∝ σ_jerk^(−1/3)  at fixed dt,   and  ∝ dt^(1/6) at fixed σ_jerk.
+// Both are confirmed by the sweep above: 1e5→2e5 predicts 42/2^(1/3) = 33.3 ms
+// against a measured 33; 150→30 fps predicts 33·5^(1/6) = 43.2 ms against a
+// measured 42. (3e5 is the loose one — predicted 29 ms, measured 26 — so the law
+// is a chooser of sweep points, not a substitute for measuring one.)
+//
+// On a STATIONARY point the residual is pure noise averaging, σ_out = σ_in/√(T/dt),
+// so a jerk scale s multiplies the window by s^(−1/3) and the residual σ by
+// s^(+1/6). For the legs group (metric_presentation_honesty.md §5.4, targeting an
+// 80–100 ms hip window):
+//        s = 0.1  → window ×2.15 (≈71 ms @150 fps), residual σ ×0.68
+//        s = 0.05 → window ×2.71 (≈90 ms @150 fps), residual σ ×0.61
+// pose_smoother.h::legWindowMsForJerkScale is this arithmetic, and both ratios are
+// asserted in pose_smoother_test.cpp. What the law does NOT tell you is what a
+// longer window costs a real hip excursion — that is what the 4.2 corpus sweep
+// measures, and why the default stays 1.0 until it has.
 inline Mat3 makeQ(double dt, double q)
 {
     const double dt2 = dt * dt, dt3 = dt2 * dt, dt4 = dt3 * dt, dt5 = dt4 * dt;
@@ -411,10 +436,12 @@ PoseSmootherOutput smoothPoseTrack(const std::vector<PoseFrame2D> &frames,
     }
 
     for (int k = 0; k < kWholeBodyJoints; ++k) {
-        // Per-group scales (additive — see the header doc): body 0–16 always
-        // runs the frozen base constants (scale 1.0; ×1.0 is exact, so body
+        // Per-group scales (additive — see the header doc): body 0–10 always
+        // runs the frozen base constants (scale 1.0; ×1.0 is exact, so that
         // output is byte-identical to a 17-wide run); the feet/face/hand tail
-        // scales the measurement-σ constants and sigmaJerk multiplicatively.
+        // and the legs (11–16, phase 4.1) scale the measurement-σ constants and
+        // sigmaJerk multiplicatively. Every branch is mutually exclusive and the
+        // legs one is last because the tail tests are all `>= 17`.
         double sigScale = 1.0, jerkScale = 1.0;
         if (k >= kLeftHandFirstKp) {
             sigScale = cfg.handSigmaScale;  jerkScale = cfg.handJerkScale;
@@ -422,6 +449,8 @@ PoseSmootherOutput smoothPoseTrack(const std::vector<PoseFrame2D> &frames,
             sigScale = cfg.faceSigmaScale;  jerkScale = cfg.faceJerkScale;
         } else if (k >= kFootFirstKp) {
             sigScale = cfg.feetSigmaScale;  jerkScale = cfg.feetJerkScale;
+        } else if (isLegKeypoint(k)) {
+            sigScale = cfg.legsSigmaScale;  jerkScale = cfg.legsJerkScale;
         }
         const double measBase  = cfg.measSigBasePx  * sigScale;
         const double measSlope = cfg.measSigSlopePx * sigScale;

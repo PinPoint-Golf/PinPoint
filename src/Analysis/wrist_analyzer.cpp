@@ -403,8 +403,15 @@ struct PoseSmoothStage : AnalysisStage {
         const pinpoint::FormatDescriptor &fd = ctx.window->formatOf(ctx.job.cameraSources.front());
         if (const auto *cfmt = std::get_if<pinpoint::CameraFormat>(&fd.format);
             cfmt && cfmt->width > 0 && cfmt->height > 0) {
+            // Legs-group smoother window (poseSmooth.legsSigmaScale /
+            // poseSmooth.legsJerkScale — metric_presentation_honesty.md §5.4).
+            // fromOverrides applies exactly those two keys through tuning::apply;
+            // both ship at 1.0, so with no override the config is the frozen one
+            // and every keypoint is byte-identical (×1.0 is exact in IEEE-754).
+            const PoseSmootherConfig smCfg =
+                PoseSmootherConfig::fromOverrides(ctx.job.tuningOverrides);
             PoseSmootherOutput so = smoothPoseTrack(ctx.detail->pose2d.frames,
-                                                    int(cfmt->width), int(cfmt->height));
+                                                    int(cfmt->width), int(cfmt->height), smCfg);
             ctx.detail->pose2d.smoothed    = std::move(so.smoothed);
             ctx.detail->pose2d.smoothedAux = std::move(so.aux);
 
