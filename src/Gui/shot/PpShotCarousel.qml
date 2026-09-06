@@ -158,6 +158,25 @@ Item {
         NumberAnimation { duration: Theme.durationFast; easing.type: Easing.OutCubic }
     }
 
+    // One-click select / deselect of a swing, shared by the film-strip cards and the
+    // filter menu's shot picker (which is the ONLY way in while the strip is folded).
+    // Clicking the swing already on the stage takes it off; anything else promotes it.
+    // `card` is the live delegate when the click came from a card and null when it came
+    // from the picker — the strip is folded then, so there is no delegate to point at,
+    // and pointing at the previous one would misname the focused swing to the screens
+    // that read selectedCard.swingDir as their fallback.
+    function _toggleShot(shotId, swingDir, card) {
+        if (shotId === SessionMode.focusedShotId) {
+            root.selectedShotId = -1
+            root.selectedCard   = null
+            SessionMode.clearFocus()
+        } else {
+            root.selectedShotId = shotId
+            root.selectedCard   = card || null
+            SessionMode.enterReplay(shotId, swingDir)
+        }
+    }
+
     // Opens the export options sheet for a set of swing dirs. The ⋯ "export all
     // selected" action routes through here, sharing one options panel, one
     // exporter call and one toast.
@@ -386,17 +405,7 @@ Item {
                 // the already-focused card again deselects it and resets the
                 // Replay/Analyse stage to its empty state.
                 selected: shotId === SessionMode.focusedShotId
-                onTapped: {
-                    if (shotId === SessionMode.focusedShotId) {
-                        root.selectedShotId = -1
-                        root.selectedCard   = null
-                        SessionMode.clearFocus()
-                    } else {
-                        root.selectedShotId = shotId
-                        root.selectedCard   = cardDelegate
-                        SessionMode.enterReplay(shotId, swingDir)
-                    }
-                }
+                onTapped:  root._toggleShot(shotId, swingDir, cardDelegate)
                 onRated: (n) => root.activeModel.setRating(shotId, n)
             }
         }
@@ -481,7 +490,21 @@ Item {
             color: Theme.colorSurface; radius: Theme.radiusLg
             border.width: 1; border.color: Theme.colorBorderStrong
         }
-        contentItem: PpShotFilter { proxy: filterProxy }
+        // The panel is the filter alone while the film strip is up — the cards are the
+        // selector then. Folded, it also carries the shot picker: the strip is where a
+        // swing is chosen, and folding it away must not cost the user that.
+        contentItem: PpShotFilter {
+            id: filterPanel
+            proxy:          filterProxy
+            showShots:      !root.expanded
+            focusedShotId:  SessionMode.focusedShotId
+            focusedSummary: root._focusSummary
+            onShotToggled:  (shotId, swingDir) => root._toggleShot(shotId, swingDir, null)
+        }
+        // Scroll the focused swing's chip into view — in a long session it can be
+        // several rows down, and a picker that opens away from the current swing
+        // reads as one that has lost it.
+        onOpened: filterPanel.positionAtFocused()
     }
 
     // ── Swing-edit popover — club / rating / note for the focused shot ───────
