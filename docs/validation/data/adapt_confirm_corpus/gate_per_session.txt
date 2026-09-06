@@ -1,0 +1,758 @@
+
+######## 2026-06-11_Mark-Liversedge_Wrist_01
+gate: control control (9 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500             9    0.34   9.78   0.33   1.32   0.97   0.19   0.95    0   45 absent  FAIL FAIL  ok   ok  FAIL  fail   80.6
+after                 9    0.02   0.08   0.02   0.08   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL  ok   ok   fail    0.3
+control2              9    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 45 fragmented series (C6 FAIL)
+  swing_0001                               pelvisSway         n_samples 229 -> 341
+  swing_0002                               pelvisSway         n_samples 229 -> 340
+  swing_0003                               pelvisSway         n_samples 231 -> 343
+  swing_0004                               pelvisSway         n_samples 229 -> 341
+  swing_0005                               pelvisSway         n_samples 229 -> 341
+  swing_0006                               pelvisSway         n_samples 219 -> 320
+  swing_0007                               pelvisSway         n_samples 227 -> 339
+  swing_0008                               pelvisSway         n_samples 229 -> 341
+  swing_0009                               pelvisSway         n_samples 243 -> 355
+  swing_0001                               hipLineTilt        n_samples 229 -> 341
+  swing_0002                               hipLineTilt        n_samples 229 -> 340
+  swing_0003                               hipLineTilt        n_samples 231 -> 343
+  swing_0004                               hipLineTilt        n_samples 229 -> 341
+  swing_0005                               hipLineTilt        n_samples 229 -> 341
+  swing_0006                               hipLineTilt        n_samples 219 -> 320
+  swing_0007                               hipLineTilt        n_samples 227 -> 339
+  swing_0008                               hipLineTilt        n_samples 229 -> 341
+  swing_0009                               hipLineTilt        n_samples 243 -> 355
+  swing_0001                               plumbBobDistance   n_samples 229 -> 341
+  swing_0002                               plumbBobDistance   n_samples 229 -> 340
+  swing_0003                               plumbBobDistance   n_samples 231 -> 343
+  swing_0004                               plumbBobDistance   n_samples 229 -> 341
+  swing_0005                               plumbBobDistance   n_samples 229 -> 341
+  swing_0006                               plumbBobDistance   n_samples 219 -> 320
+  swing_0007                               plumbBobDistance   n_samples 227 -> 339
+  swing_0008                               plumbBobDistance   n_samples 229 -> 341
+  swing_0009                               plumbBobDistance   n_samples 243 -> 355
+  swing_0001                               leadKneeDrift      n_samples 229 -> 341
+  swing_0002                               leadKneeDrift      n_samples 229 -> 340
+  swing_0003                               leadKneeDrift      n_samples 231 -> 343
+  swing_0004                               leadKneeDrift      n_samples 229 -> 341
+  swing_0005                               leadKneeDrift      n_samples 229 -> 341
+  swing_0006                               leadKneeDrift      n_samples 219 -> 320
+  swing_0007                               leadKneeDrift      n_samples 227 -> 339
+  swing_0008                               leadKneeDrift      n_samples 229 -> 341
+  swing_0009                               leadKneeDrift      n_samples 243 -> 355
+  swing_0001                               pelvisLift         n_samples 229 -> 341
+  swing_0002                               pelvisLift         n_samples 229 -> 340
+  swing_0003                               pelvisLift         n_samples 231 -> 343
+  swing_0004                               pelvisLift         n_samples 229 -> 341
+  swing_0005                               pelvisLift         n_samples 229 -> 341
+  swing_0006                               pelvisLift         n_samples 219 -> 320
+  swing_0007                               pelvisLift         n_samples 227 -> 339
+  swing_0008                               pelvisLift         n_samples 229 -> 341
+  swing_0009                               pelvisLift         n_samples 243 -> 355
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           9   0.27   9.78   9   0.23   1.26   1.001   0.209   0.816      101
+  hipLineTilt          9   0.00   0.45   9   0.00   0.00   0.966   0.199   0.629      101
+  plumbBobDistance     9   0.02   4.96   9   0.00   0.01   1.000   0.174   0.950      101
+  leadKneeDrift        9   0.34   1.27   9   0.33   0.81   0.998   0.218   0.878      101
+  pelvisLift           9   0.30   1.43   9   0.20   1.32   1.000   0.226   0.816      101
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           9   0.02   0.07   9   0.02   0.07   1.000   0.997   1.000        0
+  hipLineTilt          9   0.00   0.00   9   0.00   0.00   1.001   0.993   0.971        0
+  plumbBobDistance     9   0.01   0.08   9   0.00   0.01   0.999   1.000   0.996        0
+  leadKneeDrift        9   0.01   0.08   9   0.01   0.08   0.999   0.996   1.000        0
+  pelvisLift           9   0.02   0.08   9   0.02   0.07   1.000   0.972   1.000        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           9   0.00   0.00   9   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt          9   0.00   0.00   9   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     9   0.00   0.00   9   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift        9   0.00   0.00   9   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift           9   0.00   0.00   9   0.00   0.00   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-07-03_Mark-Liversedge_Wrist_01
+gate: control control (10 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500            10    2.91  40.67   2.85  40.06   0.85   0.31   0.94    0   50      5  FAIL FAIL  ok   ok  FAIL  fail   69.0
+control2             10    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+after                10    0.04   0.17   0.01   0.12   1.00   1.01   1.00    0    0     11   ok   ok  FAIL  ok   ok   fail   -0.5
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 50 fragmented series (C6 FAIL)
+  swing_0002                               pelvisSway         n_samples 215 -> 327
+  swing_0003                               pelvisSway         n_samples 229 -> 341
+  swing_0004                               pelvisSway         n_samples 227 -> 339
+  swing_0005                               pelvisSway         n_samples 227 -> 339
+  swing_0006                               pelvisSway         n_samples 229 -> 341
+  swing_0007                               pelvisSway         n_samples 229 -> 341
+  swing_0008                               pelvisSway         n_samples 213 -> 325
+  swing_0009                               pelvisSway         n_samples 211 -> 323
+  swing_0010                               pelvisSway         n_samples 213 -> 326
+  swing_0011                               pelvisSway         n_samples 229 -> 341
+  swing_0002                               hipLineTilt        n_samples 215 -> 327
+  swing_0003                               hipLineTilt        n_samples 229 -> 341
+  swing_0004                               hipLineTilt        n_samples 227 -> 339
+  swing_0005                               hipLineTilt        n_samples 227 -> 339
+  swing_0006                               hipLineTilt        n_samples 229 -> 341
+  swing_0007                               hipLineTilt        n_samples 229 -> 341
+  swing_0008                               hipLineTilt        n_samples 213 -> 325
+  swing_0009                               hipLineTilt        n_samples 211 -> 323
+  swing_0010                               hipLineTilt        n_samples 213 -> 326
+  swing_0011                               hipLineTilt        n_samples 229 -> 341
+  swing_0002                               plumbBobDistance   n_samples 215 -> 327
+  swing_0003                               plumbBobDistance   n_samples 229 -> 341
+  swing_0004                               plumbBobDistance   n_samples 227 -> 339
+  swing_0005                               plumbBobDistance   n_samples 227 -> 339
+  swing_0006                               plumbBobDistance   n_samples 229 -> 341
+  swing_0007                               plumbBobDistance   n_samples 229 -> 341
+  swing_0008                               plumbBobDistance   n_samples 213 -> 325
+  swing_0009                               plumbBobDistance   n_samples 211 -> 323
+  swing_0010                               plumbBobDistance   n_samples 213 -> 326
+  swing_0011                               plumbBobDistance   n_samples 229 -> 341
+  swing_0002                               leadKneeDrift      n_samples 215 -> 327
+  swing_0003                               leadKneeDrift      n_samples 229 -> 341
+  swing_0004                               leadKneeDrift      n_samples 227 -> 339
+  swing_0005                               leadKneeDrift      n_samples 227 -> 339
+  swing_0006                               leadKneeDrift      n_samples 229 -> 341
+  swing_0007                               leadKneeDrift      n_samples 229 -> 341
+  swing_0008                               leadKneeDrift      n_samples 213 -> 325
+  swing_0009                               leadKneeDrift      n_samples 211 -> 323
+  swing_0010                               leadKneeDrift      n_samples 213 -> 326
+  swing_0011                               leadKneeDrift      n_samples 229 -> 341
+  swing_0002                               pelvisLift         n_samples 215 -> 327
+  swing_0003                               pelvisLift         n_samples 229 -> 341
+  swing_0004                               pelvisLift         n_samples 227 -> 339
+  swing_0005                               pelvisLift         n_samples 227 -> 339
+  swing_0006                               pelvisLift         n_samples 229 -> 341
+  swing_0007                               pelvisLift         n_samples 229 -> 341
+  swing_0008                               pelvisLift         n_samples 213 -> 325
+  swing_0009                               pelvisLift         n_samples 211 -> 323
+  swing_0010                               pelvisLift         n_samples 213 -> 326
+  swing_0011                               pelvisLift         n_samples 229 -> 341
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          10   2.91  17.13  10   2.53  40.06   0.983   0.208   0.899       46
+  hipLineTilt         10   0.03   7.54   9   0.00  10.34   0.998   0.251   0.800       46
+  plumbBobDistance    10   0.03   6.50  10   0.01  10.07   0.997   0.472   0.944       46
+  leadKneeDrift       10   2.77   5.81  10   2.85  24.39   0.875   0.135   0.802       46
+  pelvisLift          10   1.86  40.67  10   1.52   5.61   0.849   0.198   0.899       46
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt         10   0.00   0.00   9   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance    10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift       10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift          10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          10   0.03   0.17  10   0.01   0.12   1.000   1.000   1.000        0
+  hipLineTilt         10   0.02   0.09   9   0.00   0.00   1.000   1.000   0.989        0
+  plumbBobDistance    10   0.02   0.13  10   0.00   0.05   0.998   1.015   0.991        0
+  leadKneeDrift       10   0.00   0.11  10   0.00   0.11   1.000   0.999   1.000        0
+  pelvisLift          10   0.04   0.10  10   0.01   0.03   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-07-04_Mark-Liversedge_Wrist_01
+gate: control control (15 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500            15    2.10   4.77   1.71  16.32   0.78   0.20   0.85    1   75      6  FAIL FAIL  ok   ok  FAIL  fail   80.0
+after                15    0.00   0.16   0.00   0.08   1.00   1.00   1.00    0    0     20   ok   ok  FAIL  ok   ok   fail    0.0
+control2             15    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 75 fragmented series (C6 FAIL)
+  swing_0001                               pelvisSway         n_samples 229 -> 341
+  swing_0002                               pelvisSway         n_samples 224 -> 337
+  swing_0003                               pelvisSway         n_samples 227 -> 339
+  swing_0004                               pelvisSway         n_samples 229 -> 341
+  swing_0005                               pelvisSway         n_samples 229 -> 342
+  swing_0006                               pelvisSway         n_samples 229 -> 342
+  swing_0007                               pelvisSway         n_samples 227 -> 338
+  swing_0008                               pelvisSway         n_samples 227 -> 339
+  swing_0009                               pelvisSway         n_samples 229 -> 341
+  swing_0010                               pelvisSway         n_samples 227 -> 339
+  swing_0011                               pelvisSway         n_samples 217 -> 329
+  swing_0012                               pelvisSway         n_samples 229 -> 341
+  swing_0013                               pelvisSway         n_samples 227 -> 339
+  swing_0014                               pelvisSway         n_samples 217 -> 330
+  swing_0015                               pelvisSway         n_samples 227 -> 339
+  swing_0001                               hipLineTilt        n_samples 229 -> 341
+  swing_0002                               hipLineTilt        n_samples 224 -> 337
+  swing_0003                               hipLineTilt        n_samples 227 -> 339
+  swing_0004                               hipLineTilt        n_samples 229 -> 341
+  swing_0005                               hipLineTilt        n_samples 229 -> 342
+  swing_0006                               hipLineTilt        n_samples 229 -> 342
+  swing_0007                               hipLineTilt        n_samples 227 -> 338
+  swing_0008                               hipLineTilt        n_samples 227 -> 339
+  swing_0009                               hipLineTilt        n_samples 229 -> 341
+  swing_0010                               hipLineTilt        n_samples 227 -> 339
+  swing_0011                               hipLineTilt        n_samples 217 -> 329
+  swing_0012                               hipLineTilt        n_samples 229 -> 341
+  swing_0013                               hipLineTilt        n_samples 227 -> 339
+  swing_0014                               hipLineTilt        n_samples 217 -> 330
+  swing_0015                               hipLineTilt        n_samples 227 -> 339
+  swing_0001                               plumbBobDistance   n_samples 229 -> 341
+  swing_0002                               plumbBobDistance   n_samples 224 -> 337
+  swing_0003                               plumbBobDistance   n_samples 227 -> 339
+  swing_0004                               plumbBobDistance   n_samples 229 -> 341
+  swing_0005                               plumbBobDistance   n_samples 229 -> 342
+  swing_0006                               plumbBobDistance   n_samples 229 -> 342
+  swing_0007                               plumbBobDistance   n_samples 227 -> 338
+  swing_0008                               plumbBobDistance   n_samples 227 -> 339
+  swing_0009                               plumbBobDistance   n_samples 229 -> 341
+  swing_0010                               plumbBobDistance   n_samples 227 -> 339
+  swing_0011                               plumbBobDistance   n_samples 217 -> 329
+  swing_0012                               plumbBobDistance   n_samples 229 -> 341
+  swing_0013                               plumbBobDistance   n_samples 227 -> 339
+  swing_0014                               plumbBobDistance   n_samples 217 -> 330
+  swing_0015                               plumbBobDistance   n_samples 227 -> 339
+  swing_0001                               leadKneeDrift      n_samples 229 -> 341
+  swing_0002                               leadKneeDrift      n_samples 224 -> 337
+  swing_0003                               leadKneeDrift      n_samples 227 -> 339
+  swing_0004                               leadKneeDrift      n_samples 229 -> 341
+  swing_0005                               leadKneeDrift      n_samples 229 -> 342
+  swing_0006                               leadKneeDrift      n_samples 229 -> 342
+  swing_0007                               leadKneeDrift      n_samples 227 -> 338
+  swing_0008                               leadKneeDrift      n_samples 227 -> 339
+  swing_0009                               leadKneeDrift      n_samples 229 -> 341
+  swing_0010                               leadKneeDrift      n_samples 227 -> 339
+  swing_0011                               leadKneeDrift      n_samples 217 -> 329
+  swing_0012                               leadKneeDrift      n_samples 229 -> 341
+  swing_0013                               leadKneeDrift      n_samples 227 -> 339
+  swing_0014                               leadKneeDrift      n_samples 217 -> 330
+  swing_0015                               leadKneeDrift      n_samples 227 -> 339
+  swing_0001                               pelvisLift         n_samples 229 -> 341
+  swing_0002                               pelvisLift         n_samples 224 -> 337
+  swing_0003                               pelvisLift         n_samples 227 -> 339
+  swing_0004                               pelvisLift         n_samples 229 -> 341
+  swing_0005                               pelvisLift         n_samples 229 -> 342
+  swing_0006                               pelvisLift         n_samples 229 -> 342
+  swing_0007                               pelvisLift         n_samples 227 -> 338
+  swing_0008                               pelvisLift         n_samples 227 -> 339
+  swing_0009                               pelvisLift         n_samples 229 -> 341
+  swing_0010                               pelvisLift         n_samples 227 -> 339
+  swing_0011                               pelvisLift         n_samples 217 -> 329
+  swing_0012                               pelvisLift         n_samples 229 -> 341
+  swing_0013                               pelvisLift         n_samples 227 -> 339
+  swing_0014                               pelvisLift         n_samples 217 -> 330
+  swing_0015                               pelvisLift         n_samples 227 -> 339
+
+dense1500: 1 lost phase samples (C2 FAIL)
+  swing_0010                               hipLineTilt        P7
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          15   0.61   1.29  15   1.19   3.80   0.978   0.192   0.768      111
+  hipLineTilt         15   0.00   0.10  14   0.00   0.00   0.783   0.235   0.697      111
+  plumbBobDistance    15   0.00   0.09  15   0.00   4.76   0.972   0.173   0.849      111
+  leadKneeDrift       15   0.52   1.23  15   0.73  16.32   0.994   0.134   0.696      111
+  pelvisLift          15   2.10   4.77  15   1.71   3.74   0.873   0.181   0.768      111
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          15   0.00   0.10  15   0.00   0.08   1.000   1.000   1.000        0
+  hipLineTilt         15   0.00   0.10  15   0.00   0.00   1.000   1.000   0.993        0
+  plumbBobDistance    15   0.00   0.08  15   0.00   0.01   1.000   1.000   1.000        0
+  leadKneeDrift       15   0.00   0.08  15   0.00   0.08   1.000   1.000   1.000        0
+  pelvisLift          15   0.00   0.16  15   0.00   0.04   1.000   1.000   1.000        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          15   0.00   0.00  15   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt         15   0.00   0.00  15   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance    15   0.00   0.00  15   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift       15   0.00   0.00  15   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift          15   0.00   0.00  15   0.00   0.00   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-07-05_Mark-Liversedge_Wrist_02
+gate: control control (10 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500            10    9.23  18.67   6.94  16.23   0.44   0.17   0.90    0   45      8  FAIL FAIL  ok   ok  FAIL  fail   82.6
+after                10    0.00   0.11   0.00   0.11   1.00   1.00   1.00    0    0     24   ok   ok  FAIL FAIL  ok   fail    0.1
+control2             10    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 45 fragmented series (C6 FAIL)
+  swing_0001                               pelvisSway         n_samples 215 -> 327
+  swing_0002                               pelvisSway         n_samples 215 -> 327
+  swing_0003                               pelvisSway         n_samples 213 -> 325
+  swing_0004                               pelvisSway         n_samples 213 -> 325
+  swing_0005                               pelvisSway         n_samples 215 -> 327
+  swing_0006                               pelvisSway         n_samples 217 -> 330
+  swing_0007                               pelvisSway         n_samples 213 -> 325
+  swing_0008                               pelvisSway         n_samples 223 -> 336
+  swing_0009                               pelvisSway         n_samples 227 -> 339
+  swing_0010                               pelvisSway         n_samples 213 -> 325
+  swing_0001                               hipLineTilt        n_samples 215 -> 327
+  swing_0002                               hipLineTilt        n_samples 215 -> 327
+  swing_0003                               hipLineTilt        n_samples 213 -> 325
+  swing_0004                               hipLineTilt        n_samples 213 -> 325
+  swing_0005                               hipLineTilt        n_samples 215 -> 327
+  swing_0006                               hipLineTilt        n_samples 217 -> 330
+  swing_0007                               hipLineTilt        n_samples 213 -> 325
+  swing_0008                               hipLineTilt        n_samples 223 -> 336
+  swing_0009                               hipLineTilt        n_samples 227 -> 339
+  swing_0010                               hipLineTilt        n_samples 213 -> 325
+  swing_0002                               plumbBobDistance   n_samples 215 -> 327
+  swing_0004                               plumbBobDistance   n_samples 213 -> 325
+  swing_0005                               plumbBobDistance   n_samples 215 -> 327
+  swing_0006                               plumbBobDistance   n_samples 217 -> 330
+  swing_0009                               plumbBobDistance   n_samples 227 -> 339
+  swing_0001                               leadKneeDrift      n_samples 215 -> 327
+  swing_0002                               leadKneeDrift      n_samples 215 -> 327
+  swing_0003                               leadKneeDrift      n_samples 213 -> 325
+  swing_0004                               leadKneeDrift      n_samples 213 -> 325
+  swing_0005                               leadKneeDrift      n_samples 215 -> 327
+  swing_0006                               leadKneeDrift      n_samples 217 -> 330
+  swing_0007                               leadKneeDrift      n_samples 213 -> 325
+  swing_0008                               leadKneeDrift      n_samples 223 -> 336
+  swing_0009                               leadKneeDrift      n_samples 227 -> 339
+  swing_0010                               leadKneeDrift      n_samples 213 -> 325
+  swing_0001                               pelvisLift         n_samples 215 -> 327
+  swing_0002                               pelvisLift         n_samples 215 -> 327
+  swing_0003                               pelvisLift         n_samples 213 -> 325
+  swing_0004                               pelvisLift         n_samples 213 -> 325
+  swing_0005                               pelvisLift         n_samples 215 -> 327
+  swing_0006                               pelvisLift         n_samples 217 -> 330
+  swing_0007                               pelvisLift         n_samples 213 -> 325
+  swing_0008                               pelvisLift         n_samples 223 -> 336
+  swing_0009                               pelvisLift         n_samples 227 -> 339
+  swing_0010                               pelvisLift         n_samples 213 -> 325
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          10   1.39   5.25  10   1.24   3.64   0.989   0.197   0.842      112
+  hipLineTilt         10   0.02   1.65  10   0.00   0.00   0.790   0.219   0.769      112
+  plumbBobDistance     5   0.02   2.71   5   0.00   0.00   0.441   0.105   0.898      112
+  leadKneeDrift       10   1.93   3.79  10   2.03   3.88   0.975   0.136   0.752       90
+  pelvisLift          10   9.23  18.67  10   6.94  16.23   0.699   0.193   0.842      112
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          10   0.00   0.06  10   0.00   0.05   1.000   0.996   1.000        0
+  hipLineTilt         10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     5   0.00   0.05   5   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift       10   0.00   0.04  10   0.00   0.03   1.000   1.000   1.000        0
+  pelvisLift          10   0.00   0.11  10   0.00   0.11   1.000   1.000   1.000        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt         10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift       10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift          10   0.00   0.00  10   0.00   0.00   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-07-08_Mark-Liversedge_Wrist_01
+gate: control control (11 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500            11    2.30   6.41   2.18   5.59   0.72   0.19   0.93    0   55      4  FAIL FAIL  ok   ok  FAIL  fail   81.1
+after                11    0.02   0.32   0.01   0.31   1.00   1.00   1.00    0    0      9   ok   ok  FAIL  ok   ok   fail    0.0
+control2             11    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 55 fragmented series (C6 FAIL)
+  swing_0001                               pelvisSway         n_samples 227 -> 339
+  swing_0002                               pelvisSway         n_samples 215 -> 328
+  swing_0003                               pelvisSway         n_samples 213 -> 325
+  swing_0004                               pelvisSway         n_samples 215 -> 327
+  swing_0005                               pelvisSway         n_samples 227 -> 340
+  swing_0006                               pelvisSway         n_samples 227 -> 340
+  swing_0007                               pelvisSway         n_samples 227 -> 339
+  swing_0008                               pelvisSway         n_samples 227 -> 339
+  swing_0009                               pelvisSway         n_samples 215 -> 328
+  swing_0010                               pelvisSway         n_samples 219 -> 331
+  swing_0011                               pelvisSway         n_samples 227 -> 339
+  swing_0001                               hipLineTilt        n_samples 227 -> 339
+  swing_0002                               hipLineTilt        n_samples 215 -> 328
+  swing_0003                               hipLineTilt        n_samples 213 -> 325
+  swing_0004                               hipLineTilt        n_samples 215 -> 327
+  swing_0005                               hipLineTilt        n_samples 227 -> 340
+  swing_0006                               hipLineTilt        n_samples 227 -> 340
+  swing_0007                               hipLineTilt        n_samples 227 -> 339
+  swing_0008                               hipLineTilt        n_samples 227 -> 339
+  swing_0009                               hipLineTilt        n_samples 215 -> 328
+  swing_0010                               hipLineTilt        n_samples 219 -> 331
+  swing_0011                               hipLineTilt        n_samples 227 -> 339
+  swing_0001                               plumbBobDistance   n_samples 227 -> 339
+  swing_0002                               plumbBobDistance   n_samples 215 -> 328
+  swing_0003                               plumbBobDistance   n_samples 213 -> 325
+  swing_0004                               plumbBobDistance   n_samples 215 -> 327
+  swing_0005                               plumbBobDistance   n_samples 227 -> 340
+  swing_0006                               plumbBobDistance   n_samples 227 -> 340
+  swing_0007                               plumbBobDistance   n_samples 227 -> 339
+  swing_0008                               plumbBobDistance   n_samples 227 -> 339
+  swing_0009                               plumbBobDistance   n_samples 215 -> 328
+  swing_0010                               plumbBobDistance   n_samples 219 -> 331
+  swing_0011                               plumbBobDistance   n_samples 227 -> 339
+  swing_0001                               leadKneeDrift      n_samples 227 -> 339
+  swing_0002                               leadKneeDrift      n_samples 215 -> 328
+  swing_0003                               leadKneeDrift      n_samples 213 -> 325
+  swing_0004                               leadKneeDrift      n_samples 215 -> 327
+  swing_0005                               leadKneeDrift      n_samples 227 -> 340
+  swing_0006                               leadKneeDrift      n_samples 227 -> 340
+  swing_0007                               leadKneeDrift      n_samples 227 -> 339
+  swing_0008                               leadKneeDrift      n_samples 227 -> 339
+  swing_0009                               leadKneeDrift      n_samples 215 -> 328
+  swing_0010                               leadKneeDrift      n_samples 219 -> 331
+  swing_0011                               leadKneeDrift      n_samples 227 -> 339
+  swing_0001                               pelvisLift         n_samples 227 -> 339
+  swing_0002                               pelvisLift         n_samples 215 -> 328
+  swing_0003                               pelvisLift         n_samples 213 -> 325
+  swing_0004                               pelvisLift         n_samples 215 -> 327
+  swing_0005                               pelvisLift         n_samples 227 -> 340
+  swing_0006                               pelvisLift         n_samples 227 -> 340
+  swing_0007                               pelvisLift         n_samples 227 -> 339
+  swing_0008                               pelvisLift         n_samples 227 -> 339
+  swing_0009                               pelvisLift         n_samples 215 -> 328
+  swing_0010                               pelvisLift         n_samples 219 -> 331
+  swing_0011                               pelvisLift         n_samples 227 -> 339
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          11   1.37   4.04  11   1.11   3.93   0.985   0.188   0.832      112
+  hipLineTilt         11   0.00   0.02  11   0.00   0.00   0.999   0.267   0.748      112
+  plumbBobDistance    11   0.01   0.01  11   0.00   0.01   0.718   0.111   0.933      112
+  leadKneeDrift       11   0.69   2.59  11   0.76   2.60   1.000   0.218   0.786      112
+  pelvisLift          11   2.30   6.41  11   2.18   5.59   0.871   0.150   0.832      112
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          11   0.01   0.19  11   0.00   0.21   1.000   1.000   1.000        0
+  hipLineTilt         11   0.00   0.02  11   0.00   0.00   1.000   1.000   0.998        0
+  plumbBobDistance    11   0.00   0.01  11   0.00   0.01   0.997   1.000   0.999        0
+  leadKneeDrift       11   0.01   0.17  11   0.01   0.17   1.000   1.000   1.000        0
+  pelvisLift          11   0.02   0.32  11   0.00   0.31   1.000   1.000   1.000        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          11   0.00   0.00  11   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt         11   0.00   0.00  11   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance    11   0.00   0.00  11   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift       11   0.00   0.00  11   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift          11   0.00   0.00  11   0.00   0.00   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-07-09_Mark-Liversedge_Wrist_01
+gate: control control (6 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+after                 6    0.01   0.13   0.00   0.11   1.00     -   1.00    0    0      7  FAIL FAIL FAIL FAIL  ok   fail      -
+control2              6    0.00   0.00   0.00   0.00   1.00     -   1.00    0    0 absent  FAIL FAIL FAIL FAIL  ok   fail      -
+dense1500             6    4.30   5.87   2.96   5.49   0.73     -   0.87    0   24      4  FAIL FAIL FAIL FAIL FAIL  fail      -
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 24 fragmented series (C6 FAIL)
+  swing_0001                               pelvisSway         n_samples 229 -> 340
+  swing_0002                               pelvisSway         n_samples 215 -> 327
+  swing_0003                               pelvisSway         n_samples 215 -> 328
+  swing_0004                               pelvisSway         n_samples 219 -> 331
+  swing_0005                               pelvisSway         n_samples 213 -> 326
+  swing_0006                               pelvisSway         n_samples 229 -> 341
+  swing_0001                               hipLineTilt        n_samples 229 -> 340
+  swing_0002                               hipLineTilt        n_samples 215 -> 327
+  swing_0003                               hipLineTilt        n_samples 215 -> 328
+  swing_0004                               hipLineTilt        n_samples 219 -> 331
+  swing_0005                               hipLineTilt        n_samples 213 -> 326
+  swing_0006                               hipLineTilt        n_samples 229 -> 341
+  swing_0001                               leadKneeDrift      n_samples 229 -> 340
+  swing_0002                               leadKneeDrift      n_samples 215 -> 327
+  swing_0003                               leadKneeDrift      n_samples 215 -> 328
+  swing_0004                               leadKneeDrift      n_samples 219 -> 331
+  swing_0005                               leadKneeDrift      n_samples 213 -> 326
+  swing_0006                               leadKneeDrift      n_samples 229 -> 341
+  swing_0001                               pelvisLift         n_samples 229 -> 340
+  swing_0002                               pelvisLift         n_samples 215 -> 327
+  swing_0003                               pelvisLift         n_samples 215 -> 328
+  swing_0004                               pelvisLift         n_samples 219 -> 331
+  swing_0005                               pelvisLift         n_samples 213 -> 326
+  swing_0006                               pelvisLift         n_samples 229 -> 341
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   0.01   0.03   6   0.00   0.01   1.000   1.000   0.999        0
+  hipLineTilt          6   0.00   0.02   6   0.00   0.00   1.000   1.000   0.996        0
+  plumbBobDistance     0     -     -   0     -     -     -     -     -        -
+  leadKneeDrift        6   0.01   0.05   6   0.00   0.04   1.000   1.000   1.000        0
+  pelvisLift           6   0.01   0.13   6   0.00   0.11   0.999   1.000   0.999        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt          6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     0     -     -   0     -     -     -     -     -        -
+  leadKneeDrift        6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift           6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   1.33   2.31   6   1.14   1.96   0.971   0.186   0.875      111
+  hipLineTilt          6   0.00   0.02   6   0.00   0.00   0.729   0.300   0.797      111
+  plumbBobDistance     0     -     -   0     -     -     -     -     -        -
+  leadKneeDrift        6   0.92   4.82   6   1.16   5.12   0.976   0.097   0.745      111
+  pelvisLift           6   4.30   5.87   6   2.96   5.49   0.765   0.177   0.875      111
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-07-10_Mark-Liversedge_Wrist_01
+gate: control control (5 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500             5    2.70   5.09   1.95   4.69   0.68   0.20   0.83    0   25      4  FAIL FAIL  ok   ok  FAIL  fail   79.6
+after                 5    0.04   0.07   0.04   0.11   1.00   0.99   1.00    0    0      4   ok   ok  FAIL  ok   ok   fail    1.2
+control2              5    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 25 fragmented series (C6 FAIL)
+  swing_0001                               pelvisSway         n_samples 229 -> 341
+  swing_0002                               pelvisSway         n_samples 229 -> 341
+  swing_0003                               pelvisSway         n_samples 219 -> 331
+  swing_0004                               pelvisSway         n_samples 229 -> 341
+  swing_0005                               pelvisSway         n_samples 229 -> 341
+  swing_0001                               hipLineTilt        n_samples 229 -> 341
+  swing_0002                               hipLineTilt        n_samples 229 -> 341
+  swing_0003                               hipLineTilt        n_samples 219 -> 331
+  swing_0004                               hipLineTilt        n_samples 229 -> 341
+  swing_0005                               hipLineTilt        n_samples 229 -> 341
+  swing_0001                               plumbBobDistance   n_samples 229 -> 341
+  swing_0002                               plumbBobDistance   n_samples 229 -> 341
+  swing_0003                               plumbBobDistance   n_samples 219 -> 331
+  swing_0004                               plumbBobDistance   n_samples 229 -> 341
+  swing_0005                               plumbBobDistance   n_samples 229 -> 341
+  swing_0001                               leadKneeDrift      n_samples 229 -> 341
+  swing_0002                               leadKneeDrift      n_samples 229 -> 341
+  swing_0003                               leadKneeDrift      n_samples 219 -> 331
+  swing_0004                               leadKneeDrift      n_samples 229 -> 341
+  swing_0005                               leadKneeDrift      n_samples 229 -> 341
+  swing_0001                               pelvisLift         n_samples 229 -> 341
+  swing_0002                               pelvisLift         n_samples 229 -> 341
+  swing_0003                               pelvisLift         n_samples 219 -> 331
+  swing_0004                               pelvisLift         n_samples 229 -> 341
+  swing_0005                               pelvisLift         n_samples 229 -> 341
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           5   2.70   4.94   5   1.95   4.00   0.977   0.228   0.834      112
+  hipLineTilt          5   0.00   0.02   5   0.00   0.00   1.000   0.212   0.673      112
+  plumbBobDistance     5   0.00   0.04   5   0.00   0.00   0.676   0.172   0.627      112
+  leadKneeDrift        5   1.68   2.01   5   1.79   2.01   1.018   0.158   0.658      112
+  pelvisLift           5   2.00   5.09   5   1.54   4.69   0.756   0.292   0.834      112
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           5   0.04   0.07   5   0.04   0.11   1.000   0.993   1.000        0
+  hipLineTilt          5   0.00   0.02   5   0.00   0.00   1.000   0.973   0.992        0
+  plumbBobDistance     5   0.00   0.04   5   0.00   0.00   1.000   0.999   0.999        0
+  leadKneeDrift        5   0.00   0.05   5   0.00   0.09   0.999   1.000   0.999        0
+  pelvisLift           5   0.02   0.05   5   0.02   0.05   0.999   0.995   1.000        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt          5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift        5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift           5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-07-10_Mark-Liversedge_Wrist_02
+gate: control control (6 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500             6    3.35   5.19   3.19   4.90   0.94   0.47   0.83    0   30      6  FAIL FAIL FAIL  ok  FAIL  fail   53.2
+after                 6    0.01   0.41   0.00   0.41   1.00   1.00   1.00    0    0      8   ok   ok  FAIL  ok   ok   fail    0.0
+control2              6    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 30 fragmented series (C6 FAIL)
+  swing_0001                               pelvisSway         n_samples 229 -> 341
+  swing_0002                               pelvisSway         n_samples 216 -> 329
+  swing_0003                               pelvisSway         n_samples 227 -> 339
+  swing_0004                               pelvisSway         n_samples 213 -> 325
+  swing_0005                               pelvisSway         n_samples 215 -> 327
+  swing_0006                               pelvisSway         n_samples 215 -> 328
+  swing_0001                               hipLineTilt        n_samples 229 -> 341
+  swing_0002                               hipLineTilt        n_samples 216 -> 329
+  swing_0003                               hipLineTilt        n_samples 227 -> 339
+  swing_0004                               hipLineTilt        n_samples 213 -> 325
+  swing_0005                               hipLineTilt        n_samples 215 -> 327
+  swing_0006                               hipLineTilt        n_samples 215 -> 328
+  swing_0001                               plumbBobDistance   n_samples 229 -> 341
+  swing_0002                               plumbBobDistance   n_samples 216 -> 329
+  swing_0003                               plumbBobDistance   n_samples 227 -> 339
+  swing_0004                               plumbBobDistance   n_samples 213 -> 325
+  swing_0005                               plumbBobDistance   n_samples 215 -> 327
+  swing_0006                               plumbBobDistance   n_samples 215 -> 328
+  swing_0001                               leadKneeDrift      n_samples 229 -> 341
+  swing_0002                               leadKneeDrift      n_samples 216 -> 329
+  swing_0003                               leadKneeDrift      n_samples 227 -> 339
+  swing_0004                               leadKneeDrift      n_samples 213 -> 325
+  swing_0005                               leadKneeDrift      n_samples 215 -> 327
+  swing_0006                               leadKneeDrift      n_samples 215 -> 328
+  swing_0001                               pelvisLift         n_samples 229 -> 341
+  swing_0002                               pelvisLift         n_samples 216 -> 329
+  swing_0003                               pelvisLift         n_samples 227 -> 339
+  swing_0004                               pelvisLift         n_samples 213 -> 325
+  swing_0005                               pelvisLift         n_samples 215 -> 327
+  swing_0006                               pelvisLift         n_samples 215 -> 328
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   1.11   3.90   6   0.94   3.45   0.992   0.252   0.736      112
+  hipLineTilt          6   0.00   0.00   6   0.00   0.00   1.000   0.292   0.713      112
+  plumbBobDistance     6   0.01   0.02   6   0.00   0.01   1.002   0.861   0.826      112
+  leadKneeDrift        6   1.00   2.45   6   1.02   2.49   0.979   0.100   0.624      112
+  pelvisLift           6   3.35   5.19   6   3.19   4.90   0.936   0.200   0.736      112
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   0.00   0.04   6   0.00   0.03   1.000   1.000   1.000        0
+  hipLineTilt          6   0.00   0.00   6   0.00   0.00   1.000   1.000   0.996        0
+  plumbBobDistance     6   0.01   0.02   6   0.00   0.01   1.000   1.000   0.998        0
+  leadKneeDrift        6   0.01   0.41   6   0.00   0.41   1.000   1.000   1.000        0
+  pelvisLift           6   0.00   0.33   6   0.00   0.33   1.000   1.000   1.000        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt          6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift        6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift           6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
+
+######## 2026-08-18_Mark-Liversedge_Wrist_01
+gate: control control (5 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+after                 5    0.25   0.34   0.24   0.25   1.01   0.69   0.99    0    0 absent   ok   ok   ok   ok   ok   PASS   31.2
+dense1500             5    0.25   0.34   0.24   0.25   1.01   0.69   0.99    0    0 absent   ok   ok   ok   ok   ok   PASS   31.2
+control2              5    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+== after  (PASS)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           5   0.10   0.13   5   0.08   0.13   1.000   0.644   0.990        0
+  hipLineTilt          5   0.01   0.02   5   0.00   0.00   1.000   0.745   0.971        0
+  plumbBobDistance     5   0.05   0.09   5   0.00   0.01   1.009   0.673   0.906        0
+  leadKneeDrift        5   0.12   0.15   5   0.10   0.13   0.998   0.517   0.985        0
+  pelvisLift           5   0.25   0.34   5   0.24   0.25   1.000   0.572   0.990        0
+
+== dense1500  (PASS)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           5   0.10   0.13   5   0.08   0.13   1.000   0.644   0.990        0
+  hipLineTilt          5   0.01   0.02   5   0.00   0.00   1.000   0.745   0.971        0
+  plumbBobDistance     5   0.05   0.09   5   0.00   0.01   1.009   0.673   0.906        0
+  leadKneeDrift        5   0.12   0.15   5   0.10   0.13   0.998   0.517   0.985        0
+  pelvisLift           5   0.25   0.34   5   0.24   0.25   1.000   0.572   0.990        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt          5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift        5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift           5   0.00   0.00   5   0.00   0.00   1.000   1.000   1.000        0
+
+2/3 settings pass C2∧C3∧C4∧C5∧C6; best: after (gain 31.2 %)
+
+######## 2026-08-18_Mark-Liversedge_Wrist_02
+gate: control control (6 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+after                 6    0.12   0.28   0.16   0.38   0.99   0.66   0.99    0    0 absent   ok   ok   ok   ok   ok   PASS   33.9
+dense1500             6    0.12   0.28   0.16   0.38   0.99   0.66   0.99    0    0 absent   ok   ok   ok   ok   ok   PASS   33.9
+control2              6    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+== after  (PASS)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   0.12   0.28   6   0.16   0.38   1.000   0.725   0.994        0
+  hipLineTilt          6   0.02   0.05   6   0.00   0.00   0.999   0.747   0.938        0
+  plumbBobDistance     6   0.03   0.10   6   0.01   0.05   0.994   0.512   0.891        0
+  leadKneeDrift        6   0.06   0.10   6   0.04   0.10   0.997   0.713   0.994        0
+  pelvisLift           6   0.09   0.19   6   0.07   0.24   0.997   0.621   0.994        0
+
+== dense1500  (PASS)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   0.12   0.28   6   0.16   0.38   1.000   0.725   0.994        0
+  hipLineTilt          6   0.02   0.05   6   0.00   0.00   0.999   0.747   0.938        0
+  plumbBobDistance     6   0.03   0.10   6   0.01   0.05   0.994   0.512   0.891        0
+  leadKneeDrift        6   0.06   0.10   6   0.04   0.10   0.997   0.713   0.994        0
+  pelvisLift           6   0.09   0.19   6   0.07   0.24   0.997   0.621   0.994        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway           6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt          6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance     6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift        6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift           6   0.00   0.00   6   0.00   0.00   1.000   1.000   1.000        0
+
+2/3 settings pass C2∧C3∧C4∧C5∧C6; best: after (gain 33.9 %)

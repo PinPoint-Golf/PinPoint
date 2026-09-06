@@ -249,7 +249,7 @@ Run unattended per Mark's instruction (5 Sept): the C15 gate decides promotion.
 
 ---
 
-## Phase 6 — Draw the windowed mean `[x]` (6.5, Mark's look, outstanding)
+## Phase 6 — Draw the windowed mean `[x]`
 
 Agreed with Mark 5 Sept ("I think the chart should draw the windowed mean"), after Phase 5.
 Rationale: Phases 1–3 deliberately never changed the drawn line ("one curve"), so the wobble
@@ -266,7 +266,7 @@ reduction, and the raw samples stay visible as faint dots behind the line.
 - [x] **6.3** `PpSegmentBrush.qml` sparkline uses the same mean.
 - [x] **6.4** Probe prints mean-vs-raw at the peak index; tests pin that the tiles equal the drawn
       line at the peak (PEAK == max of the drawn mean inside the window).
-- [ ] **6.5** One windowed look by Mark.
+- [x] **6.5** One windowed look by Mark — 5 Sept: "that looks much much better".
 
 ## Side items (not gating any phase)
 
@@ -570,3 +570,37 @@ reduction, and the raw samples stay visible as faint dots behind the line.
   "@end" reads the drawn line; dot stroke never rounds to zero; the probe reads the
   PathMultiline back. 9 suites green; probe ONE CURVE ✓ on all series. One test expectation
   corrected by me (an edge within ±15 ms of a sample is that sample's median, not a fallback).
+
+- **2026-09-05 (Phase 6 seen and pushed; corpus confirmation launched)** — Mark looked at the new
+  chart in the windowed app ("much much better"); 10f1594 pushed. Full-corpus confirmation of
+  the adaptive window started on GOLFSIMPC (Release swinglab_run, three whole-library passes:
+  mode-off control, promoted defaults, second control as the GPU non-determinism floor; the
+  dense-sampling cell too if the studio's pose cache can be bypassed). Results go under
+  docs/validation/data/adapt_confirm_corpus/.
+
+- **2026-09-06 (Corpus confirmation of the adaptive window, GOLFSIMPC, Release, CUDA)** — sha
+  10f1594; three whole-library passes (mode-off control, promoted defaults, second control) over
+  the 83 swings with video, 7.9 s/swing; data under `docs/validation/data/adapt_confirm_corpus/`.
+  **Noise floor: zero** — control vs control2 byte-identical on every phase sample, jitter ratio
+  1.000 everywhere, no frame-count change (two identical passes over 83 swings on this build and
+  machine; the "pose runs are non-deterministic" note came from one swing and needs re-judging,
+  though a control still costs nothing). **After vs control:** C2/C3/C5/C6 pass corpus-wide; the
+  largest phase-sample move anywhere is 0.41 σ (07-10 Wrist_02 swing_0004 leadKneeDrift), no
+  sample lost, no fragmentation. Per session: both **08-18 sessions PASS with 31 % / 34 %**
+  still-address jitter gain (the swept 35 % reproduced); the seven July sessions are inert
+  (ratios 1.000–1.005) — the golfer moves at address there and the window correctly does not
+  lengthen — and **06-11 (720-wide) is inert too**: its address |a| median is quiet but its p95
+  (4330) exceeds the width-scaled aRef (3000), and the ±20 ms running MAX pins the window to
+  today's whenever any frame in reach exceeds aRef. So engagement is governed by the address
+  **p95** against aRef, not the median — a finding to carry into any future aRef work. The
+  divergence guard fired 83 times on 48 July swings (never on 08-18 or 06-11): the safety net
+  working as designed on material the subset gate could not exercise; those keypoints are
+  byte-identical to mode-off. **The dense-sampling diagnosis of 5 Sept was wrong**: there is no
+  pose cache; `pose.densePreMs` is read only on the camera-only two-pass branch, and the 08-18
+  swings are IMU-segmented and take the scan-bounded path, so the key never applied to them.
+  On the eight camera-only sessions it does apply (+6 % runtime) but it changes the phase
+  ladder itself (P4 samples moving up to 40 σ, 349 series changing length, one sample lost):
+  denser address posing is a segmentation change, not a drop-in, and needs its own gate with a
+  rate-normalised jitter statistic. Tooling notes: the gate must run on the studio
+  (`PYTHONIOENCODING=utf-8`; backslash swing paths do not pair with Mac paths); C5's strict `< 1`
+  marks an identical run as a failure — should be `≤ 1`.

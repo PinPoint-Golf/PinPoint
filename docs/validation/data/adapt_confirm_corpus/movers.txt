@@ -1,0 +1,52 @@
+control: 83 swings
+
+=== after: 83 paired swings, 807 phase-sample comparisons
+    adaptFallbacks: field present on 48/83 swings, total 83, swings with >0: 48
+    samples ≥2σ: 0   ≥1σ: 0   max 0.41σ
+     0.41σ  2026-07-10_Mark-Liversedge_Wrist_02/swing_0004   leadKneeDrift      P4 ctl   -9.2958 ->   -8.1674  σ 2.7478
+     0.41σ  2026-07-10_Mark-Liversedge_Wrist_02/swing_0004   leadKneeDrift      P7 ctl   -4.7190 ->   -3.5912  σ 2.7478
+     0.38σ  2026-08-18_Mark-Liversedge_Wrist_02/swing_0003   pelvisSway         P7 ctl   15.2990 ->   15.6355  σ 0.8795
+     0.34σ  2026-08-18_Mark-Liversedge_Wrist_01/swing_0004   pelvisLift         P4 ctl  -30.3953 ->  -30.0929  σ 0.8774
+     0.33σ  2026-07-10_Mark-Liversedge_Wrist_02/swing_0004   pelvisLift         P4 ctl  -37.8205 ->  -38.2530  σ 1.2992
+     0.33σ  2026-07-10_Mark-Liversedge_Wrist_02/swing_0004   pelvisLift         P7 ctl    3.5282 ->    3.0956  σ 1.2992
+     0.32σ  2026-07-08_Mark-Liversedge_Wrist_01/swing_0011   pelvisLift         P4 ctl  -31.6412 ->  -31.9338  σ 0.9247
+     0.31σ  2026-07-08_Mark-Liversedge_Wrist_01/swing_0011   pelvisLift         P7 ctl   -2.0206 ->   -2.3034  σ 0.9247
+     0.28σ  2026-08-18_Mark-Liversedge_Wrist_02/swing_0004   pelvisSway         P4 ctl  -16.5721 ->  -16.8154  σ 0.8658
+     0.28σ  2026-08-18_Mark-Liversedge_Wrist_01/swing_0003   pelvisLift         P4 ctl  -31.1133 ->  -31.3521  σ 0.8584
+     0.25σ  2026-08-18_Mark-Liversedge_Wrist_01/swing_0001   pelvisLift         P4 ctl  -35.1108 ->  -35.3341  σ 0.8898
+     0.25σ  2026-08-18_Mark-Liversedge_Wrist_01/swing_0001   pelvisLift         P7 ctl   -5.4003 ->   -5.6218  σ 0.8898
+    pose frame-count changes vs control: 0
+
+=== control2: 83 paired swings, 807 phase-sample comparisons
+    adaptFallbacks: field present on 0/83 swings, total 0, swings with >0: 0
+    samples ≥2σ: 0   ≥1σ: 0   max 0.00σ
+     0.00σ  2026-06-11_Mark-Liversedge_Wrist_01/swing_0007   plumbBobDistance   P4 ctl   -5.1849 ->   -5.1850  σ 0.9050
+     0.00σ  2026-07-03_Mark-Liversedge_Wrist_01/swing_0004   leadKneeDrift      P7 ctl   -8.7701 ->   -8.7702  σ 1.8218
+     0.00σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0001   pelvisLift         P7 ctl   -7.3336 ->   -7.3336  σ 0.8627
+     0.00σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0001   pelvisLift         P4 ctl  -26.2087 ->  -26.2088  σ 0.8627
+     0.00σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0001   leadKneeDrift      P7 ctl    1.8551 ->    1.8550  σ 1.6995
+     0.00σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0001   pelvisSway         P7 ctl   20.1843 ->   20.1843  σ 0.8627
+     0.00σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0001   pelvisSway         P4 ctl  -19.5956 ->  -19.5955  σ 0.8627
+     0.00σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0001   leadKneeDrift      P4 ctl  -12.5676 ->  -12.5676  σ 1.6995
+     0.00σ  2026-07-08_Mark-Liversedge_Wrist_01/swing_0010   leadKneeDrift      P7 ctl    0.6215 ->    0.6216  σ 2.2599
+     0.00σ  2026-06-11_Mark-Liversedge_Wrist_01/swing_0007   leadKneeDrift      P4 ctl   -6.1866 ->   -6.1867  σ 2.3461
+     0.00σ  2026-07-10_Mark-Liversedge_Wrist_02/swing_0003   pelvisSway         P7 ctl    8.2643 ->    8.2644  σ 1.3975
+     0.00σ  2026-07-10_Mark-Liversedge_Wrist_02/swing_0003   pelvisSway         P4 ctl  -23.1881 ->  -23.1881  σ 1.3975
+    pose frame-count changes vs control: 0
+
+=== dense1500: 83 paired swings, 806 phase-sample comparisons
+    adaptFallbacks: field present on 28/83 swings, total 37, swings with >0: 28
+    samples ≥2σ: 170   ≥1σ: 267   max 40.67σ
+    40.67σ  2026-07-03_Mark-Liversedge_Wrist_01/swing_0002   pelvisLift         P4 ctl  -41.9778 ->   -1.3259  σ 0.9996
+    40.06σ  2026-07-03_Mark-Liversedge_Wrist_01/swing_0002   pelvisSway         P7 ctl   22.4181 ->  -17.6276  σ 0.9996
+    24.39σ  2026-07-03_Mark-Liversedge_Wrist_01/swing_0007   leadKneeDrift      P7 ctl   46.0327 ->   -5.3873  σ 2.1086
+    18.67σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0007   pelvisLift         P4 ctl  -39.6255 ->  -22.5457  σ 0.9148
+    17.13σ  2026-07-03_Mark-Liversedge_Wrist_01/swing_0002   pelvisSway         P4 ctl  -16.7093 ->    0.4186  σ 0.9996
+    16.78σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0008   pelvisLift         P4 ctl  -38.4260 ->  -20.4326  σ 1.0723
+    16.32σ  2026-07-04_Mark-Liversedge_Wrist_01/swing_0010   leadKneeDrift      P7 ctl   -0.2195 ->   42.0848  σ 2.5926
+    16.23σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0007   pelvisLift         P7 ctl  -18.5044 ->   -3.6619  σ 0.9148
+    13.55σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0008   pelvisLift         P7 ctl  -16.1935 ->   -1.6608  σ 1.0723
+    13.20σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0002   pelvisLift         P4 ctl  -28.5488 ->  -17.1878  σ 0.8605
+    13.05σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0002   pelvisLift         P7 ctl   -9.8441 ->    1.3873  σ 0.8605
+    13.02σ  2026-07-05_Mark-Liversedge_Wrist_02/swing_0001   pelvisLift         P4 ctl  -26.2087 ->  -14.9728  σ 0.8627
+    pose frame-count changes vs control: 72  e.g. [(('2026-06-11_Mark-Liversedge_Wrist_01', 'swing_0001'), 229, 341), (('2026-06-11_Mark-Liversedge_Wrist_01', 'swing_0002'), 229, 340), (('2026-06-11_Mark-Liversedge_Wrist_01', 'swing_0003'), 231, 343), (('2026-06-11_Mark-Liversedge_Wrist_01', 'swing_0004'), 229, 341)]

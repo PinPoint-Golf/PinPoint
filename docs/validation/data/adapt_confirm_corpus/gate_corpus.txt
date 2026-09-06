@@ -1,0 +1,391 @@
+gate: control control (83 swings), 3 settings, σ reference: control, series: pelvisSway,hipLineTilt,plumbBobDistance,leadKneeDrift,pelvisLift
+setting               n  dP4med dP4max dP7med dP7max    exc    jit    sig miss frag    fbk    C2   C3   C4   C5   C6  GATE  gain%
+---------------------------------------------------------------------------------------------------------------------------------
+dense1500            83    2.14  40.67   1.78  40.06   0.88   0.25   0.89    1  349     37  FAIL FAIL  ok   ok  FAIL  fail   74.5
+after                83    0.02   0.41   0.01   0.41   1.00   1.00   1.00    0    0     83   ok   ok  FAIL  ok   ok   fail    0.0
+control2             83    0.00   0.00   0.00   0.00   1.00   1.00   1.00    0    0 absent   ok   ok  FAIL FAIL  ok   fail    0.0
+
+dP4/dP7 = |Δ phase sample| / σ vs the control, WORST series (med < 1, max < 2); exc = P1–P7 excursion ratio furthest from 1 (in [0.97, 1.03]); jit = mean still-address p95 jitter ratio over pelvisSway/hipLineTilt/plumbBobDistance (each ≤ 0.8); sig = worst σ ratio (< 1); miss = phase samples the control has and this setting lost (any ⇒ C2 FAIL); frag = series/swings that lost valid samples or changed length (any ⇒ C6 FAIL); fbk = total pose2d.adaptFallbacks (diagnostic only); gain = 1 − jit.
+
+dense1500: 349 fragmented series (C6 FAIL)
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0001 pelvisSway         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0002 pelvisSway         n_samples 229 -> 340
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0003 pelvisSway         n_samples 231 -> 343
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0004 pelvisSway         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0005 pelvisSway         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0006 pelvisSway         n_samples 219 -> 320
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0007 pelvisSway         n_samples 227 -> 339
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0008 pelvisSway         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0009 pelvisSway         n_samples 243 -> 355
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0002 pelvisSway         n_samples 215 -> 327
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0003 pelvisSway         n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0004 pelvisSway         n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0005 pelvisSway         n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0006 pelvisSway         n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0007 pelvisSway         n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0008 pelvisSway         n_samples 213 -> 325
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0009 pelvisSway         n_samples 211 -> 323
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0010 pelvisSway         n_samples 213 -> 326
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0011 pelvisSway         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0001 pelvisSway         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0002 pelvisSway         n_samples 224 -> 337
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0003 pelvisSway         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0004 pelvisSway         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0005 pelvisSway         n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0006 pelvisSway         n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0007 pelvisSway         n_samples 227 -> 338
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0008 pelvisSway         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0009 pelvisSway         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0010 pelvisSway         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0011 pelvisSway         n_samples 217 -> 329
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0012 pelvisSway         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0013 pelvisSway         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0014 pelvisSway         n_samples 217 -> 330
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0015 pelvisSway         n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0001 pelvisSway         n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0002 pelvisSway         n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0003 pelvisSway         n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0004 pelvisSway         n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0005 pelvisSway         n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0006 pelvisSway         n_samples 217 -> 330
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0007 pelvisSway         n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0008 pelvisSway         n_samples 223 -> 336
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0009 pelvisSway         n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0010 pelvisSway         n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0001 pelvisSway         n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0002 pelvisSway         n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0003 pelvisSway         n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0004 pelvisSway         n_samples 215 -> 327
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0005 pelvisSway         n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0006 pelvisSway         n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0007 pelvisSway         n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0008 pelvisSway         n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0009 pelvisSway         n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0010 pelvisSway         n_samples 219 -> 331
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0011 pelvisSway         n_samples 227 -> 339
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0001 pelvisSway         n_samples 229 -> 340
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0002 pelvisSway         n_samples 215 -> 327
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0003 pelvisSway         n_samples 215 -> 328
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0004 pelvisSway         n_samples 219 -> 331
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0005 pelvisSway         n_samples 213 -> 326
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0006 pelvisSway         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0001 pelvisSway         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0002 pelvisSway         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0003 pelvisSway         n_samples 219 -> 331
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0004 pelvisSway         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0005 pelvisSway         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0001 pelvisSway         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0002 pelvisSway         n_samples 216 -> 329
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0003 pelvisSway         n_samples 227 -> 339
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0004 pelvisSway         n_samples 213 -> 325
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0005 pelvisSway         n_samples 215 -> 327
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0006 pelvisSway         n_samples 215 -> 328
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0001 hipLineTilt        n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0002 hipLineTilt        n_samples 229 -> 340
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0003 hipLineTilt        n_samples 231 -> 343
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0004 hipLineTilt        n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0005 hipLineTilt        n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0006 hipLineTilt        n_samples 219 -> 320
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0007 hipLineTilt        n_samples 227 -> 339
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0008 hipLineTilt        n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0009 hipLineTilt        n_samples 243 -> 355
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0002 hipLineTilt        n_samples 215 -> 327
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0003 hipLineTilt        n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0004 hipLineTilt        n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0005 hipLineTilt        n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0006 hipLineTilt        n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0007 hipLineTilt        n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0008 hipLineTilt        n_samples 213 -> 325
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0009 hipLineTilt        n_samples 211 -> 323
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0010 hipLineTilt        n_samples 213 -> 326
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0011 hipLineTilt        n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0001 hipLineTilt        n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0002 hipLineTilt        n_samples 224 -> 337
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0003 hipLineTilt        n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0004 hipLineTilt        n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0005 hipLineTilt        n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0006 hipLineTilt        n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0007 hipLineTilt        n_samples 227 -> 338
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0008 hipLineTilt        n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0009 hipLineTilt        n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0010 hipLineTilt        n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0011 hipLineTilt        n_samples 217 -> 329
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0012 hipLineTilt        n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0013 hipLineTilt        n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0014 hipLineTilt        n_samples 217 -> 330
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0015 hipLineTilt        n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0001 hipLineTilt        n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0002 hipLineTilt        n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0003 hipLineTilt        n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0004 hipLineTilt        n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0005 hipLineTilt        n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0006 hipLineTilt        n_samples 217 -> 330
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0007 hipLineTilt        n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0008 hipLineTilt        n_samples 223 -> 336
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0009 hipLineTilt        n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0010 hipLineTilt        n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0001 hipLineTilt        n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0002 hipLineTilt        n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0003 hipLineTilt        n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0004 hipLineTilt        n_samples 215 -> 327
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0005 hipLineTilt        n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0006 hipLineTilt        n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0007 hipLineTilt        n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0008 hipLineTilt        n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0009 hipLineTilt        n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0010 hipLineTilt        n_samples 219 -> 331
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0011 hipLineTilt        n_samples 227 -> 339
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0001 hipLineTilt        n_samples 229 -> 340
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0002 hipLineTilt        n_samples 215 -> 327
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0003 hipLineTilt        n_samples 215 -> 328
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0004 hipLineTilt        n_samples 219 -> 331
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0005 hipLineTilt        n_samples 213 -> 326
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0006 hipLineTilt        n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0001 hipLineTilt        n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0002 hipLineTilt        n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0003 hipLineTilt        n_samples 219 -> 331
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0004 hipLineTilt        n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0005 hipLineTilt        n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0001 hipLineTilt        n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0002 hipLineTilt        n_samples 216 -> 329
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0003 hipLineTilt        n_samples 227 -> 339
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0004 hipLineTilt        n_samples 213 -> 325
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0005 hipLineTilt        n_samples 215 -> 327
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0006 hipLineTilt        n_samples 215 -> 328
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0001 plumbBobDistance   n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0002 plumbBobDistance   n_samples 229 -> 340
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0003 plumbBobDistance   n_samples 231 -> 343
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0004 plumbBobDistance   n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0005 plumbBobDistance   n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0006 plumbBobDistance   n_samples 219 -> 320
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0007 plumbBobDistance   n_samples 227 -> 339
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0008 plumbBobDistance   n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0009 plumbBobDistance   n_samples 243 -> 355
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0002 plumbBobDistance   n_samples 215 -> 327
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0003 plumbBobDistance   n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0004 plumbBobDistance   n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0005 plumbBobDistance   n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0006 plumbBobDistance   n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0007 plumbBobDistance   n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0008 plumbBobDistance   n_samples 213 -> 325
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0009 plumbBobDistance   n_samples 211 -> 323
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0010 plumbBobDistance   n_samples 213 -> 326
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0011 plumbBobDistance   n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0001 plumbBobDistance   n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0002 plumbBobDistance   n_samples 224 -> 337
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0003 plumbBobDistance   n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0004 plumbBobDistance   n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0005 plumbBobDistance   n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0006 plumbBobDistance   n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0007 plumbBobDistance   n_samples 227 -> 338
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0008 plumbBobDistance   n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0009 plumbBobDistance   n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0010 plumbBobDistance   n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0011 plumbBobDistance   n_samples 217 -> 329
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0012 plumbBobDistance   n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0013 plumbBobDistance   n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0014 plumbBobDistance   n_samples 217 -> 330
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0015 plumbBobDistance   n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0002 plumbBobDistance   n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0004 plumbBobDistance   n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0005 plumbBobDistance   n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0006 plumbBobDistance   n_samples 217 -> 330
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0009 plumbBobDistance   n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0001 plumbBobDistance   n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0002 plumbBobDistance   n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0003 plumbBobDistance   n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0004 plumbBobDistance   n_samples 215 -> 327
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0005 plumbBobDistance   n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0006 plumbBobDistance   n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0007 plumbBobDistance   n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0008 plumbBobDistance   n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0009 plumbBobDistance   n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0010 plumbBobDistance   n_samples 219 -> 331
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0011 plumbBobDistance   n_samples 227 -> 339
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0001 plumbBobDistance   n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0002 plumbBobDistance   n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0003 plumbBobDistance   n_samples 219 -> 331
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0004 plumbBobDistance   n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0005 plumbBobDistance   n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0001 plumbBobDistance   n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0002 plumbBobDistance   n_samples 216 -> 329
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0003 plumbBobDistance   n_samples 227 -> 339
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0004 plumbBobDistance   n_samples 213 -> 325
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0005 plumbBobDistance   n_samples 215 -> 327
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0006 plumbBobDistance   n_samples 215 -> 328
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0001 leadKneeDrift      n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0002 leadKneeDrift      n_samples 229 -> 340
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0003 leadKneeDrift      n_samples 231 -> 343
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0004 leadKneeDrift      n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0005 leadKneeDrift      n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0006 leadKneeDrift      n_samples 219 -> 320
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0007 leadKneeDrift      n_samples 227 -> 339
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0008 leadKneeDrift      n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0009 leadKneeDrift      n_samples 243 -> 355
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0002 leadKneeDrift      n_samples 215 -> 327
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0003 leadKneeDrift      n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0004 leadKneeDrift      n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0005 leadKneeDrift      n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0006 leadKneeDrift      n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0007 leadKneeDrift      n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0008 leadKneeDrift      n_samples 213 -> 325
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0009 leadKneeDrift      n_samples 211 -> 323
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0010 leadKneeDrift      n_samples 213 -> 326
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0011 leadKneeDrift      n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0001 leadKneeDrift      n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0002 leadKneeDrift      n_samples 224 -> 337
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0003 leadKneeDrift      n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0004 leadKneeDrift      n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0005 leadKneeDrift      n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0006 leadKneeDrift      n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0007 leadKneeDrift      n_samples 227 -> 338
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0008 leadKneeDrift      n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0009 leadKneeDrift      n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0010 leadKneeDrift      n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0011 leadKneeDrift      n_samples 217 -> 329
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0012 leadKneeDrift      n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0013 leadKneeDrift      n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0014 leadKneeDrift      n_samples 217 -> 330
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0015 leadKneeDrift      n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0001 leadKneeDrift      n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0002 leadKneeDrift      n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0003 leadKneeDrift      n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0004 leadKneeDrift      n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0005 leadKneeDrift      n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0006 leadKneeDrift      n_samples 217 -> 330
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0007 leadKneeDrift      n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0008 leadKneeDrift      n_samples 223 -> 336
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0009 leadKneeDrift      n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0010 leadKneeDrift      n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0001 leadKneeDrift      n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0002 leadKneeDrift      n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0003 leadKneeDrift      n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0004 leadKneeDrift      n_samples 215 -> 327
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0005 leadKneeDrift      n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0006 leadKneeDrift      n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0007 leadKneeDrift      n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0008 leadKneeDrift      n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0009 leadKneeDrift      n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0010 leadKneeDrift      n_samples 219 -> 331
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0011 leadKneeDrift      n_samples 227 -> 339
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0001 leadKneeDrift      n_samples 229 -> 340
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0002 leadKneeDrift      n_samples 215 -> 327
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0003 leadKneeDrift      n_samples 215 -> 328
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0004 leadKneeDrift      n_samples 219 -> 331
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0005 leadKneeDrift      n_samples 213 -> 326
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0006 leadKneeDrift      n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0001 leadKneeDrift      n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0002 leadKneeDrift      n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0003 leadKneeDrift      n_samples 219 -> 331
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0004 leadKneeDrift      n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0005 leadKneeDrift      n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0001 leadKneeDrift      n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0002 leadKneeDrift      n_samples 216 -> 329
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0003 leadKneeDrift      n_samples 227 -> 339
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0004 leadKneeDrift      n_samples 213 -> 325
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0005 leadKneeDrift      n_samples 215 -> 327
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0006 leadKneeDrift      n_samples 215 -> 328
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0001 pelvisLift         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0002 pelvisLift         n_samples 229 -> 340
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0003 pelvisLift         n_samples 231 -> 343
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0004 pelvisLift         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0005 pelvisLift         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0006 pelvisLift         n_samples 219 -> 320
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0007 pelvisLift         n_samples 227 -> 339
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0008 pelvisLift         n_samples 229 -> 341
+  2026-06-11_Mark-Liversedge_Wrist_01\swing_0009 pelvisLift         n_samples 243 -> 355
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0002 pelvisLift         n_samples 215 -> 327
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0003 pelvisLift         n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0004 pelvisLift         n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0005 pelvisLift         n_samples 227 -> 339
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0006 pelvisLift         n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0007 pelvisLift         n_samples 229 -> 341
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0008 pelvisLift         n_samples 213 -> 325
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0009 pelvisLift         n_samples 211 -> 323
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0010 pelvisLift         n_samples 213 -> 326
+  2026-07-03_Mark-Liversedge_Wrist_01\swing_0011 pelvisLift         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0001 pelvisLift         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0002 pelvisLift         n_samples 224 -> 337
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0003 pelvisLift         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0004 pelvisLift         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0005 pelvisLift         n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0006 pelvisLift         n_samples 229 -> 342
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0007 pelvisLift         n_samples 227 -> 338
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0008 pelvisLift         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0009 pelvisLift         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0010 pelvisLift         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0011 pelvisLift         n_samples 217 -> 329
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0012 pelvisLift         n_samples 229 -> 341
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0013 pelvisLift         n_samples 227 -> 339
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0014 pelvisLift         n_samples 217 -> 330
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0015 pelvisLift         n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0001 pelvisLift         n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0002 pelvisLift         n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0003 pelvisLift         n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0004 pelvisLift         n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0005 pelvisLift         n_samples 215 -> 327
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0006 pelvisLift         n_samples 217 -> 330
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0007 pelvisLift         n_samples 213 -> 325
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0008 pelvisLift         n_samples 223 -> 336
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0009 pelvisLift         n_samples 227 -> 339
+  2026-07-05_Mark-Liversedge_Wrist_02\swing_0010 pelvisLift         n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0001 pelvisLift         n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0002 pelvisLift         n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0003 pelvisLift         n_samples 213 -> 325
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0004 pelvisLift         n_samples 215 -> 327
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0005 pelvisLift         n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0006 pelvisLift         n_samples 227 -> 340
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0007 pelvisLift         n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0008 pelvisLift         n_samples 227 -> 339
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0009 pelvisLift         n_samples 215 -> 328
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0010 pelvisLift         n_samples 219 -> 331
+  2026-07-08_Mark-Liversedge_Wrist_01\swing_0011 pelvisLift         n_samples 227 -> 339
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0001 pelvisLift         n_samples 229 -> 340
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0002 pelvisLift         n_samples 215 -> 327
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0003 pelvisLift         n_samples 215 -> 328
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0004 pelvisLift         n_samples 219 -> 331
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0005 pelvisLift         n_samples 213 -> 326
+  2026-07-09_Mark-Liversedge_Wrist_01\swing_0006 pelvisLift         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0001 pelvisLift         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0002 pelvisLift         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0003 pelvisLift         n_samples 219 -> 331
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0004 pelvisLift         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_01\swing_0005 pelvisLift         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0001 pelvisLift         n_samples 229 -> 341
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0002 pelvisLift         n_samples 216 -> 329
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0003 pelvisLift         n_samples 227 -> 339
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0004 pelvisLift         n_samples 213 -> 325
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0005 pelvisLift         n_samples 215 -> 327
+  2026-07-10_Mark-Liversedge_Wrist_02\swing_0006 pelvisLift         n_samples 215 -> 328
+
+dense1500: 1 lost phase samples (C2 FAIL)
+  2026-07-04_Mark-Liversedge_Wrist_01\swing_0010 hipLineTilt        P7
+
+== dense1500  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          83   0.93  17.13  83   1.02  40.06   0.988   0.209   0.849        0
+  hipLineTilt         83   0.00   7.54  81   0.00  10.34   0.996   0.270   0.748        0
+  plumbBobDistance    72   0.01   6.50  72   0.00  10.07   0.991   0.286   0.895        0
+  leadKneeDrift       83   0.69   5.81  83   0.81  24.39   0.992   0.165   0.798        0
+  pelvisLift          83   2.14  40.67  83   1.78  16.23   0.880   0.202   0.849        0
+
+== after  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          83   0.01   0.28  83   0.01   0.38   1.000   1.000   1.000        0
+  hipLineTilt         83   0.00   0.10  82   0.00   0.00   1.000   1.000   0.993        0
+  plumbBobDistance    72   0.01   0.13  72   0.00   0.05   1.000   1.000   0.998        0
+  leadKneeDrift       83   0.01   0.41  83   0.00   0.41   1.000   1.000   1.000        0
+  pelvisLift          83   0.02   0.34  83   0.01   0.33   1.000   1.000   1.000        0
+
+== control2  (fail)
+  series             nP4  dP4med  dP4max nP7  dP7med  dP7max     exc     jit     sig  dnvalid
+  -------------------------------------------------------------------------------------------
+  pelvisSway          83   0.00   0.00  83   0.00   0.00   1.000   1.000   1.000        0
+  hipLineTilt         83   0.00   0.00  82   0.00   0.00   1.000   1.000   1.000        0
+  plumbBobDistance    72   0.00   0.00  72   0.00   0.00   1.000   1.000   1.000        0
+  leadKneeDrift       83   0.00   0.00  83   0.00   0.00   1.000   1.000   1.000        0
+  pelvisLift          83   0.00   0.00  83   0.00   0.00   1.000   1.000   1.000        0
+
+0/3 settings pass C2∧C3∧C4∧C5∧C6
