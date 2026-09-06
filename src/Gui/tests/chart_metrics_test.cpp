@@ -1529,8 +1529,13 @@ int main()
                   !cm.domainFor(QStringLiteral("headSway")).value(QStringLiteral("firstNarrowed")).toBool()
                   && !cm.domainFor(QStringLiteral("headSway")).value(QStringLiteral("lastNarrowed")).toBool());
         // The same for a club metric and an uncatalogued key — the whole-swing majority.
-        checkTrue("clubheadSpeed not narrowed",
-                  !cm.domainFor(QStringLiteral("clubheadSpeed")).value(QStringLiteral("narrowed")).toBool());
+        checkTrue("handSpeed not narrowed",
+                  !cm.domainFor(QStringLiteral("handSpeed")).value(QStringLiteral("narrowed")).toBool());
+        // clubheadSpeed is the club-side exception: Address→Impact, LAST side only, because the
+        // quantity steps at contact and no window about Impact may straddle it (manifest note).
+        checkTrue("clubheadSpeed narrowed on the last side only",
+                  cm.domainFor(QStringLiteral("clubheadSpeed")).value(QStringLiteral("lastNarrowed")).toBool()
+                  && !cm.domainFor(QStringLiteral("clubheadSpeed")).value(QStringLiteral("firstNarrowed")).toBool());
         checkTrue("unknown key not narrowed",
                   !unknown.value(QStringLiteral("narrowed")).toBool());
 

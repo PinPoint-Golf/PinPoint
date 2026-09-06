@@ -69,6 +69,18 @@
 //          (the parabola 4τ(1−τ) peaks 1 in the middle), so a synthesized run reads
 //          as least-trustworthy where it is furthest from a real measurement.
 //   headPx grip + L·(cos θ, sin θ) — the same image-plane convention as samples[].
+//   θ̇      linear interpolation of the anchor rates (legacy viz field), or with
+//          SynthConfig::curveRate the ANALYTIC dθ/dt of the Hermite above — the rate
+//          the emitted θ(t) actually has, which is what `clubheadSpeed` composes from.
+//
+// IMPACT IS A BOUNDARY, NOT A KNOT (Sept 2026, clubhead-speed timing). The club's
+// angular rate is discontinuous at contact (an iron loses ~20–30 % of its speed in
+// two frames), and a Hermite that shares ONE slope at the P7 anchor cannot say so:
+// pinned to an under-estimated end slope but forced to cover the true Δθ, the cubic
+// bulges and its rate peaks at the bracket MIDPOINT (−18 ms on the 08-18 pairs) then
+// decays ~1 mph/ms into P7. The six-argument overload of synthesizeBetweenAnchors
+// therefore takes an IN and an OUT rate per anchor: bracket [a,b] uses θ̇_out(a) and
+// θ̇_in(b). The five-argument form (in == out) is the legacy behaviour, bit for bit.
 //
 // C⁰ is exact at anchors by construction (Hermite interpolates its endpoints
 // regardless of the slopes), so a synthesized state evaluated AT an anchor equals
@@ -93,6 +105,10 @@ struct SynthConfig {
                                   // this FIXED grid, not the source frame rate, so a low-fps or
                                   // gappy capture still yields a smooth ¼×-replay/fan trail.
                                   // <= 0 ⇒ fall back to the source per-frame timestamps.
+    bool   curveRate   = true;    // synth.curveRate — thetaDotRadS = analytic dθ/dt of the emitted
+                                  // Hermite (slope-limited, in/out-slope aware); what clubheadSpeed
+                                  // composes from (ON 2026-09-06). false = the legacy linear
+                                  // interpolation of the anchor rates (pre-Sept swing.json, bit for bit).
 };
 
 namespace synth_detail {
@@ -110,31 +126,49 @@ inline double unwrapTowards(double a, double b, double expectedDelta)
     return a + dRaw + turns * 2.0 * kSynthPi;
 }
 
-// Cubic Hermite value at unit parameter τ∈[0,1]. p0/p1 = endpoint values; m0/m1 =
-// endpoint derivatives w.r.t. τ (i.e. dP/dτ). `monotone` applies Fritsch–Carlson
-// limiting (θ path): derivatives opposite in sign to the secant are zeroed and the
-// pair is scaled back inside the α²+β²≤9 monotone region — so the curve never bulges
-// past [p0,p1]. The value at τ=0/1 is p0/p1 EXACTLY regardless of limiting.
-inline double hermite(double p0, double p1, double m0, double m1, double t, bool monotone)
+// Fritsch–Carlson limiting of the endpoint derivatives (θ path): derivatives opposite
+// in sign to the secant are zeroed and the pair is scaled back inside the α²+β²≤9
+// monotone region — so the curve never bulges past [p0,p1]. Split out so the value
+// AND the derivative below are evaluated with the SAME limited slopes.
+inline void limitMonotone(double p0, double p1, double& m0, double& m1)
 {
-    if (monotone) {
-        const double delta = p1 - p0;
-        if (delta == 0.0) { m0 = 0.0; m1 = 0.0; }
-        else {
-            double a = m0 / delta, b = m1 / delta;
-            if (a < 0.0) { m0 = 0.0; a = 0.0; }
-            if (b < 0.0) { m1 = 0.0; b = 0.0; }
-            const double s = a * a + b * b;
-            if (s > 9.0) {
-                const double tau = 3.0 / std::sqrt(s);
-                m0 = tau * a * delta;
-                m1 = tau * b * delta;
-            }
-        }
+    const double delta = p1 - p0;
+    if (delta == 0.0) { m0 = 0.0; m1 = 0.0; return; }
+    double a = m0 / delta, b = m1 / delta;
+    if (a < 0.0) { m0 = 0.0; a = 0.0; }
+    if (b < 0.0) { m1 = 0.0; b = 0.0; }
+    const double s = a * a + b * b;
+    if (s > 9.0) {
+        const double tau = 3.0 / std::sqrt(s);
+        m0 = tau * a * delta;
+        m1 = tau * b * delta;
     }
+}
+
+// Cubic Hermite value at unit parameter τ∈[0,1] with the slopes AS GIVEN (already
+// limited, or deliberately unlimited). The value at τ=0/1 is p0/p1 EXACTLY.
+inline double hermiteValue(double p0, double p1, double m0, double m1, double t)
+{
     const double t2 = t * t, t3 = t2 * t;
     return (2.0 * t3 - 3.0 * t2 + 1.0) * p0 + (t3 - 2.0 * t2 + t) * m0
          + (-2.0 * t3 + 3.0 * t2) * p1 + (t3 - t2) * m1;
+}
+
+// dP/dτ of the same cubic — equals m0 at τ=0 and m1 at τ=1 exactly.
+inline double hermiteDeriv(double p0, double p1, double m0, double m1, double t)
+{
+    const double t2 = t * t;
+    return (6.0 * t2 - 6.0 * t) * p0 + (3.0 * t2 - 4.0 * t + 1.0) * m0
+         + (-6.0 * t2 + 6.0 * t) * p1 + (3.0 * t2 - 2.0 * t) * m1;
+}
+
+// Cubic Hermite value at unit parameter τ∈[0,1]. p0/p1 = endpoint values; m0/m1 =
+// endpoint derivatives w.r.t. τ (i.e. dP/dτ). `monotone` applies the Fritsch–Carlson
+// limiter above. The value at τ=0/1 is p0/p1 EXACTLY regardless of limiting.
+inline double hermite(double p0, double p1, double m0, double m1, double t, bool monotone)
+{
+    if (monotone) limitMonotone(p0, p1, m0, m1);
+    return hermiteValue(p0, p1, m0, m1, t);
 }
 
 } // namespace synth_detail
@@ -154,10 +188,13 @@ inline ShaftSample2D synthSampleAt(const ShaftPosition& a, double thetaDotA, con
     const double hSec = dtUs * 1e-6;                                  // bracket duration (s)
     const double tau  = dtUs > 0.0 ? double(t - a.t_us) / dtUs : 0.0; // ∈ [0,1] for in-bracket t
 
-    // θ — unwrap b onto a along the track direction, then monotone-safe Hermite.
+    // θ — unwrap b onto a along the track direction, then monotone-safe Hermite. The
+    // limited slopes are kept so the analytic rate below is the rate of THIS curve.
     const double expected = 0.5 * (thetaDotA + thetaDotB) * hSec;     // signed expected Δθ (rad)
     const double thB      = unwrapTowards(a.thetaRad, b.thetaRad, expected);
-    const double theta    = hermite(a.thetaRad, thB, thetaDotA * hSec, thetaDotB * hSec, tau, true);
+    double mA = thetaDotA * hSec, mB = thetaDotB * hSec;
+    limitMonotone(a.thetaRad, thB, mA, mB);
+    const double theta    = hermiteValue(a.thetaRad, thB, mA, mB, tau);
 
     // grip — plain cubic Hermite per axis (grip path is an arc, not monotone).
     const double gxp = hermite(a.gripPx.x(), b.gripPx.x(), gripVelA.x() * hSec, gripVelB.x() * hSec, tau, false);
@@ -179,9 +216,12 @@ inline ShaftSample2D synthSampleAt(const ShaftPosition& a, double thetaDotA, con
     s.t_us         = t;
     s.gripPx       = QPointF{ gxp, gyp };
     s.thetaRad     = theta;
-    // θ̇ reported by linear interpolation of the anchor rates — a viz-tier field
-    // (the precision channel is samples[], never this synthesized series).
-    s.thetaDotRadS = thetaDotA + (thetaDotB - thetaDotA) * tau;
+    // θ̇ — the analytic rate of the emitted curve (curveRate), or the legacy linear
+    // interpolation of the anchor rates (a viz-tier field; the precision channel is
+    // samples[], never this synthesized series).
+    s.thetaDotRadS = (cfg.curveRate && hSec > 0.0)
+                   ? hermiteDeriv(a.thetaRad, thB, mA, mB, tau) / hSec
+                   : thetaDotA + (thetaDotB - thetaDotA) * tau;
     s.visibleLenPx = len;
     s.conf         = float(base * decay);
     s.flags        = ShaftSynthesized;
@@ -197,16 +237,21 @@ inline ShaftSample2D synthSampleAt(const ShaftPosition& a, double thetaDotA, con
 // one sample per frame STRICTLY between each consecutive-anchor pair — so the result
 // is ascending in t_us, all flagged ShaftSynthesized, and empty outside
 // [first anchor, last anchor] or when < 2 anchors are given.
+// Two rates per anchor: bracket [a_k, a_k+1] leaves a_k at thetaDotOutRadS[k] and
+// arrives at a_k+1 at thetaDotInRadS[k+1]. An anchor whose in and out rates differ
+// (P7: the impact step) is a C⁰ knot with a rate discontinuity — deliberately.
 inline std::vector<ShaftSample2D> synthesizeBetweenAnchors(
     const std::vector<ShaftPosition>& anchors,
-    const std::vector<double>&        thetaDotRadS,
+    const std::vector<double>&        thetaDotInRadS,
+    const std::vector<double>&        thetaDotOutRadS,
     const std::vector<QPointF>&       gripVelPxS,
     const std::vector<int64_t>&       frameTUs,
     const SynthConfig&                cfg)
 {
     std::vector<ShaftSample2D> out;
     const size_t n = anchors.size();
-    if (n < 2 || thetaDotRadS.size() != n || gripVelPxS.size() != n) return out;
+    if (n < 2 || thetaDotInRadS.size() != n || thetaDotOutRadS.size() != n
+        || gripVelPxS.size() != n) return out;
 
     for (size_t k = 0; k + 1 < n; ++k) {
         const ShaftPosition& a = anchors[k];
@@ -214,11 +259,22 @@ inline std::vector<ShaftSample2D> synthesizeBetweenAnchors(
         if (b.t_us <= a.t_us) continue;                     // defensive: strictly increasing
         for (int64_t t : frameTUs) {
             if (t <= a.t_us || t >= b.t_us) continue;       // STRICTLY between the anchors
-            out.push_back(synthSampleAt(a, thetaDotRadS[k],     gripVelPxS[k],
-                                        b, thetaDotRadS[k + 1], gripVelPxS[k + 1], t, cfg));
+            out.push_back(synthSampleAt(a, thetaDotOutRadS[k],    gripVelPxS[k],
+                                        b, thetaDotInRadS[k + 1], gripVelPxS[k + 1], t, cfg));
         }
     }
     return out;
+}
+
+// Legacy single-rate form: in == out at every anchor (C¹ everywhere).
+inline std::vector<ShaftSample2D> synthesizeBetweenAnchors(
+    const std::vector<ShaftPosition>& anchors,
+    const std::vector<double>&        thetaDotRadS,
+    const std::vector<QPointF>&       gripVelPxS,
+    const std::vector<int64_t>&       frameTUs,
+    const SynthConfig&                cfg)
+{
+    return synthesizeBetweenAnchors(anchors, thetaDotRadS, thetaDotRadS, gripVelPxS, frameTUs, cfg);
 }
 
 } // namespace pinpoint::analysis

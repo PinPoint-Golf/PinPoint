@@ -865,6 +865,30 @@ inline constexpr int    kOnsetRunBridgeFrames = 10;
 // are structurally exempt.
 inline constexpr double kOnsetBridgeMinNetFrac = 0.2;
 inline constexpr bool   kEmitTakeaway         = true;  // vision Takeaway event at bs0 (ladder gains 1 event)
+
+// --- Impact as a boundary in the θ chain (shaft_track_assembly.cpp, Sept 2026) ---
+// The club's angular rate is DISCONTINUOUS at contact, and every stage that
+// smoothed across it (the anchor-rate median5+gauss2 spanning ±27 ms at 150 fps,
+// then a Hermite sharing one slope at P7) put the clubhead-speed peak at the
+// P6→P7 bracket MIDPOINT (−18 ms on the 08-18 LM pairs) with a 1 mph/ms decay
+// into impact. With kEnabled the P7 anchor gets an IN rate (linear fit of the
+// reconciled θ over the kWindowUs before P7, floored at the P6→P7 mean rate,
+// which is smear-immune because both anchors are θ-crossing definitions) and an
+// OUT rate (fit over the window after), and the bracket's start anchor an OUT
+// rate fitted forward. The synthesized tier then carries the analytic rate of the
+// curve it emits (synth.curveRate) so `clubheadSpeed` can compose from it.
+// PROMOTED 2026-09-06 on the six 08-18 LM pairs (7-iron, 150 fps): peak time
+// −17…−19 ms → −1…−9 ms, pre-impact reading SD vs the monitor 3.3 → 1.8 mph.
+// Two deeper probes were tried in the same gate and REJECTED — splitting the φ
+// Gaussian at the impact frame and scaling the DP step prior across contact
+// (×0.25) — because freeing θ at the blur frames made the pre-impact reading
+// NOISIER (SD 1.9 → 5.2 mph); the DP/reconcile smear of θ near impact is a
+// known residual, bounded below by the floor. Keys "shaft.impactBoundary.*".
+namespace impactBoundary {
+inline constexpr bool    kEnabled   = true;    // shaft.impactBoundary.enabled (ON 2026-09-06)
+inline constexpr int64_t kWindowUs  = 24000;   // one-sided slope-fit window either side of P7 (µs)
+inline constexpr int     kMinFrames = 3;       // widen the window until this many frames fit
+} // namespace impactBoundary
 } // namespace shaft
 
 // --- Late-pipeline timeline-event refinement (src/Analysis/event_refine.h) -----
@@ -969,6 +993,19 @@ inline constexpr int    kFusionDisputeMs   = 300;   // refine.fusionDisputeMs �
 // 5) is a quality check on the curves, not a correctness gate — set false to dark it.
 namespace kinematics {
 inline constexpr bool kEnabled = true;   // kinematics.enabled — master gate (ON 2026-07-18, display-only)
+// kinematics.composed — clubhead speed COMPOSED as |v_grip + L_fused·θ̇·n̂| from the
+// track's own rate, instead of differentiating the interpolated head path (which
+// inherits every smoothing artefact of θ, see tuned::shaft::impactBoundary). L is the
+// FUSED club length, not the per-frame visible extent, which overshoots the club by
+// up to 17 % in motion blur. Expects synth.curveRate for a meaningful synth rate.
+// With it, the px→m scale maps the fused span to (clubLengthM − lenGripDownM) — the
+// tracker's own drawing convention, the anchor being the bottom of the hands — and the
+// series is masked past the P7 knot (its Address→Impact domain). PROMOTED 2026-09-06:
+// against the six 08-18 LM pairs the reading at impact is 0.959 ± 0.022 of the monitor
+// (was 1.004 ± 0.030 — but that was a mid-bracket peak decaying 1 mph/ms through the
+// instant, i.e. two errors cancelling). The −4 % is the rate floor reading a lower bound
+// of the instantaneous rate; it closes when the θ smear at impact does.
+inline constexpr bool kComposed = true;
 } // namespace kinematics
 
 // Face-on swing-plane transition delta (shaft_plane.h / ShaftPlaneStage). Ships ON:

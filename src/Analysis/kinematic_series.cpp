@@ -79,12 +79,25 @@ int nearestIndex(const std::vector<int64_t> &grid, int64_t t)
 
 // Set Address/Top/Impact phase dots on a curve from the phase timeline; when the
 // timeline is empty, a lone Impact dot at impactUs.
+// A masked sample is never the site of a phase dot (MetricSeries::valid): the dot goes to
+// the nearest VALID sample, which for a series masked past its P7 knot is the last sample
+// of the club arriving — the number the launch-monitor comparison reads.
 void addPhaseDots(MetricSeries &m, const std::vector<PhaseEvent> &phases, int64_t impactUs)
 {
     if (m.t_us.empty()) return;
     const auto dot = [&](Phase p, int64_t t) {
-        const int i = nearestIndex(m.t_us, t);
+        int i = nearestIndex(m.t_us, t);
         if (i < 0) return;
+        if (!m.valid.empty() && m.valid[size_t(i)] == 0u) {
+            int best = -1; int64_t bd = std::numeric_limits<int64_t>::max();
+            for (int j = 0; j < int(m.t_us.size()); ++j) {
+                if (m.valid[size_t(j)] == 0u) continue;
+                const int64_t d = std::llabs(m.t_us[size_t(j)] - t);
+                if (d < bd) { bd = d; best = j; }
+            }
+            if (best < 0) return;
+            i = best;
+        }
         m.phaseSamples.push_back({ p, m.t_us[size_t(i)], m.value[size_t(i)], QString() });
     };
     bool any = false;
@@ -139,9 +152,59 @@ std::vector<double> speedMph(const std::vector<int64_t> &t, const std::vector<do
     return movAvg(sp, 1);   // light 3-tap smooth of the speed itself
 }
 
+// Composed head speed (mph) on a track: |v_grip + L·θ̇·n̂|, n̂ = (−sin θ, cos θ) the
+// image-plane direction of rotation, L the fused club length in px (falls back to the
+// measured club length, then the sample's own visible extent). v_grip is the ±1-sample
+// central difference of the grip path — the grip is smooth through impact, the head is
+// not, and nothing here smooths across the step.
+std::vector<double> composedHeadSpeedMph(const std::vector<ShaftSample2D> &track,
+                                         const ShaftTrack2D &shaft, double mPerPx)
+{
+    const int n = int(track.size());
+    std::vector<double> sp(size_t(std::max(n, 0)), 0.0);
+    if (n < 2) return sp;
+    double lenFixed = -1.0;
+    if (shaft.lengths.fusedPx > 0.0)        lenFixed = shaft.lengths.fusedPx;
+    else if (shaft.measuredClubLenPx > 0.0) lenFixed = shaft.measuredClubLenPx;
+    for (int i = 0; i < n; ++i) {
+        const int a = std::max(i - 1, 0), b = std::min(i + 1, n - 1);
+        const double dt = double(track[size_t(b)].t_us - track[size_t(a)].t_us) / 1e6;
+        double gvx = 0.0, gvy = 0.0;
+        if (dt > 0.0) {
+            gvx = (track[size_t(b)].gripPx.x() - track[size_t(a)].gripPx.x()) / dt;
+            gvy = (track[size_t(b)].gripPx.y() - track[size_t(a)].gripPx.y()) / dt;
+        }
+        const ShaftSample2D &s = track[size_t(i)];
+        const double L  = lenFixed > 0.0 ? lenFixed : std::max(s.visibleLenPx, 0.0);
+        const double vx = gvx - L * s.thetaDotRadS * std::sin(s.thetaRad);
+        const double vy = gvy + L * s.thetaDotRadS * std::cos(s.thetaRad);
+        sp[size_t(i)] = std::hypot(vx, vy) * mPerPx * kMps2Mph;
+    }
+    return sp;
+}
+
+// Domain mask for the composed clubhead speed: every sample AFTER `boundaryUs` is marked
+// invalid (MetricSeries::valid — drawn dashed, skipped by every reducer, never a phase dot).
+// The boundary is the P7 knot of the track, where the synthesized rate steps, NOT the
+// acoustic impact: the two differ by up to ~3 ms, and a boundary sample on the departing
+// side would put the step back inside every window about Impact. Same mechanism as
+// metric_channel.h's applyPhaseDomainMask (design §5.1), snapped to the knot instead of the
+// nearest grid sample for that reason. No boundary ⇒ the series is left exactly as it was.
+void maskAfter(MetricSeries &m, int64_t boundaryUs)
+{
+    if (m.t_us.empty() || boundaryUs < 0) return;
+    bool any = false;
+    for (int64_t t : m.t_us) if (t > boundaryUs) { any = true; break; }
+    if (!any) return;
+    if (m.valid.empty()) m.valid.assign(m.t_us.size(), 1u);
+    for (size_t i = 0; i < m.t_us.size(); ++i)
+        if (m.t_us[i] > boundaryUs) m.valid[i] = 0u;
+}
+
 MetricSeries makeSpeedSeries(const QString &key, const QString &label,
                              const std::vector<int64_t> &t, std::vector<double> v,
-                             const std::vector<PhaseEvent> &phases, int64_t impactUs)
+                             const std::vector<PhaseEvent> &phases, int64_t impactUs,
+                             int64_t maskAfterUs = -1)
 {
     MetricSeries m;
     m.key   = key;
@@ -149,6 +212,7 @@ MetricSeries makeSpeedSeries(const QString &key, const QString &label,
     m.unit  = QStringLiteral("mph");
     m.t_us  = t;
     m.value = std::move(v);
+    maskAfter(m, maskAfterUs);
     addPhaseDots(m, phases, impactUs);
     return m;
 }
@@ -246,7 +310,10 @@ std::vector<MetricSeries> buildKinematicSeries(const KinematicSeriesInputs &in)
     if (track.size() < 2)
         return out;
 
-    const double mPerPx = resolveMetrePerPx(shaft, track, in.clubLengthM);
+    // Composed: the fused px span runs from the hands to the head, so it maps to the club
+    // length LESS the grip-down (the tracker's own drawing convention), never the full club.
+    const double lengthM = in.composed ? std::max(in.clubLengthM - in.gripDownM, 0.0) : in.clubLengthM;
+    const double mPerPx  = resolveMetrePerPx(shaft, track, lengthM);
     std::vector<int64_t> t;
     std::vector<double> hx, hy, gx, gy;
     t.reserve(track.size());
@@ -255,8 +322,18 @@ std::vector<MetricSeries> buildKinematicSeries(const KinematicSeriesInputs &in)
         hx.push_back(e.headPx.x());  hy.push_back(e.headPx.y());
         gx.push_back(e.gripPx.x());  gy.push_back(e.gripPx.y());
     }
+    // Composed: the tail past the P7 knot (or, without a located P7, past the impact
+    // instant) is out of the metric's Address→Impact domain — see maskAfter.
+    int64_t boundaryUs = -1;
+    if (in.composed) {
+        boundaryUs = in.impactUs;
+        for (const ShaftPosition &p : shaft.positions)
+            if (p.p == 7) { boundaryUs = p.t_us; break; }
+    }
     out.push_back(makeSpeedSeries(QStringLiteral("clubheadSpeed"), QStringLiteral("Clubhead speed"),
-                                  t, speedMph(t, hx, hy, mPerPx), in.phases, in.impactUs));
+                                  t, in.composed ? composedHeadSpeedMph(track, shaft, mPerPx)
+                                                 : speedMph(t, hx, hy, mPerPx),
+                                  in.phases, in.impactUs, boundaryUs));
     out.push_back(makeSpeedSeries(QStringLiteral("handSpeed"), QStringLiteral("Hand speed"),
                                   t, speedMph(t, gx, gy, mPerPx), in.phases, in.impactUs));
 

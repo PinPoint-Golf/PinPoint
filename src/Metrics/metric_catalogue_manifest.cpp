@@ -1113,18 +1113,27 @@ void installMetricManifest(MetricCatalogue &cat)
         .unit = QStringLiteral("mph"),
         .group = QStringLiteral("Club & speed"),
         .description = QStringLiteral(
-            "How fast the clubhead is travelling near impact — the magnitude of its velocity, taken "
-            "as a central difference of the tracked head position and scaled to real-world units "
-            "on the ground plane. It is the headline power number and the biggest single driver of "
-            "distance."),
+            "How fast the clubhead is travelling as it arrives at the ball — the hands' velocity plus "
+            "the shaft's rotation about them, composed from the tracked club and scaled to "
+            "real-world units by the club's length. It is the headline power number and the "
+            "biggest single driver of distance."),
         .howToRead = QStringLiteral(
-            "Read the peak, which occurs right around impact. As widely-published references, tour "
+            "Read the value at impact, which is where the curve peaks; the curve ends there because "
+            "the ball takes a quarter of the club's speed in the next two frames. As widely-published references, tour "
             "drivers run about 113 mph and 7-irons about 89 mph, but the right number is club- and "
             "player-dependent. On a single face-on camera this is an in-plane estimate, so treat "
             "motion along the depth axis as approximate. Needs face-on club tracking."),
         .signPositive = QStringLiteral("a faster clubhead"),
         .signNegative = QString(),
         .phases = { P::Impact },
+        // Address→Impact, like the frontal-plane family, but for a different reason: the
+        // clubhead's speed is DISCONTINUOUS at contact (an iron gives the ball a quarter of it in
+        // two frames), and every reducer here is a window ABOUT an instant — a ±15 ms median, a
+        // 40 ms centred mean. Straddling the step, the Impact reading and the PEAK tile both come
+        // back low and early, which is the artefact this metric's timing fix removed at the
+        // producer. The producer masks the post-impact tail (design §5.1's domain mask), so the
+        // reducers read the club as it arrives, never a blend of arriving and departing.
+        .domain = P1toP7,
         .routes = {
             via("clubSensorFused", RM::Fused, Direct,
                 { .faceOnCamera = true, .imuRoles = { R::Club }, .clubTrack = true },

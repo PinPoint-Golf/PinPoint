@@ -1028,6 +1028,8 @@ struct KinematicsStage : AnalysisStage {
         in.handedness  = ctx.job.handedness;
         in.clubLengthM = ctx.job.clubLengthM;
         in.phases      = ctx.seg.events;
+        in.composed    = KinematicSeriesConfig::fromOverrides(ctx.job.tuningOverrides).composed;
+        in.gripDownM   = ShaftV3Config::fromOverrides(ctx.job.tuningOverrides).lenGripDownM;
         for (MetricSeries &m : buildKinematicSeries(in))
             ctx.detail->series.push_back(std::move(m));
     }

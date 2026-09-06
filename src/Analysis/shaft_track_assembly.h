@@ -342,6 +342,19 @@ struct ShaftV3Config {
     // ShaftTrack2D.synth with the VISUALIZATION-tier interpolated series between the
     // located P-anchors. fromOverrides populates it.
     SynthConfig     synth;
+    // Impact as a boundary in the θ chain — "shaft.impactBoundary.*" keys
+    // (tuned::shaft::impactBoundary has the why). enabled=false by default (dark);
+    // when on, the P7 anchor carries an IN and an OUT rate fitted one-sided about
+    // impact, and the bracket-start anchor an OUT rate fitted forward, so the
+    // synthesized tier (and clubheadSpeed composed from it) no longer peaks at the
+    // bracket midpoint. (The two smoothers upstream — the φ Gaussian and the DP step
+    // prior — were probed in the same gate and left alone: see the tuned namespace.)
+    struct ImpactBoundaryConfig {
+        bool    enabled      = tuned::shaft::impactBoundary::kEnabled;
+        int64_t windowUs     = tuned::shaft::impactBoundary::kWindowUs;    // one-sided fit window (µs)
+        int     minFrames    = tuned::shaft::impactBoundary::kMinFrames;   // widen until this many frames fit
+        bool    floorInSlope = true;    // monotone rate across the bracket into P7: |θ̇⁻(P7)| ≥ |mean| ≥ |θ̇⁺(P6)|
+    } impactBoundary;
     // Hand-axis θ prior (WB4) — "shaft.handAxisPrior.*" keys. enabled=false by
     // default (dark); when on, the per-frame hand-axis direction penalises the DP
     // states far from it near the grip. fromOverrides populates it.

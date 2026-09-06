@@ -220,7 +220,7 @@ Two telemetry layers — do not conflate them:
 | 14c | BodyRotation | pose frames **OR** a bound Pelvis/Thorax stream | pelvis/thorax turn, X-factor + stretch (unscored) |
 | 14d | ClubDelivery | `shaft.valid` && samples | shaft-vs-horizontal + attack angle from the MEASURED head; low point from the SYNTHESIZED arc (`shaft.synth`) — the two channels fail independently. All unscored; low point carries σ = 2.0 in |
 | 14e | Tempo | confident Address/Top/Impact ladder | tempo backswing + ratio (unscored) |
-| 14f | Kinematics | `kinematics.enabled` (dark by default) | clubhead/hand speed + lag series from the shaft track and pose (unscored). Shared with `CameraKinematicsAnalyzer`, which is the whole of that profile. |
+| 14f | Kinematics | `kinematics.enabled` (ON 2026-07-18), `kinematics.composed` (ON 2026-09-06: clubhead speed composed from grip velocity + fused length × the synth tier's rate, masked past P7) | clubhead/hand speed + lag series from the shaft track and pose (unscored). Shared with `CameraKinematicsAnalyzer`, which is the whole of that profile. |
 | 15 | Bindings | always | `detail->bindings` (calibration snapshot per device) |
 | 16 | Resemblance | always | `detail->score` + §B.7 interval + tier |
 | 17 | Assessment | `runAssessment` && IMU streams && local series | findings; **overrides** headline score, clears interval |

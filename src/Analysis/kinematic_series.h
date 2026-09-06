@@ -36,9 +36,12 @@
 //   - hand speed     = linear speed of the shaft grip end (gripPx)
 //   - lag angle      = angle between the lead forearm (elbow→wrist pose) and the
 //                      clubshaft (grip→head) direction
-// Speeds prefer the dense C¹ synth shaft channel (ShaftTrack2D.synth — a display-tier
-// track, the right basis for differentiation) and fall back to the measured samples;
-// the px→metre scale comes from the club-length fusion so the speeds read in mph.
+// Speeds prefer the dense synth shaft channel (ShaftTrack2D.synth) and fall back to the
+// measured samples. Hand speed differentiates the grip path; clubhead speed is COMPOSED
+// from the track's constituents — |v_grip + L·θ̇·n̂| with the fused club length and the
+// sample's own rate (KinematicSeriesInputs::composed) — because differentiating the
+// interpolated head path reported the shape of the interpolation near impact. The
+// px→metre scale comes from the club-length fusion so the speeds read in mph.
 //
 // The builder lives here rather than inside the wrist analyzer so every session-type
 // profile can reuse it: the Wrist profile appends these via KinematicsStage, and the
@@ -48,16 +51,18 @@
 
 namespace pinpoint::analysis {
 
-// Dark-flag config for the kinematics display stage (developer guide §6.3). Master
-// gate only today; smoothing/scale knobs would join here as "kinematics.*" keys.
+// Config for the kinematics display stage (developer guide §6.3): the master gate and
+// the composed-speed producer switch, "kinematics.*" keys.
 struct KinematicSeriesConfig {
-    bool enabled = tuned::kinematics::kEnabled;   // kinematics.enabled — master gate (dark)
+    bool enabled  = tuned::kinematics::kEnabled;    // kinematics.enabled — master gate (dark)
+    bool composed = tuned::kinematics::kComposed;   // kinematics.composed — see KinematicSeriesInputs (ON 2026-09-06)
 
     static KinematicSeriesConfig fromOverrides(const QVariantMap &ov)
     {
         using namespace tuning;
         KinematicSeriesConfig c;
-        apply(ov, "kinematics.enabled", c.enabled);
+        apply(ov, "kinematics.enabled",  c.enabled);
+        apply(ov, "kinematics.composed", c.composed);
         return c;
     }
 };
@@ -71,6 +76,21 @@ struct KinematicSeriesInputs {
     int64_t impactUs    = -1;              // impact instant (absolute µs) — Impact phase dot
     int     handedness  = 0;               // 0 unknown, 1 right, 2 left (lead-arm sign)
     double  clubLengthM = 1.12;            // physical club length → px→metre scale for mph
+
+    // Clubhead speed COMPOSED from the track's constituents — |v_grip + L·θ̇·n̂| with
+    // L the fused club length (px) and θ̇ the sample's own rate — instead of
+    // differentiating the head path. Differentiating the synthesized arc reported the
+    // shape of the interpolation near impact (peak at the P6→P7 bracket midpoint, 1 mph/ms
+    // decay into P7); composing reads the rate the tier actually carries, and applies no
+    // smoothing across the impact step. Hand speed and lag are unaffected.
+    bool    composed    = false;
+    // Butt→grip-anchor distance (m) the px→metre scale must subtract when composing: the
+    // tracker's grip anchor sits at the BOTTOM of the hands and its fused length is the
+    // anchor→head span, which it draws as (clubLengthM − lenGripDownM) — see
+    // ShaftV3Config::lenGripDownM and the length ladder. Mapping that span to the FULL club
+    // length (the differentiated path's convention) over-scales every speed by ~14 %.
+    // Only the composed producer applies it, so the legacy path stays byte-identical.
+    double  gripDownM   = 0.13;
 
     // Phase timeline (ctx.seg.events) so the curves carry Address/Top/Impact phase dots
     // matching the other detail series. Empty ⇒ only an Impact dot (from impactUs).

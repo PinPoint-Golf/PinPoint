@@ -401,6 +401,12 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "synth.enabled", c.synth.enabled);
     apply(ov, "synth.midConfFrac", c.synth.midConfFrac);
     apply(ov, "synth.rateHz", c.synth.rateHz);
+    apply(ov, "synth.curveRate", c.synth.curveRate);
+    // Impact boundary: "shaft.impactBoundary.*" keys.
+    apply(ov, "shaft.impactBoundary.enabled",      c.impactBoundary.enabled);
+    apply(ov, "shaft.impactBoundary.windowUs",     c.impactBoundary.windowUs);
+    apply(ov, "shaft.impactBoundary.minFrames",    c.impactBoundary.minFrames);
+    apply(ov, "shaft.impactBoundary.floorInSlope", c.impactBoundary.floorInSlope);
     // Hand-axis θ prior (WB4): "shaft.handAxisPrior.*" keys.
     apply(ov, "shaft.handAxisPrior.enabled", c.handAxisPrior.enabled);
     apply(ov, "shaft.handAxisPrior.weight",  c.handAxisPrior.weight);
@@ -2442,7 +2448,77 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
             }
         }
         const std::vector<int64_t> &synthTimes = synthGrid.empty() ? tUs : synthGrid;
-        out.synth = synthesizeBetweenAnchors(out.positions, thetaDot, gripVel, synthTimes, cfg.synth);
+
+        // ── Impact boundary (tuned::shaft::impactBoundary) ─────────────────────
+        // The smoothed ω above spans ±27 ms at 150 fps, so at P7 it averages the
+        // pre-contact rate with the post-contact one (half of it) and the Hermite
+        // into P7 bulges mid-bracket. Replace the rates around the impact bracket
+        // with ONE-SIDED linear fits of the reconciled θ: P7 in-rate from the
+        // window before P7 (floored at the bracket's mean rate — both anchors are
+        // θ-crossing definitions, so that mean is smear-immune), P7 out-rate from
+        // the window after, and the bracket-start anchor's out-rate fitted forward
+        // (capped at the mean, so the rate is monotone across the bracket). Every
+        // other anchor keeps in == out == the smoothed ω. A fit that cannot find
+        // minFrames frames even after widening leaves the smoothed value in place.
+        std::vector<double> thetaDotIn = thetaDot, thetaDotOut = thetaDot;
+        if (cfg.impactBoundary.enabled) {
+            const auto& ib = cfg.impactBoundary;
+            const double frameUs = nf > 1 ? double(tUs[nf - 1] - tUs[0]) / double(nf - 1) : 0.0;
+            // Linear LSQ slope (rad/s) of the unwrapped reconciled θ over frames with
+            // t ∈ [t0, t1], the window widened symmetrically one frame at a time until
+            // minFrames frames fit; measured tiers (not PRED) preferred when ≥ 2 of them.
+            auto fitSlope = [&](int64_t t0, int64_t t1, double& slopeRadS) -> bool {
+                std::vector<int> idx;
+                double lo = double(t0), hi = double(t1);
+                for (int widen = 0; widen < 8; ++widen) {
+                    idx.clear();
+                    for (int i = 0; i < nf; ++i)
+                        if (double(tUs[i]) >= lo && double(tUs[i]) <= hi
+                            && !std::isnan(rec.thetaOut[i])) idx.push_back(i);
+                    if (int(idx.size()) >= std::max(ib.minFrames, 2) || frameUs <= 0.0) break;
+                    lo -= frameUs; hi += frameUs;
+                }
+                std::vector<int> meas;
+                for (int i : idx) if (tierOf[size_t(i)] != PRED) meas.push_back(i);
+                if (meas.size() >= 2) idx.swap(meas);
+                if (idx.size() < 2) return false;
+                std::vector<double> ts(idx.size()), th(idx.size());
+                th[0] = rec.thetaOut[idx[0]];
+                for (size_t j = 0; j < idx.size(); ++j) {
+                    ts[j] = double(tUs[idx[j]] - tUs[idx[0]]) * 1e-6;
+                    if (j) th[j] = th[j - 1] + circWrap(rec.thetaOut[idx[j]] - rec.thetaOut[idx[j - 1]]);
+                }
+                double mt = 0, mth = 0;
+                for (size_t j = 0; j < idx.size(); ++j) { mt += ts[j]; mth += th[j]; }
+                mt /= double(idx.size()); mth /= double(idx.size());
+                double num = 0, den = 0;
+                for (size_t j = 0; j < idx.size(); ++j) { num += (ts[j] - mt) * (th[j] - mth); den += (ts[j] - mt) * (ts[j] - mt); }
+                if (den <= 0.0) return false;
+                slopeRadS = (num / den) * kPi / 180.0;
+                return true;
+            };
+            for (size_t k = 1; k < out.positions.size(); ++k) {
+                if (out.positions[k].p != 7) continue;
+                const ShaftPosition& p7 = out.positions[k];
+                const ShaftPosition& pa = out.positions[k - 1];
+                const double dtB  = double(p7.t_us - pa.t_us) * 1e-6;
+                const double mean = dtB > 0.0 ? std::remainder(p7.thetaRad - pa.thetaRad, 2.0 * kPi) / dtB : 0.0;
+                double sIn = 0.0, sOut = 0.0, sPrev = 0.0;
+                if (fitSlope(p7.t_us - ib.windowUs, p7.t_us, sIn)) {
+                    if (ib.floorInSlope && mean != 0.0
+                        && (sIn * mean <= 0.0 || std::abs(sIn) < std::abs(mean))) sIn = mean;
+                    thetaDotIn[k] = sIn;
+                }
+                if (fitSlope(p7.t_us, p7.t_us + ib.windowUs, sOut)) thetaDotOut[k] = sOut;
+                if (fitSlope(pa.t_us, pa.t_us + ib.windowUs, sPrev)) {
+                    if (ib.floorInSlope && mean != 0.0
+                        && (sPrev * mean <= 0.0 || std::abs(sPrev) > std::abs(mean))) sPrev = mean;
+                    thetaDotOut[k - 1] = sPrev;
+                }
+            }
+        }
+        out.synth = synthesizeBetweenAnchors(out.positions, thetaDotIn, thetaDotOut, gripVel,
+                                             synthTimes, cfg.synth);
     }
 
     out.coverage = spanFrames > 0 ? float(spanMeas) / float(spanFrames) : 0.f;

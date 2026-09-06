@@ -170,6 +170,66 @@ int main()
         check(none.empty(), "< 2 anchors ⇒ empty result");
     }
 
+    std::printf("=== shaft_synthesis: impact boundary — in/out rates, curve rate ===\n");
+    {
+        SynthConfig cfg; cfg.enabled = true; cfg.curveRate = true;
+        // P6 → P7 → P8 with a rate STEP at P7: 2.0 rad/s arriving, 1.0 leaving. Bracket
+        // means 1.8 and 1.0 rad/s; P6 leaves at 1.6 ≤ 1.8 ≤ 2.0 so the incoming bracket's
+        // rate is monotone non-decreasing (no mid-bracket bulge).
+        std::vector<ShaftPosition> anchors = {
+            anchor(6, 0,        400, 500, 0.00, 380.0, 0.7f),
+            anchor(7, 100'000,  420, 520, 0.18, 380.0, 0.7f),
+            anchor(8, 200'000,  440, 540, 0.28, 380.0, 0.7f),
+        };
+        const std::vector<double>  in  = { 1.6, 2.0, 1.0 };
+        const std::vector<double>  out = { 1.6, 1.0, 1.0 };
+        const std::vector<QPointF> gv(3, QPointF{ 0.0, 0.0 });
+        std::vector<int64_t> frames;
+        for (int64_t t = 0; t <= 200'000; t += 1'000) frames.push_back(t);
+        const std::vector<ShaftSample2D> Z = synthesizeBetweenAnchors(anchors, in, out, gv, frames, cfg);
+        check(!Z.empty(), "in/out overload emits");
+        // C⁰ at the P7 knot from both sides.
+        const ShaftSample2D *before = nullptr, *after = nullptr;
+        for (const ShaftSample2D &z : Z) {
+            if (z.t_us == 99'000)  before = &z;
+            if (z.t_us == 101'000) after  = &z;
+        }
+        check(before && after, "samples either side of P7");
+        if (before && after) {
+            check(near(before->thetaRad, 0.18, 2.5e-3) && near(after->thetaRad, 0.18, 1.5e-3),
+                  "θ continuous across the P7 knot");
+            check(near(before->thetaDotRadS, 2.0, 0.03), "rate just before P7 ≈ in-rate 2.0");
+            check(near(after->thetaDotRadS,  1.0, 0.03), "rate just after P7 ≈ out-rate 1.0");
+        }
+        // The analytic rate is the rate of the emitted θ (finite difference agrees), and
+        // it is monotone across the incoming bracket — the peak sits AT P7, not mid-way.
+        bool fdOk = true, monoOk = true; double maxRate = 0; int64_t tMax = -1;
+        for (size_t i = 1; i + 1 < Z.size(); ++i) {
+            if (Z[i + 1].t_us >= 100'000) break;   // stay inside bracket 1: no FD across the knot
+            const double fd = (Z[i + 1].thetaRad - Z[i - 1].thetaRad)
+                            / (double(Z[i + 1].t_us - Z[i - 1].t_us) * 1e-6);
+            if (!near(fd, Z[i].thetaDotRadS, 2e-3)) fdOk = false;
+            if (Z[i].thetaDotRadS + 1e-9 < Z[i - 1].thetaDotRadS) monoOk = false;
+            if (Z[i].thetaDotRadS > maxRate) { maxRate = Z[i].thetaDotRadS; tMax = Z[i].t_us; }
+        }
+        check(fdOk,   "curveRate == finite difference of the emitted θ");
+        check(monoOk, "rate monotone non-decreasing into P7");
+        check(tMax >= 98'000, "rate peaks at the P7 end of the bracket");
+        // Legacy forms unchanged: single-rate overload == in/out with in == out, and
+        // curveRate=false reports the linear interpolation of the anchor rates.
+        SynthConfig legacy; legacy.enabled = true; legacy.curveRate = false;
+        const std::vector<double> one = { 1.6, 1.8, 1.0 };
+        const std::vector<ShaftSample2D> A = synthesizeBetweenAnchors(anchors, one, gv, frames, legacy);
+        const std::vector<ShaftSample2D> B = synthesizeBetweenAnchors(anchors, one, one, gv, frames, legacy);
+        bool same = A.size() == B.size();
+        for (size_t i = 0; same && i < A.size(); ++i)
+            same = A[i].thetaRad == B[i].thetaRad && A[i].thetaDotRadS == B[i].thetaDotRadS;
+        check(same, "single-rate overload == in/out overload with in == out");
+        const ShaftSample2D *mid = nullptr;
+        for (const ShaftSample2D &z : A) if (z.t_us == 50'000) mid = &z;
+        check(mid && near(mid->thetaDotRadS, 1.7, 1e-9), "curveRate=false ⇒ linear anchor-rate interpolation (legacy)");
+    }
+
     std::printf("\n%s (%d failures)\n", g_fail ? "FAIL" : "PASS", g_fail);
     return g_fail;
 }

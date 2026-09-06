@@ -185,6 +185,87 @@ int main()
               ch && near(ch->value[25], 2000.0 * 0.001 * kMps2Mph, 0.02));
     }
 
+    // 7. Composed clubhead speed: |v_grip + L_fused·θ̇·n̂| from the track's own rate —
+    //    a pure rotation about a static grip at 5 rad/s with a 1 m (1000 px) fused length
+    //    is 5 m/s everywhere, whatever the head path or the visible extent say.
+    {
+        ShaftTrack2D shaft;
+        shaft.valid = true; shaft.frameWidth = 1000; shaft.frameHeight = 1000;
+        shaft.lengths.fusedPx = 1000.0;
+        const double omega = 5.0;
+        for (int i = 0; i < N; ++i) {
+            ShaftSample2D e;
+            e.t_us         = int64_t(i) * 10'000;
+            e.thetaRad     = omega * 0.010 * i;
+            e.thetaDotRadS = omega;
+            e.gripPx       = QPointF(100.0, 300.0);
+            e.visibleLenPx = 2000.0;                                     // must be IGNORED
+            e.headPx       = QPointF(100.0 + 2000.0 * std::cos(e.thetaRad),
+                                     300.0 + 2000.0 * std::sin(e.thetaRad));
+            shaft.samples.push_back(e);
+        }
+        KinematicSeriesInputs in;
+        in.shaft = &shaft; in.impactUs = impactUs; in.clubLengthM = 1.0; in.composed = true;
+        in.gripDownM = 0.0;   // exact numbers below; the grip-down scaling is checked separately
+        const std::vector<MetricSeries> out = buildKinematicSeries(in);
+        const MetricSeries *ch = find(out, "clubheadSpeed");
+        bool flat = ch && ch->value.size() == size_t(N);
+        for (size_t i = 0; flat && i < ch->value.size(); ++i)
+            flat = near(ch->value[i], 5.0 * kMps2Mph, 1e-6);
+        CHECK("composed: pure rotation ⇒ L_fused·ω everywhere, visible extent ignored", flat);
+        // The px→m scale maps the fused span to (clubLengthM − gripDownM), not the full club.
+        in.gripDownM = 0.13;
+        const std::vector<MetricSeries> outG = buildKinematicSeries(in);
+        const MetricSeries *chg = find(outG, "clubheadSpeed");
+        CHECK("composed: gripDownM scales the speed by (L − gripDown)/L",
+              chg && near(chg->value[25], 0.87 * 5.0 * kMps2Mph, 1e-6));
+        in.gripDownM = 0.0;
+        // Without a P7 anchor the domain mask falls to the impact instant: samples after it are
+        // invalid, the Impact dot sits on the last valid one.
+        CHECK("composed: samples after impact masked invalid",
+              ch && ch->valid.size() == size_t(N) && ch->valid[24] == 1u && ch->valid[25] == 1u
+                 && ch->valid[26] == 0u && ch->valid[N - 1] == 0u);
+        bool dotOk = false;
+        if (ch) for (const PhaseSample &ps : ch->phaseSamples)
+            if (ps.phase == Phase::Impact) dotOk = (ps.t_us == impactUs);
+        CHECK("composed: Impact dot on the last valid sample", dotOk);
+        // With a located P7 the boundary is the knot, even when impact is later.
+        ShaftPosition p7; p7.p = 7; p7.t_us = 230'000;
+        shaft.positions.push_back(p7);
+        const std::vector<MetricSeries> outP = buildKinematicSeries(in);
+        const MetricSeries *chp = find(outP, "clubheadSpeed");
+        bool knot = chp && chp->valid.size() == size_t(N) && chp->valid[23] == 1u && chp->valid[24] == 0u;
+        if (chp) for (const PhaseSample &ps : chp->phaseSamples)
+            if (ps.phase == Phase::Impact) knot = knot && ps.t_us == 230'000;
+        CHECK("composed: mask boundary is the P7 knot, Impact dot moves onto it", knot);
+        shaft.positions.clear();
+        // The differentiated path carries no mask at all (byte-identical legacy series).
+        in.composed = false;
+        const std::vector<MetricSeries> outD = buildKinematicSeries(in);
+        const MetricSeries *chd = find(outD, "clubheadSpeed");
+        CHECK("differentiated: no validity mask", chd && chd->valid.empty());
+        in.composed = true;
+        // Differentiated path (composed=false) reads the 2000 px extent instead — the
+        // two modes are genuinely different producers.
+        in.composed = false;
+        const std::vector<MetricSeries> out2 = buildKinematicSeries(in);
+        const MetricSeries *ch2 = find(out2, "clubheadSpeed");
+        CHECK("differentiated: reads the head path (≈ 10 m/s here)",
+              ch2 && near(ch2->value[25], 10.0 * kMps2Mph, 0.05 * kMps2Mph));
+        // Composed with a moving grip along n̂ adds linearly: grip +x at 1000 px/s, θ = π/2
+        // ⇒ n̂ = (−1, 0) ⇒ |1000 − 5000| px/s = 4 m/s.
+        ShaftTrack2D shaft2 = shaft;
+        for (int i = 0; i < N; ++i) {
+            shaft2.samples[size_t(i)].thetaRad = kPi / 2.0;
+            shaft2.samples[size_t(i)].gripPx   = QPointF(100.0 + 1000.0 * 0.010 * i, 300.0);
+        }
+        in.shaft = &shaft2; in.composed = true;
+        const std::vector<MetricSeries> out3 = buildKinematicSeries(in);
+        const MetricSeries *ch3 = find(out3, "clubheadSpeed");
+        CHECK("composed: grip velocity adds vectorially (|1000 − 5000| px/s ⇒ 4 m/s)",
+              ch3 && near(ch3->value[25], 4.0 * kMps2Mph, 1e-6));
+    }
+
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }
