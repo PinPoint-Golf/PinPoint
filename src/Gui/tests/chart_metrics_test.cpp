@@ -1625,6 +1625,60 @@ int main()
         checkTrue("inside the domain ⇒ measured",    cm.measuredAt(t, QVariantList{}, 1000, 0, 2000));
     }
 
+    // ── segments: the chip list, and the SWING entry the chart opens on ───────────
+    //
+    // The window default moved off the whole recording (seconds of a golfer standing over the ball)
+    // onto Address→Finish, and that segment is emitted here rather than derived in QML. What is at
+    // risk is not the arithmetic but the three cases where it must NOT appear: no finish resolved,
+    // nothing between the two landmarks (the adjacent-pair loop already emits it), and a phase list
+    // with neither.
+    {
+        std::printf("segments — Full, the swing, then the adjacent pairs\n");
+        auto ph = [](int phase, qlonglong tUs) {
+            return QVariant(QVariantMap{ { QStringLiteral("phase"), phase },
+                                         { QStringLiteral("t_us"),  tUs } });
+        };
+        auto swingOf = [](const QVariantList &segs) {
+            for (const QVariant &sv : segs)
+                if (sv.toMap().value(QStringLiteral("swing")).toBool()) return sv.toMap();
+            return QVariantMap{};
+        };
+
+        // Address 200 ms in, Top, Impact, Finish at 1.4 s — inside a 2.5 s recording.
+        const QVariantList full{ ph(0, 200000), ph(2, 900000), ph(5, 1200000), ph(7, 1400000) };
+        const QVariantList segs = cm.segments(full, 2500000);
+        checkEqI("[0] is the whole recording",
+                 segs.at(0).toMap().value(QStringLiteral("endUs")).toLongLong(), 2500000);
+        const QVariantMap sw = swingOf(segs);
+        checkEqI("swing starts at Address", sw.value(QStringLiteral("startUs")).toLongLong(), 200000);
+        checkEqI("swing ends at Finish",    sw.value(QStringLiteral("endUs")).toLongLong(), 1400000);
+        checkEqI("swing is Address→…",      sw.value(QStringLiteral("phaseA")).toInt(), 0);
+        checkEqI("…→Finish",                sw.value(QStringLiteral("phaseB")).toInt(), 7);
+        // It sits directly after Full, so the chip lands beside it rather than at the end of a row
+        // of pairs.
+        checkTrue("swing is chip [1]",
+                  segs.at(1).toMap().value(QStringLiteral("swing")).toBool());
+
+        // No Finish resolved ⇒ no swing chip. A window running Address→<axis end> would claim a
+        // finish this swing never found.
+        const QVariantList noFinish{ ph(0, 200000), ph(2, 900000), ph(5, 1200000) };
+        checkTrue("no Finish ⇒ no swing segment", swingOf(cm.segments(noFinish, 2500000)).isEmpty());
+
+        // Address and Finish ADJACENT (nothing P-tagged between them) ⇒ the pair loop already emits
+        // exactly this segment, and two identical chips is a bug, not a shortcut.
+        const QVariantList bare{ ph(0, 200000), ph(7, 1400000) };
+        const QVariantList bareSegs = cm.segments(bare, 2500000);
+        checkTrue("adjacent pair ⇒ no duplicate chip", swingOf(bareSegs).isEmpty());
+        checkEqI("…and the pair itself is still there", bareSegs.size(), 2);
+
+        // Untagged phases can never be an endpoint — Takeaway (1) between them changes nothing.
+        const QVariantList tkw{ ph(0, 200000), ph(1, 400000), ph(7, 1400000) };
+        checkTrue("an untagged phase does not separate them",
+                  swingOf(cm.segments(tkw, 2500000)).isEmpty());
+
+        checkEqI("no phases ⇒ Full alone", cm.segments(QVariantList{}, 2500000).size(), 1);
+    }
+
     std::printf("\n%s — %d failure(s)\n", g_fail ? "FAILED" : "OK", g_fail);
     return g_fail ? 1 : 0;
 }

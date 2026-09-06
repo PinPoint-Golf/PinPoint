@@ -49,9 +49,14 @@ public:
     explicit ChartMetrics(QObject *parent = nullptr)
         : QObject(parent), m_catalogue(pinpoint::analysis::makeMetricCatalogue()) {}
 
-    // Segment list for a swing. [0] = Full ({startUs:0, endUs:spanUs, phaseA:-1, phaseB:-1});
-    // then one entry per adjacent phase pair, ordered by time:
-    //   { startUs, endUs, phaseA:int, phaseB:int }.
+    // Segment list for a swing. [0] = Full — the whole RECORDING ({startUs:0, endUs:spanUs,
+    // phaseA:-1, phaseB:-1}); [1] = the SWING (Address→Finish), present only when the swing carries
+    // both landmarks with something between them; then one entry per adjacent phase pair, ordered
+    // by time:
+    //   { startUs, endUs, phaseA:int, phaseB:int } — plus `swing:true` on that one entry.
+    //
+    // The swing entry is what the chart opens on, so the reader starts on the golfer's motion
+    // rather than on the seconds of standing still that bracket it in the recording.
     // The label is composed in QML from phaseA/phaseB via TimelineLabels.phaseShortTag (no
     // tag strings duplicated here). Mirrors swing_data_source.cpp segment logic so the
     // segment vocabulary is identical. `phases` is analysisDetail.phases ([{phase,t_us,…}]).

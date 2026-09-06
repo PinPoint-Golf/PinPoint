@@ -184,13 +184,24 @@ double unitStepFloor(const QString &)
     return 1.0;
 }
 
+// The two Phase enum members segments() names directly (swing_analysis.h Phase: 0 Address,
+// 7 Finish) — the ends of the swing itself, as opposed to the ends of the recording. Written as
+// named constants for the same reason PpChartPlot names Phase::Impact beside its 5: a bare 7 in a
+// list comparison is unreadable and the enum is one file away from this one.
+constexpr int kAddressPhase = 0;
+constexpr int kFinishPhase  = 7;
+
 } // namespace
 
 QVariantList ChartMetrics::segments(const QVariantList &phases, qint64 spanUs) const
 {
     QVariantList out;
 
-    // [0] = Full swing. Label is "Full" in QML; phaseA/phaseB = -1 mark it as the whole span.
+    // [0] = Full RECORDING. Label is "Full" in QML; phaseA/phaseB = -1 mark it as the whole span.
+    //
+    // ⚠ NOT THE SWING. This is every microsecond the cameras held onto — the address dwell before
+    // the takeaway and the tail after the finish included — which on a typical capture is most of
+    // the axis spent on a golfer standing still. The swing itself is [1] below.
     {
         QVariantMap full;
         full.insert(QStringLiteral("startUs"), qint64(0));
@@ -218,6 +229,35 @@ QVariantList ChartMetrics::segments(const QVariantList &phases, qint64 spanUs) c
     }
     std::sort(ev.begin(), ev.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
+
+    // [1] = THE SWING — Address → Finish, the span the chart opens on (PpMetricChart's
+    // _defaultSeg). It is not an adjacent pair, so the loop below cannot produce it, and it is the
+    // window a reader actually wants: everything the golfer did, and nothing of the wait either
+    // side of it.
+    //
+    // Emitted only when this swing HAS both landmarks and Finish follows Address, so a capture the
+    // segmenter never resolved a finish for offers no chip that would silently mean something else.
+    // Skipped when the two are ADJACENT in ev (a swing with no P-position between them), where the
+    // pair loop already emits exactly this segment and a duplicate chip would be two identical
+    // buttons side by side.
+    {
+        int a = -1, b = -1;
+        for (int i = 0; i < ev.size(); ++i) {
+            if (ev[i].second == kAddressPhase && a < 0) a = i;
+            if (ev[i].second == kFinishPhase)           b = i;
+        }
+        if (a >= 0 && b > a + 1 && ev[b].first > ev[a].first) {
+            QVariantMap swing;
+            swing.insert(QStringLiteral("startUs"), ev[a].first);
+            swing.insert(QStringLiteral("endUs"),   ev[b].first);
+            swing.insert(QStringLiteral("phaseA"),  ev[a].second);
+            swing.insert(QStringLiteral("phaseB"),  ev[b].second);
+            // The one key that marks it: the chart picks its opening window by asking for this
+            // rather than by testing phaseA/phaseB against two bare enum numbers in QML.
+            swing.insert(QStringLiteral("swing"),   true);
+            out.append(swing);
+        }
+    }
 
     for (int i = 0; i + 1 < ev.size(); ++i) {
         QVariantMap seg;

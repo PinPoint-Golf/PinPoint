@@ -243,5 +243,29 @@ Item {
             compare(chart.preset, "Custom")
             compare(chart._presetTitle, "All metrics")
         }
+
+        function test_013_the_selector_sits_in_the_title_row_and_survives_a_collapse() {
+            // ⚠ THIS IS A PLACEMENT ASSERTION AND IT IS THE POINT OF THE CONTROL. The combo used
+            // to live inside CONTROLS, a COLLAPSIBLE section whose state is remembered per screen
+            // — so on a screen where the reader had once collapsed it, the panel's primary
+            // selector was not merely two clicks away, it was not on screen at all. Asserting
+            // "the combo exists" would have passed throughout. What has to hold is where it is:
+            // in the title row, and reachable with CONTROLS shut.
+            chart.seriesList = probe.wristAndSpeed
+            chart.controlsCollapsed = true
+            waitForRendering(chart)
+
+            var combo = findChild(chart, "presetCombo")
+            var title = findChild(chart, "presetTitle")
+            verify(combo !== null)
+            verify(combo.visible)                       // …with the accordion closed
+            compare(combo.parent, title.parent)         // the same row as the title
+            // Far right: past the title, and hard against the panel's right edge (the label and
+            // the layout's own spacing are the only gap).
+            verify(combo.x > title.x + title.width)
+            verify(combo.x + combo.width >= chart.width - Theme.sp(2))
+
+            chart.controlsCollapsed = false
+        }
     }
 }

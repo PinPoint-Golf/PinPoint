@@ -17,8 +17,8 @@
  */
 
 // PpChartPlot — one plot region: a Y axis (grid + ticks + unit), an X time axis (ms from
-// impact), swing-phase bands + impact emphasis, N metric traces, band-coloured P-position
-// dots, a replay playhead, and a shared hover crosshair. Given a series subset (each
+// impact), swing-phase bands + landmark emphasis (top of swing, impact), N metric traces,
+// band-coloured P-position dots, a replay playhead, and a shared hover crosshair. Given a series subset (each
 // decorated with its `color`), a value range [valueLo,valueHi], a time domain
 // [domStartUs,domEndUs], and geometry — so it serves BOTH overlay (one plot, N series) and
 // split (N plots, one series each). Pure scale/path binding only; axis maths lives in
@@ -437,7 +437,20 @@ Item {
             id: ph
             required property var modelData
             required property int index
+            // ── THE TWO LANDMARK TICKS ────────────────────────────────────────────
+            //
+            // Every phase draws a hairline; these two draw a LINE. They are the pair a golfer
+            // reads a trace against — the top is where the backswing ends and everything
+            // downswing is timed from, impact is where it is spent — so a curve is read as
+            // "this much between the top and impact", and that reading needs both edges
+            // visible without hunting for a 40%-opacity hairline among nine of them.
+            //
+            // Same accent, DIFFERENT WEIGHT: impact stays the strongest mark on the plot
+            // (0.85) and the top sits under it (0.55), so the emphasis still ranks them
+            // rather than putting two equal walls through every chart.
             readonly property bool isImpact: ph.modelData.phase === 5      // Phase::Impact
+            readonly property bool isTop:    ph.modelData.phase === 2      // Phase::Top (P4)
+            readonly property bool landmark: ph.isImpact || ph.isTop
             readonly property real tx: root._plotLeft + root.xForT(ph.modelData.t_us)
             readonly property var  nextPhase: (ph.index + 1 < root.phases.length)
                                               ? root.phases[ph.index + 1] : null
@@ -458,9 +471,9 @@ Item {
             Rectangle {
                 visible: root._inDom(ph.modelData.t_us)
                 x: ph.tx; y: root._plotTop
-                width: ph.isImpact ? Theme.sp(1.5) : 1; height: root._plotH
-                color: ph.isImpact ? Theme.colorAccent : Theme.colorBorderMid
-                opacity: ph.isImpact ? 0.85 : 0.4
+                width: ph.landmark ? Theme.sp(1.5) : 1; height: root._plotH
+                color: ph.landmark ? Theme.colorAccent : Theme.colorBorderMid
+                opacity: ph.isImpact ? 0.85 : (ph.isTop ? 0.55 : 0.4)
             }
             // Short tag at the foot of the tick.
             Text {
@@ -469,7 +482,7 @@ Item {
                 y: root._plotBottom - height - Theme.sp(2)
                 text: labels.phaseShortTag(ph.modelData.phase)
                 font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
-                color: ph.isImpact ? Theme.colorText2 : Theme.colorText3
+                color: ph.landmark ? Theme.colorText2 : Theme.colorText3
             }
         }
     }

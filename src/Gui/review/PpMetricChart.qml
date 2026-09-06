@@ -62,8 +62,9 @@ Item {
     property bool showPlayhead: true
 
     // ── Chart-local view state (NOT bound to shotReplay / SwingDataSource) ─────────
-    property real viewStartUs: root._axisStart      // segment/brush window (Phase 2)
-    property real viewEndUs:   root._axisEnd
+    // The window OPENS on the swing, not on the recording — see _defaultSeg.
+    property real viewStartUs: root._defaultStart   // segment/brush window (Phase 2)
+    property real viewEndUs:   root._defaultEnd
     property bool splitMode:   true                 // true = chart per series; false = overlay
     property var  enabledKeys: ({})                 // legend visibility ({} = all on)
     property bool showDots:    true
@@ -89,7 +90,11 @@ Item {
     signal scrubBegan()
     signal scrubEnded()
 
-    property string _preset:   "Full"               // active segment ("Full" / "ADR→TKW" / "Custom")
+    // Active segment ("Full" / "P1→P10" / "P4→P5" / "Custom"). A BINDING, not a literal, so a swing
+    // whose phases arrive after its series (the usual order on disk replay) re-labels itself when
+    // the default window below moves under it; the chip clicks and the brush drag break it, and
+    // onSeriesListChanged re-establishes it for the next swing exactly as it does the window.
+    property string _preset:   root._defaultLabel
 
     // Compact mode: just the overlay plot (no toolbar / segment chips / brush / header /
     // legend / summary) — for small in-tile transients like the ¼× auto-replay graph.
@@ -643,7 +648,8 @@ Item {
         return out
     }
 
-    // Full-swing extents (the window defaults to these; the brush narrows them in Phase 2).
+    // Recording extents — the outer bounds of the axis and of the brush. NOT the window default
+    // since the Address→Finish opening; _defaultStart/_defaultEnd are.
     readonly property real _dataStart: (root._list.length && root._list[0].t_us
                                         && root._list[0].t_us.length) ? root._list[0].t_us[0] : 0
     readonly property real _dataEnd: {
@@ -760,6 +766,37 @@ Item {
         return seg.phaseA === -1 ? qsTr("Full")
              : labels.phaseShortTag(seg.phaseA) + "→" + labels.phaseShortTag(seg.phaseB)
     }
+    // ── THE WINDOW THE CHART OPENS ON: THE SWING, NOT THE RECORDING ────────────────
+    //
+    // A capture holds whatever the ring buffer held — commonly a second or more of a golfer standing
+    // over the ball before the takeaway, and a tail after the finish. Opening on that spent most of
+    // the axis on the address dwell: every curve compressed into the right-hand third, and the
+    // motion the reader came to look at drawn in a few dozen pixels. So the default is the
+    // Address→Finish segment, and "Full" is still one chip away for anyone who wants the tails
+    // (they are where a settling IMU or a late trigger shows itself, so nothing is hidden — it is
+    // simply not what the panel opens on).
+    //
+    // ⚠ FALLS BACK TO THE FULL AXIS, never to a half-open guess. A swing the segmenter resolved no
+    // Finish for has no swing segment (ChartMetrics::segments emits none), and the honest window
+    // there is everything we have: a chart that opened on Address→<axis end> would be quietly
+    // claiming a finish it never found.
+    // ⚠ FULL MODE ONLY. The compact instance (the ¼× auto-replay strip in the camera tiles) is a
+    // PLAYHEAD surface with no chips and no brush: it draws a cursor tracking a replay that runs
+    // over the whole recording, and a window narrower than that replay would park the playhead
+    // outside the plot for the pre-roll and the tail, with no control anywhere to widen it again.
+    readonly property var _defaultSeg: {
+        if (root.compact) return null
+        for (var i = 0; i < root._segments.length; ++i)
+            if (root._segments[i].swing === true) return root._segments[i]
+        return null
+    }
+    readonly property real _defaultStart: root._defaultSeg ? root._defaultSeg.startUs
+                                                           : root._axisStart
+    readonly property real _defaultEnd:   root._defaultSeg ? root._defaultSeg.endUs
+                                                           : root._axisEnd
+    readonly property string _defaultLabel: root._defaultSeg ? root._segLabel(root._defaultSeg)
+                                                             : qsTr("Full")
+
     function _selectSegment(seg) {
         if (seg.phaseA === -1) {                         // Full — use the true axis extent
             root.viewStartUs = root._axisStart
@@ -772,12 +809,13 @@ Item {
         }
     }
 
-    // A new swing restores the full-window bindings (the imperative chip/brush writes break
-    // them); the window is chart-local, so it always re-opens to the whole new swing.
+    // A new swing restores the default-window bindings (the imperative chip/brush writes break
+    // them); the window is chart-local, so it always re-opens on the new swing's Address→Finish
+    // (or its full axis, where that swing has no such segment).
     onSeriesListChanged: {
-        root._preset     = "Full"
-        root.viewStartUs = Qt.binding(function () { return root._axisStart })
-        root.viewEndUs   = Qt.binding(function () { return root._axisEnd })
+        root._preset     = Qt.binding(function () { return root._defaultLabel })
+        root.viewStartUs = Qt.binding(function () { return root._defaultStart })
+        root.viewEndUs   = Qt.binding(function () { return root._defaultEnd })
     }
 
     // Shared hover cursor, fanned back to every plot so the crosshair spans all facets.
@@ -830,38 +868,77 @@ Item {
         spacing: Theme.sp(8)
         visible: root._hasAny
 
-        // ── Panel title ───────────────────────────────────────────────────────────
-        // PpDisplayText is the app's one display-title component — brand warm→cool gradient
-        // fill, Theme.fontSzDisplay, flat fallback under reduce-motion — the same call the
-        // Metric Library and the metric detail sheet make. Not a Text with a gradient bolted
-        // on: the mask/MultiEffect machinery lives in that component precisely so no caller
-        // reimplements it.
+        // ── Panel title row: the panel's name, and the one control that changes it ─
         //
-        // Outside the collapsible sections, and above CONTROLS, because it titles the PANEL
-        // rather than any one section — collapsing all three must not take the panel's name
-        // with them. Hidden in compact, which is plot-only by definition.
-        PpDisplayText {
-            objectName: "presetTitle"        // tst_chart_presets reaches it by name
+        // The METRICS combo lives HERE, at the far right of the title, and not in CONTROLS below
+        // it. It is the panel's primary selector — it decides which curves exist at all — and
+        // CONTROLS is a collapsible section, so parked in there it cost a reader two clicks
+        // (open the accordion, then the combo) and, on a screen where the section was remembered
+        // collapsed, it was invisible. Everything left in CONTROLS is a way of LOOKING at the
+        // curves (split/overlay, dots, cursor, the segment window); this is a way of choosing
+        // them, which is why it belongs beside the title that names its answer.
+        RowLayout {
             visible: !root.compact
-            text: root._presetTitle
-            // ⚠ CAPPED, NEVER Layout.fillWidth — the gradient is why. PpDisplayText paints the
-            // brand sweep across a Rectangle anchored to its GLYPHS, and the glyphs track the
-            // item's width. Filled to a 900px panel, "Wrist & forearm" occupies the first fifth
-            // of that sweep and renders in near-flat warm: the gradient is still there and looks
-            // switched off. Sized to its text it spans warm→cool over the words, which is what
-            // every other caller gets by simply not stretching (MetricLibrary sizes naturally;
-            // MetricDetail caps, like this).
+            Layout.fillWidth: true
+            spacing: Theme.sp(10)
+
+            // PpDisplayText is the app's one display-title component — brand warm→cool gradient
+            // fill, Theme.fontSzDisplay, flat fallback under reduce-motion — the same call the
+            // Metric Library and the metric detail sheet make. Not a Text with a gradient bolted
+            // on: the mask/MultiEffect machinery lives in that component precisely so no caller
+            // reimplements it.
             //
-            // Capped against root.width rather than the enclosing ColumnLayout: the layout's own
-            // width is derived from its children, so capping a child against it is a cycle Qt
-            // gives up on after two passes. root's width comes from the panel above it.
-            //
-            // The group names are short, but "Tempo & sequence · custom" at display size in a
-            // narrow split panel is not: elide rather than wrap, so the title can never push
-            // the plot down a line.
-            Layout.maximumWidth: root.width
-            elide: Text.ElideRight
-            maximumLineCount: 1
+            // Outside the collapsible sections, and above CONTROLS, because it titles the PANEL
+            // rather than any one section — collapsing all three must not take the panel's name
+            // with them. Hidden in compact, which is plot-only by definition.
+            PpDisplayText {
+                objectName: "presetTitle"        // tst_chart_presets reaches it by name
+                text: root._presetTitle
+                // ⚠ CAPPED, NEVER Layout.fillWidth — the gradient is why. PpDisplayText paints
+                // the brand sweep across a Rectangle anchored to its GLYPHS, and the glyphs track
+                // the item's width. Filled to a 900px panel, "Wrist & forearm" occupies the first
+                // fifth of that sweep and renders in near-flat warm: the gradient is still there
+                // and looks switched off. Sized to its text it spans warm→cool over the words,
+                // which is what every other caller gets by simply not stretching (MetricLibrary
+                // sizes naturally; MetricDetail caps, like this). The stretching in this row is
+                // the spacer's job, never the title's.
+                //
+                // Capped against root.width rather than the enclosing layout: a layout's own
+                // width is derived from its children, so capping a child against it is a cycle Qt
+                // gives up on after two passes. root's width comes from the panel above it — and
+                // the combo's share is taken off it here, so a long title elides rather than
+                // squeezing the selector out of the row.
+                //
+                // The group names are short, but "Tempo & sequence · custom" at display size in a
+                // narrow split panel is not: elide rather than wrap, so the title can never push
+                // the plot down a line.
+                Layout.maximumWidth: Math.max(Theme.sp(60),
+                                              root.width - presetCombo.width - Theme.sp(72))
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+
+            Item { Layout.fillWidth: true }      // spacer — pins the selector to the right
+
+            Text {
+                text: qsTr("METRICS")
+                font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
+                font.letterSpacing: Theme.trackingLabel
+                color: Theme.colorText3
+            }
+
+            PpComboBox {
+                id: presetCombo
+                objectName: "presetCombo"        // tst_chart_presets reaches it by name
+                Layout.preferredWidth: Theme.sp(190)
+                // Hidden rather than empty when the catalogue matched nothing — with no groups
+                // the only option would be "All", a control whose one choice is the state it is
+                // already in.
+                visible: root._groups.length > 0
+                model: root._presetOptions
+                currentIndex: root._presetOptions.indexOf(root.preset)
+                onActivated: (i) => root._applyPreset(root._presetOptions[i], true)
+            }
         }
 
         // ── CONTROLS section ──────────────────────────────────────────────────────
@@ -872,7 +949,8 @@ Item {
                          root._persistSection("controls", root.controlsCollapsed) }
         }
 
-        // Toolbar: Split/Overlay + P-dots / Cursor toggles.
+        // Toolbar: Split/Overlay + P-dots / Cursor toggles. The METRICS combo used to sit
+        // between them and is now in the title row above — see the note there.
         RowLayout {
             visible: !root.compact && !root.controlsCollapsed
             Layout.fillWidth: true
@@ -884,25 +962,6 @@ Item {
                 selected: root.splitMode ? qsTr("Split") : qsTr("Overlay")
                 onActivated: (v) => { root.splitMode = (v === qsTr("Split"))
                                       root._persistPref("split", root.splitMode) }
-            }
-
-            Text {
-                text: qsTr("METRICS")
-                Layout.leftMargin: Theme.sp(4)
-                font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
-                font.letterSpacing: Theme.trackingLabel
-                color: Theme.colorText3
-            }
-
-            PpComboBox {
-                Layout.preferredWidth: Theme.sp(190)
-                // Hidden rather than empty when the catalogue matched nothing — with no groups
-                // the only option would be "All", a control whose one choice is the state it is
-                // already in.
-                visible: root._groups.length > 0
-                model: root._presetOptions
-                currentIndex: root._presetOptions.indexOf(root.preset)
-                onActivated: (i) => root._applyPreset(root._presetOptions[i], true)
             }
 
             Item { Layout.fillWidth: true }      // spacer
@@ -1039,7 +1098,10 @@ Item {
             Layout.fillWidth: true
             spacing: Theme.sp(12)
             Text {
-                text: root._preset === "Full" ? qsTr("Full swing")
+                // "Full recording", not "Full swing": since the panel opens on Address→Finish, the
+                // Full chip is precisely the thing that is WIDER than the swing, and calling it the
+                // swing made the two windows sound like the same span read two ways.
+                text: root._preset === "Full" ? qsTr("Full recording")
                     : labels.phaseFullName(root._nearStart) + " → " + labels.phaseFullName(root._nearEnd)
                 font.family: Theme.fontBody; font.pixelSize: Theme.fontSzHeading
                 color: Theme.colorText
@@ -1324,7 +1386,7 @@ Item {
             startUs:     root.viewStartUs
             endUs:       root.viewEndUs
             impactUs:    root.impactUs
-            segmentName: root._preset === "Full" ? qsTr("full swing")
+            segmentName: root._preset === "Full" ? qsTr("full recording")
                        : (labels.phaseFullName(root._nearStart) + " → "
                           + labels.phaseFullName(root._nearEnd)).toLowerCase()
         }
