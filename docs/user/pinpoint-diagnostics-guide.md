@@ -129,7 +129,7 @@ something on nearly every swing and you would stop reading it.
 ### A characteristic — something worth telling you about
 
 A **characteristic** is a named feature of a swing, in the language a coach would use: *Scooping.*
-*Ball too far back.* *Loss of posture.* When a signal fires, its characteristic becomes a **finding**
+*Ball too far back.* *Coming out of it.* When a signal fires, its characteristic becomes a **finding**
 for that swing.
 
 A characteristic carries more than a name. It carries the **consequence** — why it matters. For

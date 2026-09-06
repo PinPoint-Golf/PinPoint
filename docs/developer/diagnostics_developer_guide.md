@@ -594,10 +594,11 @@ shipped set.)
 | `outcome` | 20 | | `intent` | 9 |
 | | | | `equipment` | 1 |
 
-**Prominence** — 58 `occasional`, 52 `common`, 25 `uncommon`, 8 `ubiquitous`, 3 `rare`. All editorial
-judgement; no prevalence study exists (see §3). The eight at `ubiquitous` are `over_the_top`,
-`early_extension`, `casting`, `loss_of_posture`, `out_to_in_path`, `open_face_to_path`, `slice` and
-`trying_to_lift_the_ball`.
+**Prominence** — 58 `occasional`, 53 `common`, 25 `uncommon`, 7 `ubiquitous`, 3 `rare`. All editorial
+judgement; no prevalence study exists (see §3). The seven at `ubiquitous` are `over_the_top`,
+`early_extension`, `casting`, `out_to_in_path`, `open_face_to_path`, `slice` and
+`trying_to_lift_the_ball`. `coming_out_of_it` (was `loss_of_posture`) left that rung when it became a
+conjunction: a conjunction cannot be commoner than its rarer part.
 
 **The two axes are not redundant, and 26 conditions prove it**: `group: setup` splits four ways — 20
 genuine Setup, 14 Capacity, 9 Intent, 1 Equipment and 2 misfiled motion faults (the two takeaways) —

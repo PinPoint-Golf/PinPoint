@@ -1123,12 +1123,13 @@
       "citation": "Provisional. PMID 30479527 reports trunk flexion at address in elite golfers on a C7 to mid-PSIS definition in the global sagittal plane; this measure is bend FROM VERTICAL. Reconcile datum and sign before adopting any published figure."
     },
     {
-      "measure": "m_spineBendLoss",
+      "measure": "m_spineBendDive",
       "context": "any",
       "mu": 0.0,
       "sigmaLo": 5.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "ESTIMATE, carried over from m_spineBendLoss when that measure was re-windowed to the transition and re-sensed to a maximum. The numbers were never seated against a corpus on either measure, and the quantity has no producer yet, so re-seating now would be inventing precision twice over. What did change is what mu=0 MEANS: on the old minimum it was the address bend never being lost across the whole downswing; here it is the address bend being held, not exceeded, between P5 and P6. Re-seat when a down-the-line or trunk-IMU route lands."
     },
     {
       "measure": "m_axisTiltAtTop",
@@ -1336,6 +1337,15 @@
       "sigmaLo": 3.0,
       "unit": "cm",
       "source": "heuristic"
+    },
+    {
+      "measure": "m_headLiftDown",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 3.0,
+      "unit": "cm",
+      "source": "heuristic",
+      "citation": "ESTIMATE, not a published figure, and deliberately the same corridor as m_headLiftBack because nothing measured says the two should differ. The centre says the head should be no higher on the way down than it was at address; the tolerance is the backswing one until a corpus separates them. First candidate for re-seating once the library has been re-analysed with this measure in it — a downswing head trace is live off one face-on camera, so unlike most of this file the data is obtainable."
     },
     {
       "measure": "m_headLiftBack",

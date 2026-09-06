@@ -120,22 +120,24 @@
       "highMeans": "more forward bend from the hips, standing over the ball more"
     },
     {
-      "id": "m_spineBendLoss",
+      "id": "m_spineBendDive",
       "kind": "provided",
       "metricKey": "spineForwardBend",
       "reducer": {
         "kind": "extremum",
         "window": [
-          "p4",
-          "p7"
+          "p5",
+          "p6"
         ],
-        "sense": "min",
+        "sense": "max",
         "anchor": "p1"
       },
       "status": "planned",
-      "label": "Spine forward bend, change from address",
+      "label": "Spine forward bend, deepest P5 to P6 from P1",
       "unit": "°",
-      "highMeans": "more forward bend than at address during the swing, a dip"
+      "highMeans": "more forward bend than at address on the way down — dropping into the ball",
+      "unwatchedTail": "low",
+      "unwatchedReason": "The low tail is a golfer who never reaches the address bend on the way down, which is standing up out of it — and that is `coming_out_of_it`, read on the head and the trunk's lean where a face-on camera can see it today. Watching this tail too would name one fault twice, and name it off an instrument nobody has built yet.\n\nREPLACES m_spineBendLoss, which was a MINIMUM over P4-P7 anchored at address and was read by `diving` on its HIGH tail. On a minimum, high means the bend never dropped below address at any point in the whole downswing — a sustained deep posture, not a dip. A golfer who drops into it before P6 and then stands up by impact has a minimum below address, so that swing scored as loss of posture and the dive was invisible: precisely the swing the characteristic exists to catch. The dip is a maximum, and it happens in the transition, so the window is P5-P6 and the sense is max."
     },
     {
       "id": "m_axisTiltAtTop",
@@ -1306,6 +1308,26 @@
       "highMeans": "the head further from the ball line, off the ball"
     },
     {
+      "id": "m_headLiftDown",
+      "kind": "provided",
+      "metricKey": "headLift",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p5",
+          "p7"
+        ],
+        "sense": "max",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Head height, highest P5 to P7 from P1",
+      "unit": "cm",
+      "highMeans": "the head higher than address on the way down, rising out of the shot",
+      "unwatchedTail": "low",
+      "unwatchedReason": "The low tail is the head DROPPING on the way down, which is the face-on half of `diving` — and diving is read on forward bend, where a squat that keeps the posture can be told apart from a dive that loses it. A head that lowers is not by itself a fault: it is what a golfer who is loading into the ground does. Author it here only alongside something that can make that distinction."
+    },
+    {
       "id": "m_headLiftBack",
       "kind": "provided",
       "metricKey": "headLift",
@@ -2195,14 +2217,6 @@
       "direction": "high"
     },
     {
-      "id": "sig_lossOfPosture",
-      "test": "outsideCorridor",
-      "measures": [
-        "m_spineBendLoss"
-      ],
-      "direction": "low"
-    },
-    {
       "id": "sig_earlyExtension",
       "test": "outsideCorridor",
       "measures": [
@@ -2537,6 +2551,14 @@
         "m_headLiftBack"
       ],
       "direction": "low"
+    },
+    {
+      "id": "sig_headRiseDown",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_headLiftDown"
+      ],
+      "direction": "high"
     },
     {
       "id": "sig_headRiseBackswing",
@@ -2925,7 +2947,7 @@
       "id": "sig_diving",
       "test": "outsideCorridor",
       "measures": [
-        "m_spineBendLoss"
+        "m_spineBendDive"
       ],
       "direction": "high"
     },
@@ -3411,32 +3433,35 @@
       "axis": "ball_body_distance"
     },
     {
-      "id": "loss_of_posture",
-      "label": "Loss of posture",
+      "id": "coming_out_of_it",
+      "label": "Coming out of it",
       "aliases": [
-        "coming out of it",
-        "standing up through it"
+        "loss of posture",
+        "standing up through it",
+        "backing out of the shot",
+        "pulling off the ball"
       ],
       "group": "posture",
       "kind": "fault",
-      "prominence": "ubiquitous",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
-        "sig_lossOfPosture"
+        "sig_headRiseDown",
+        "sig_axisTiltImpactHigh"
       ],
+      "detection": "all",
       "state": "active",
-      "consequence": "Losing the address spine angle during the swing changes the distance to the ball mid-swing, so the low point has to be found by compensation rather than by repetition.",
+      "consequence": "The golfer rises and leans away from the shot on the way down: the head finishes higher than it was at address and the upper body has tipped further from the target than it should be at impact. The distance to the ball changes mid-swing, so the low point has to be found by compensation rather than by repetition, and the club tends to arrive with the hands rescuing the strike.",
       "provenance": {
         "tier": "indirect",
         "citation": "10.1177/0363546514555698",
         "searchedOn": "2026-07-27",
-        "searchTerms": "hip internal rotation restriction lumbopelvic kinematics posture golf"
+        "searchTerms": "hip internal rotation restriction lumbopelvic kinematics posture golf\n\nWAS `loss_of_posture`, DETECTED ON SPINE FORWARD BEND. The old name described a whole family — any way of not being in the address posture at impact — while the detector behind it was one narrow reading, and the reading needed a down-the-line camera or trunk IMUs that do not exist yet, so nothing could ever fire. This is the specific fault the coaching phrase names, and it is a CONJUNCTION: the head rises AND the trunk tips away from the target. Either alone is not it. A head that rises with the trunk held is a lift, and a trunk tipped away with the head steady is tilt, which is read as `excessive_axis_tilt_impact`. Both readings are live off one face-on camera, so unlike its predecessor this fires today.\n\nDISTINCT FROM `early_extension`, WHICH REMAINS ITS COMMONEST CAUSE. Early extension is the PELVIS moving toward the ball; a golfer can come out of the shot without it, which is why the two are separate conditions joined by an edge rather than one condition. The pelvis half is depth and needs down-the-line, so until that lands the app can see that a golfer came out of it and NOT whether the hips drove it.\n\nPROMINENCE, AND THE TENSION IN IT. Held at `common`, down from `ubiquitous`. A conjunction cannot be commoner than its rarer part and that part, `excessive_axis_tilt_impact`, is seated `uncommon` — which argues for a further drop. But that seating is itself a draft judgement nobody has measured, and a fault every coach works on weekly is not rare. `common` is the reading neither side has to defend with a number. Re-seat the pair together from a corpus, not separately."
       },
       "drills": [
         "drill.postureRod"
-      ],
-      "axis": "spine_bend_change"
+      ]
     },
     {
       "id": "early_extension",
@@ -6079,9 +6104,8 @@
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-28",
-        "searchTerms": "loss of posture diving spine angle increase downswing golf"
-      },
-      "axis": "spine_bend_change"
+        "searchTerms": "loss of posture diving spine angle increase downswing golf\n\nRE-WINDOWED TO THE TRANSITION, and unpaired from `coming_out_of_it`. The dive happens on the way down, before delivery, so it is read as the deepest forward bend between P5 and P6 rather than anywhere across P4-P7. The two were authored as the two tails of one axis (`spine_bend_change`) on one measure; they are not tails of one corridor, because they are different events at different times, and a golfer can do BOTH — drop into the transition and then stand up through the ball. One number over one window cannot say that. Two windowed measures can, so the axis is gone and each stands alone."
+      }
     },
     {
       "id": "steep_shoulder_plane",
@@ -7019,8 +7043,19 @@
       }
     },
     {
+      "from": "coming_out_of_it",
+      "to": "excessive_axis_tilt_impact",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-09-06",
+        "searchTerms": "standing up out of posture trunk lean away from target at impact golf — the two share the tilt reading BY CONSTRUCTION: coming out of it is detected partly on that tail, so whenever it fires the tilt condition fires with it. The edge is what stops the pair reading as two independent findings off one number — the lean is how coming out of it SHOWS UP at impact, not a second thing that went wrong."
+      }
+    },
+    {
       "from": "early_extension",
-      "to": "loss_of_posture",
+      "to": "coming_out_of_it",
       "type": "causes",
       "strength": "strong",
       "provenance": {
@@ -7031,7 +7066,7 @@
     },
     {
       "from": "limited_thoracic_rotation",
-      "to": "loss_of_posture",
+      "to": "coming_out_of_it",
       "type": "causes",
       "strength": "strong",
       "provenance": {
@@ -7042,7 +7077,7 @@
     },
     {
       "from": "limited_trail_hip_ir",
-      "to": "loss_of_posture",
+      "to": "coming_out_of_it",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -7054,7 +7089,7 @@
     },
     {
       "from": "poor_core_stability",
-      "to": "loss_of_posture",
+      "to": "coming_out_of_it",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -9210,7 +9245,7 @@
     },
     {
       "from": "pelvis_sink_backswing",
-      "to": "loss_of_posture",
+      "to": "coming_out_of_it",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -9475,7 +9510,7 @@
     },
     {
       "from": "over_rotation_at_top",
-      "to": "loss_of_posture",
+      "to": "coming_out_of_it",
       "type": "causes",
       "strength": "moderate",
       "provenance": {

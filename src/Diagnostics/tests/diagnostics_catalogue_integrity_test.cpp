@@ -381,8 +381,13 @@ int main()
     //
     // The exemplar is now spine forward bend, which is a genuinely different case: it is SAGITTAL,
     // the plane a face-on camera foreshortens to almost nothing, and no clever reading of the
-    // frontal projection recovers it. Two reducers over one series, four characteristics behind
+    // frontal projection recovers it. Two reducers over one series, three characteristics behind
     // them.
+    //
+    // It was four until `loss_of_posture` became `coming_out_of_it` and moved off this series onto
+    // head lift and trunk lean — two readings a face-on camera already resolves. That is the one
+    // way a roadmap row shrinks without anybody writing a producer: the fault was never sagittal,
+    // it was authored against a sagittal measure.
     {
         ModelBrowser       model;
         const QVariantList rows = model.roadmap();
@@ -401,7 +406,7 @@ int main()
         }
         check(exemplarRows == 1, "a series with several reducers is ONE roadmap row");
         check(exemplarSamples == 2, "that row knows it carries two reducers");
-        check(exemplarBlocks == 4, "and that it unblocks four characteristics");
+        check(exemplarBlocks == 3, "and that it unblocks three characteristics");
 
         // And the metrics that LEFT the roadmap must really be gone: a producer landing has to
         // remove its row, or the roadmap keeps advertising work that is finished.

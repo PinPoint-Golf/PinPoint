@@ -108,8 +108,6 @@ static const Expect kExpected[] = {
       "leadWristFlexExt: '+ is bowed/flexed, - is cupped/extended'; scooping ADDS loft, so cupped" },
     { "sig_insufficientSet",  Direction::Low,
       "leadWristRadUln is the HINGE; less set is less of it" },
-    { "sig_lossOfPosture",    Direction::Low,
-      "spineForwardBend: losing posture is standing UP, the negative deviation from address" },
     { "sig_chickenWing",      Direction::High,
       "leadArmToTorso: 'a rising angle there means the arm is separating from the body'" },
     { "sig_lateBuckle",       Direction::High,  "leadKneeFlexion: 'higher means more bend'" },
@@ -151,6 +149,9 @@ static const Expect kExpected[] = {
     { "sig_headDropBackswing",    Direction::Low,
       "headLift measures a rise from address; a drop is the negative end" },
     { "sig_headRiseBackswing",    Direction::High, "…and a rise is the positive end" },
+    { "sig_headRiseDown",         Direction::High,
+      "m_headLiftDown highMeans 'the head higher than address on the way down, rising out of the "
+      "shot'; coming out of it IS that rise, so it is the high end" },
     { "sig_excessiveHeadSway",    Direction::High,
       "m_headSwayBack highMeans: 'the head further from the ball line, off the ball'" },
     { "sig_excessiveHeelLift",    Direction::High, "leadHeelLift measures a lift; more is more" },
@@ -259,8 +260,9 @@ static const Expect kExpected[] = {
     { "sig_flatThoracicSpine",      Direction::Low,
       "m_thoracicCurve highMeans 'a more rounded upper back'; a flat thoracic spine is less round" },
     { "sig_diving",                 Direction::High,
-      "m_spineBendLoss highMeans 'more forward bend than at address during the swing, a dip'; "
-      "diving IS that dip, so it is the high end" },
+      "m_spineBendDive highMeans 'more forward bend than at address on the way down — dropping "
+      "into the ball'; diving IS that dip, so it is the high end. The measure takes the MAXIMUM "
+      "between P5 and P6: a dip is a peak, and it happens in the transition" },
     { "sig_steepShoulderPlane",     Direction::High,
       "m_shoulderPlane highMeans 'a steeper, more vertical shoulder turn'; steep is the high end, "
       "where sig_flatShoulderPlane takes the low" },
@@ -387,9 +389,15 @@ static const Expect kExpected[] = {
 // three inversions got in.
 static const char *kUndefinedConvention[] = { nullptr };
 
-// Signals wrong in a way a DIRECTION cannot express. Both original entries are fixed:
-// sig_insufficientSet now reads the hinge (leadWristRadUln) rather than bow/cup, and
-// m_spineBendLoss takes the minimum rather than the maximum. Empty, and it should stay that way.
+// Signals wrong in a way a DIRECTION cannot express. All three original entries are fixed:
+// sig_insufficientSet now reads the hinge (leadWristRadUln) rather than bow/cup; m_spineBendLoss was
+// re-sensed to a minimum for sig_lossOfPosture; and sig_diving, which shared that measure and was
+// left behind by that fix, now reads m_spineBendDive — a MAXIMUM over P5-P6, because a dip is a peak
+// and it happens in the transition. High on a minimum meant "the bend never dropped below address
+// anywhere in the downswing", so a golfer who dropped into it and stood up by impact could not be
+// seen diving at all. Two signals on one measure is how the first fix left the second one broken:
+// when re-sensing a measure, audit every signal that reads it, not the one you came for.
+// Empty, and it should stay that way.
 static const char *kKnownDefective[] = { nullptr };
 
 static bool listed(const char *const *arr, size_t n, const QString &id)

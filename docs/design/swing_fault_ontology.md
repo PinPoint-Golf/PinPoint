@@ -94,7 +94,7 @@ ships:
 |---|---|---|---|---|---|
 | S-posture | setup | observable | measured | `lumbar_curve` | no (noProducer) |
 | C-posture | setup | observable | measured | `thoracic_curve` | no (noProducer) |
-| Loss of posture | posture | observable | measured | `spine_bend_change` | no (planned) |
+| Coming out of it | posture | observable | measured | — | **yes** |
 | Flat shoulder plane | posture | observable | measured | `shoulder_plane` | **yes** |
 | Early extension | posture | observable | measured | `pelvis_thrust` | no (planned) |
 | **Over the top** † | **armsAndClub** | ~~latent~~ observable | ~~asserted~~ measured | ~~—~~ `transition_plane` | ~~never~~ no (placeholder corridor) |
@@ -546,16 +546,23 @@ to sort on: **prominence and detectability run inversely at the top.**
 
 | rung | fires | dark | |
 |---|---:|---:|---|
-| Ubiquitous | 1 | 3 | **25%** |
-| Common | 19 | 3 | 86% |
+| Ubiquitous | 1 | 2 | **33%** |
+| Common | 20 | 3 | 87% |
 | Occasional | 18 | 6 | 75% |
 | Uncommon | 14 | 2 | 87% |
 | Rare | 3 | 0 | 100% |
 
-Every rare fault in the library is detectable and three of the four commonest are not — `over_the_top`,
-`early_extension` and `loss_of_posture` are all on planned measures, while `casting` alone fires. The
-mechanism is not mysterious: the frequent faults are whole-body events needing depth, and the rare
-ones tend to be single-joint readings a face-on camera already resolves.
+Every rare fault in the library is detectable and two of the three commonest are not — `over_the_top`
+and `early_extension` are both on planned measures, while `casting` fires. The mechanism is not
+mysterious: the frequent faults are whole-body events needing depth, and the rare ones tend to be
+single-joint readings a face-on camera already resolves.
+
+`loss_of_posture` was the third, and it left this list by being re-read rather than by gaining a
+producer. It is now `coming_out_of_it`, a conjunction of head rise on the way down and the trunk
+tipping away from the target at impact — two readings that are live off one face-on camera. The
+sagittal spine angle it used to wait on stayed with `diving`, where the fault genuinely is a
+sagittal one. That is worth generalising: a fault blocked on depth is sometimes blocked on the
+MEASURE somebody first reached for, not on the view.
 
 **This is a priority ordering, not a defect list**, and it is what the model is for. The library is
 authored ahead of its producers deliberately, so that it can be reviewed with coaches and then used

@@ -819,7 +819,7 @@ study counts named swing faults across a population. It is a prior, and it is re
 | Metric | Status | Faults it would unlock | Top rung | Which |
 |---|---|---:|---|---|
 | `swingPlane` | planned | **6** | ubiquitous | *Over the top*, *Steep through delivery*, *Stuck under the plane*, *Shallowing in transition*, *Steep backswing plane*, *Flat backswing plane* |
-| `spineForwardBend` | planned | **4** | ubiquitous | *Loss of posture*, *Standing too upright*, *Bent over too much at address*, *Diving into the ball* |
+| `spineForwardBend` | planned | **3** | occasional | *Standing too upright*, *Bent over too much at address*, *Diving into the ball* |
 | `clubPath` | planned | **2** | ubiquitous | *Path too far out-to-in*, *Path too far in-to-out* |
 | `faceToPath` | device | **2** | ubiquitous | *Face open to the path*, *Face closed to the path* |
 | `pelvisThrust` | planned | **2** | ubiquitous | *Early extension*, *Backing away from the ball* |
@@ -1318,24 +1318,33 @@ in the catalogue would be answering it in the wrong place.
 range-used *is* the quantity of interest — author it for one of those and the wrist-mobility use stays
 out. Dispersion waits on a session-level estimand.
 
-### B.9 Face-on proxies for `early_extension` and `loss_of_posture`
+### B.9 Face-on proxies for `early_extension` and `loss_of_posture` — half closed
 
-*Would close:* two `ubiquitous` faults, currently blocked on `pelvisThrust` and `spineForwardBend`,
-both DTL. Two proxies suggest themselves: the pelvis coming toward the camera changes its **apparent
-hip span**, which is a depth cue a single view does have; and loss of posture might be composed from
-the live `headLift` and `pelvisLift`.
+*Would close:* two `ubiquitous` faults, then blocked on `pelvisThrust` and `spineForwardBend`, both
+DTL. Two proxies suggested themselves: the pelvis coming toward the camera changes its **apparent hip
+span**, which is a depth cue a single view does have; and loss of posture might be composed from the
+live `headLift` and `pelvisLift`.
 
-*Why not.* The hip-span proxy is already spoken for. `pelvisRotation`'s Estimated rung reads the same
-collapse of the same span, and turning is what the pelvis does through the downswing — one signal
-cannot be depth and rotation at once, and the model draws `causes` edges between the two. We would be
-measuring one quantity twice, then observing a relationship we had manufactured. The `headLift` +
-`pelvisLift` composition fails differently: both rise in a perfectly good pivot, so the composite has
-no discriminating power without the spine angle, which is the sagittal reading we do not have and the
-reason `spineForwardBend` is planned in the first place.
+*Early extension is still open, for the reason first given.* The hip-span proxy is already spoken
+for. `pelvisRotation`'s Estimated rung reads the same collapse of the same span, and turning is what
+the pelvis does through the downswing — one signal cannot be depth and rotation at once, and the
+model draws `causes` edges between the two. We would be measuring one quantity twice, then observing
+a relationship we had manufactured. *What would change our mind:* a depth cue independent of turn,
+which in practice means DTL or a trunk IMU.
 
-*What would change our mind.* For early extension, a depth cue that is independent of turn — which in
-practice means DTL or a trunk IMU. For loss of posture, the `trunkImus` rung `spineForwardBend`
-already declares.
+*Loss of posture closed, and the rejection above was right about the wrong pair.* `headLift` +
+`pelvisLift` does fail exactly as stated — both rise in a perfectly good pivot, so the composite
+cannot discriminate. What works is `headLift` + **`secondaryAxisTilt`**: the second half is not a
+quantity that rises in every good swing, it is one with a seated, club-contexted corridor, so the
+conjunction asks whether the trunk tipped away from the target MORE THAN IT SHOULD HAVE while the
+head was rising. The fault shipped as `coming_out_of_it`, `detection: all` over those two, live off
+one face-on camera.
+
+The generalisable lesson is not about proxies. The old condition was named for a family (*any* way of
+not holding the address posture) and detected on one narrow sagittal reading, and the mismatch is
+what made it look depth-blocked. Naming the specific fault the coaching phrase actually means —
+rising and backing away — put it on readings we already had. Before accepting that a fault needs a
+view we do not have, check that it is on the measure it belongs on.
 
 ### B.10 Out of scope for this appendix — live metrics no condition reads
 

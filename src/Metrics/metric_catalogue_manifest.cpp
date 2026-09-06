@@ -769,8 +769,11 @@ void installMetricManifest(MetricCatalogue &cat)
         .howToRead = QStringLiteral(
             "Read at Address and Impact; the aim is to retain most of the address posture, with "
             "irons commonly holding around 30–40° into impact. A loss of forward bend into impact "
-            "is early extension and pairs with the pelvis-thrust metric; too much is a dip that "
-            "moves the low point. Planned: needs pelvis and thorax IMUs (or a calibrated 3D camera)."),
+            "is early extension and pairs with the pelvis-thrust metric. GAINING bend is a dip, and "
+            "it is a TRANSITION event — read it between P5 and P6, where it happens, not across the "
+            "downswing as a whole: a golfer who drops into it and then stands up by impact shows "
+            "both, and a reading spanning the pair cancels them. Planned: needs pelvis and thorax "
+            "IMUs (or a calibrated 3D camera)."),
         .signPositive = QStringLiteral("more forward bend from the hips"),
         .signNegative = QStringLiteral("standing taller than upright, which a swing does not reach"),
         .phases = { P::Address, P::Impact },
@@ -781,8 +784,7 @@ void installMetricManifest(MetricCatalogue &cat)
             via("trunkImus", RM::Inertial, Direct, { .imuRoles = { R::Pelvis, R::Thorax } },
                 QStringLiteral("thorax-relative-pelvis flexion from the two trunk IMUs — "
                                "sagittal, so the face-on camera cannot stand in"), PLANNED) },
-        .usedBy = { QStringLiteral("characteristic:loss_of_posture"),
-                    QStringLiteral("characteristic:posture_too_upright"),
+        .usedBy = { QStringLiteral("characteristic:posture_too_upright"),
                     QStringLiteral("characteristic:posture_too_bent"),
                     QStringLiteral("characteristic:diving") },
     });
@@ -861,7 +863,8 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("characteristic:reverse_spine_p7"),
                     QStringLiteral("characteristic:reverse_spine_p4"),
                     QStringLiteral("characteristic:excessive_axis_tilt_top"),
-                    QStringLiteral("characteristic:reverse_pivot") },
+                    QStringLiteral("characteristic:reverse_pivot"),
+                    QStringLiteral("characteristic:coming_out_of_it") },
     });
 
     cat.addDescriptor({
@@ -1867,7 +1870,7 @@ void installMetricManifest(MetricCatalogue &cat)
             "than rescaled when it does not resolve. Needs a face-on camera; Wrist Motion session."),
         .signPositive = QStringLiteral("the head rose"),
         .signNegative = QStringLiteral("the head dropped"),
-        .phases = { P::Top, P::Impact },
+        .phases = { P::Top, P::ArmParallelDown, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("vertical head travel through the INTER-EAR ruler taken at "
@@ -1875,7 +1878,8 @@ void installMetricManifest(MetricCatalogue &cat)
                                "keypoints are the scale, so it needs no ball")) },
         .usedBy = { QStringLiteral("chart:review"),
                     QStringLiteral("characteristic:head_drop_backswing"),
-                    QStringLiteral("characteristic:head_rise_backswing") },
+                    QStringLiteral("characteristic:head_rise_backswing"),
+                    QStringLiteral("characteristic:coming_out_of_it") },
     });
 
     cat.addDescriptor({
