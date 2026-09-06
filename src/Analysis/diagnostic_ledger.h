@@ -380,6 +380,8 @@ struct ShotRecord {
     QString contextId;
     qint64  timestampMs = 0;
     bool    warmUp      = false;    // declared warm-up, over and above the first-N rule
+    bool    dataWarning = false;    // recording known broken: every row NotAssessable, shot
+                                    // drawn but weightless (session_diagnostics_model detectShot)
     std::vector<ConditionRow> rows;
 };
 
@@ -1404,6 +1406,7 @@ inline QJsonObject toJson(const std::vector<ShotRecord> &shots,
         so[QStringLiteral("contextId")]   = s.contextId;
         so[QStringLiteral("timestampMs")] = double(s.timestampMs);
         so[QStringLiteral("warmUp")]      = s.warmUp;
+        so[QStringLiteral("dataWarning")] = s.dataWarning;
         so[QStringLiteral("rows")]        = rowArr;
         shotArr.append(so);
     }
@@ -1470,6 +1473,7 @@ inline std::vector<ShotRecord> fromJson(const QJsonObject &root, LedgerOptions *
         s.contextId   = so.value(QStringLiteral("contextId")).toString();
         s.timestampMs = qint64(so.value(QStringLiteral("timestampMs")).toDouble());
         s.warmUp      = so.value(QStringLiteral("warmUp")).toBool();
+        s.dataWarning = so.value(QStringLiteral("dataWarning")).toBool();
         for (const QJsonValue &rv : so.value(QStringLiteral("rows")).toArray()) {
             const QJsonObject ro = rv.toObject();
             ConditionRow r;

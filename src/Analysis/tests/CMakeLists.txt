@@ -421,6 +421,13 @@ pp_add_test(imu_refusion_check_test
     INCLUDE ${SRC}/IMU
     STD 20)
 
+# --- Capture data-integrity check (frame-timestamp holes) --------------------
+# Pure-function test over the per-lane judge; the SwingWindow wrapper is a
+# two-line enumeration over the same enumerator imu_refusion_check uses.
+pp_add_test(capture_integrity_check_test
+    SOURCES capture_integrity_check_test.cpp ${SRC}/Buffer/swing_window.cpp
+    STD 20)
+
 # --- IMU driver frame-parse + WT901BLE67 eulerToQuat override (Phase 0.3) -----
 # Exercises the REAL driver stack. imu_test_stubs.cpp supplies EventBuffer::nowMicros
 # and PpLogStream so we link neither the Buffer library nor pp_debug.cpp. The

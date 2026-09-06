@@ -56,6 +56,7 @@ QVariant ShotListModel::data(const QModelIndex &index, int role) const
     case AnalysisDetailRole:  return s.analysisDetail;
     case SwingDirRole:        return s.swingDir;
     case DataWarningRole:     return s.dataWarning;
+    case DataWarningDetailRole: return s.dataWarningDetail;
     case LmDeviceKindRole:    return s.lmDeviceKind;
     default:                  return {};
     }
@@ -79,6 +80,7 @@ QHash<int, QByteArray> ShotListModel::roleNames() const
         { SwingDirRole,        "swingDir"        },
         { DataWarningRole,     "dataWarning"     },
         { LmDeviceKindRole,    "lmDeviceKind"    },
+        { DataWarningDetailRole, "dataWarningDetail" },
     };
 }
 
@@ -105,7 +107,8 @@ int ShotListModel::addShot(const QString &swingDir, const QString &timestampLabe
                            const QString &club, bool hasVideo, const QUrl &thumbnailSource,
                            const QVariantList &tracePoints, int score,
                            const QVariantMap &metrics,
-                           const QVariantMap &analysisDetail, bool dataWarning)
+                           const QVariantMap &analysisDetail, bool dataWarning,
+                           const QVariantMap &dataWarningDetail)
 {
     int maxOrdinal = 0;
     for (const Shot &s : m_shots)
@@ -124,6 +127,7 @@ int ShotListModel::addShot(const QString &swingDir, const QString &timestampLabe
     shot.metrics         = metrics;
     shot.analysisDetail  = analysisDetail;
     shot.dataWarning     = dataWarning;
+    shot.dataWarningDetail = dataWarningDetail;
 
     // Newest first, matching the mockup's right-of-cap ordering.
     beginInsertRows(QModelIndex(), 0, 0);
@@ -138,7 +142,8 @@ void ShotListModel::addPersistedShot(const QString &swingDir, int ordinal,
                                      bool hasVideo, const QUrl &thumbnailSource, int score,
                                      int rating, const QString &note,
                                      const QVariantMap &metrics, const QVariantMap &analysisDetail,
-                                     bool dataWarning, const QString &lmDeviceKind)
+                                     bool dataWarning, const QString &lmDeviceKind,
+                                     const QVariantMap &dataWarningDetail)
 {
     Shot shot;
     shot.id              = m_nextId++;
@@ -154,6 +159,7 @@ void ShotListModel::addPersistedShot(const QString &swingDir, int ordinal,
     shot.metrics         = metrics;
     shot.analysisDetail  = analysisDetail;
     shot.dataWarning     = dataWarning;
+    shot.dataWarningDetail = dataWarningDetail;
     shot.lmDeviceKind    = lmDeviceKind;
 
     // Prepend (newest first); callers reload ascending so the highest ordinal lands first.
@@ -182,7 +188,7 @@ void ShotListModel::loadSessionDir(const QString &dir)
                          ps.thumbnailPath.isEmpty() ? QUrl()
                                                     : QUrl::fromLocalFile(ps.thumbnailPath),
                          ps.score, ps.rating, ps.note, ps.metrics, ps.analysisDetail,
-                         ps.dataWarning, ps.lmDeviceKind);
+                         ps.dataWarning, ps.lmDeviceKind, ps.dataWarningDetail);
     }
 }
 
@@ -210,8 +216,13 @@ void ShotListModel::refreshShot(const QString &swingDir)
     // Re-read alongside the readings it belongs to: this is the path a live row takes when
     // a monitor's numbers are folded in, so it is where the row learns which device sent them.
     s.lmDeviceKind   = p.lmDeviceKind;
+    // A re-analysis re-reaches (or withdraws) the integrity verdicts, so the ⚠ must
+    // follow the document here — before this it survived on screen until reload.
+    s.dataWarning       = p.dataWarning;
+    s.dataWarningDetail = p.dataWarningDetail;
     emit dataChanged(index(row), index(row),
-                     { ScoreRole, MetricsRole, AnalysisDetailRole, LmDeviceKindRole });
+                     { ScoreRole, MetricsRole, AnalysisDetailRole, LmDeviceKindRole,
+                       DataWarningRole, DataWarningDetailRole });
 }
 
 void ShotListModel::attachSwingDir(int id, const QString &swingDir)
@@ -244,9 +255,12 @@ void ShotListModel::attachSwingDir(int id, const QString &swingDir)
     s.club           = p.club;
     s.timestampLabel = p.timestampLabel;
     s.lmDeviceKind   = p.lmDeviceKind;
+    s.dataWarning       = p.dataWarning;
+    s.dataWarningDetail = p.dataWarningDetail;
     emit dataChanged(index(row), index(row),
                      { SwingDirRole, ScoreRole, MetricsRole, AnalysisDetailRole,
-                       ClubRole, TimestampLabelRole, LmDeviceKindRole });
+                       ClubRole, TimestampLabelRole, LmDeviceKindRole,
+                       DataWarningRole, DataWarningDetailRole });
 }
 
 void ShotListModel::clear()

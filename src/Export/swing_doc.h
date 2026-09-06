@@ -31,6 +31,7 @@ namespace pinpoint {
 
 struct ImuRefusionVerdict;   // Analysis/imu_refusion_check.h — by pointer, so this
                              // header need not drag the filter/refuser chain in.
+struct CaptureIntegrityVerdict;   // Analysis/capture_integrity_check.h — same reason.
 
 // ── The swing.json "imuIntegrity" block ──────────────────────────────────────
 //
@@ -53,6 +54,24 @@ QJsonObject imuIntegrityJson(const ImuRefusionVerdict &v);
 // lane, passes nullptr and the document then makes NO claim. "Not checkable" must
 // never be persisted as "checked and passed".
 void applyImuIntegrity(QJsonObject &manifest, const ImuRefusionVerdict *v);
+
+// ── The swing.json "captureIntegrity" block ──────────────────────────────────
+//
+// Frame-timestamp holes in the camera lanes (capture_integrity_check.h): the
+// 2026-08-18 s3 stall that lost ~80 frames after impact and left the user none
+// the wiser. Same two producers, same lifecycle as imuIntegrity: nullptr or a
+// verdict that checked no camera REMOVES the block, so a re-analysis can only
+// ever replace or withdraw a claim, never inherit one.
+QJsonObject captureIntegrityJson(const CaptureIntegrityVerdict &v);
+void applyCaptureIntegrity(QJsonObject &manifest, const CaptureIntegrityVerdict *v);
+
+// The per-shot DATA WARNING, read from both integrity blocks of a manifest. Empty
+// when neither block warns. Otherwise { capture: bool, imu: bool, holes, framesLost,
+// worstHoleMs, preImpact, postImpact, worstMaxDeg } — facts, not sentences, so the
+// QML tooltip and the session ledger word it themselves. The one place the rule
+// "which blocks constitute a warning" is spelled; readSwingJson and the live join
+// both call it.
+QVariantMap dataWarningDetailFrom(const QJsonObject &manifest);
 
 // The single, unified per-shot document. Raw capture manifest and derived analysis
 // live in ONE swing.json — no separate analysis.json. Written once, on the GUI thread,
@@ -258,7 +277,9 @@ struct PersistedShot {
     QString     note;               // free-text user note (from the "review" block)
     QVariantMap metrics;            // key -> { label, value } at Impact
     QVariantMap analysisDetail;     // { tier, overall, series, phases } for the graph
-    bool        dataWarning = false;// IMU re-fusion parity failed (imuIntegrity block) → not re-analysable
+    bool        dataWarning = false;// an integrity block warns (dataWarningDetailFrom): IMU re-fusion
+                                    // parity failed, or frames were lost during capture
+    QVariantMap dataWarningDetail;  // the facts behind it (empty when !dataWarning)
     // WHICH DEVICE MEASURED IT — the launchMonitor.kind token ("gcquad"), empty when the
     // shot has no device block. The readings themselves come back through analysisDetail's
     // `lm.` series; this is the only place their provenance survives a reload, and without
@@ -281,6 +302,10 @@ struct SwingSummary {
     bool    hasVideo = false;
     QString thumbnailPath;          // absolute, empty if none
     int     score = 0;
+    // The shot carries a data warning (PersistedShot::dataWarning). Here because the
+    // session ledger judges shots from this cheap read and must never count one whose
+    // recording is known to be broken.
+    bool    dataWarning = false;
     // Provenance, never persisted: true when this came from the sidecar, false when the
     // full swing.json had to be parsed. Lets the parity test prove it actually exercised
     // the cheap path — a bug that always fell back would otherwise pass silently while

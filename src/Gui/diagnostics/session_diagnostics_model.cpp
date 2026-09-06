@@ -398,6 +398,22 @@ SessionDiagnosticsModel::Ingested SessionDiagnosticsModel::detectShot(int shotId
         rec.rows.push_back(std::move(r));
     }
 
+    // Data-integrity exclusion. A shot whose recording is known broken — frames lost
+    // during capture (captureIntegrity), or an IMU record that does not reproduce
+    // (imuIntegrity) — is still drawn on the strip, still carries the ⚠ the card shows,
+    // but says nothing to the session: every row becomes NotAssessable, which rule 1
+    // already keeps out of every denominator (diagnostic_ledger.h tierAtPrefix). Done
+    // here rather than in the ledger arithmetic so the reason reads in the corridor
+    // slot like any other withheld row, and the ledger needs no new rule.
+    if (summary.dataWarning) {
+        rec.dataWarning = true;
+        for (ConditionRow &r : rec.rows) {
+            r.state               = ShotState::NotAssessable;
+            r.direction           = 0;
+            r.notAssessableReason = missingReasonText(MissingKind::CaptureDataIssue);
+        }
+    }
+
     out.record           = std::move(rec);
     out.hasLaunchMonitor = src.hasLaunchMonitor();
     out.ok               = true;

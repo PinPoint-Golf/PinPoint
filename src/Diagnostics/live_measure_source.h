@@ -76,6 +76,8 @@ enum class MissingKind {
     LaunchMonitorFieldAbsent,   // there IS launch-monitor data; this device did not report this field
     MetricNotProduced,          // the metric key is absent from this capture's analysis
     PhaseNotSegmented,          // the metric is here, but a phase the reducer needs was never found
+    CaptureDataIssue,           // the recording itself is known broken (frames lost, IMU record
+                                // inconsistent) — every row on the shot is withheld, not just one measure
 };
 
 // The sentence a not-assessable cell shows. Generic on purpose — see the header comment on why

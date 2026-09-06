@@ -138,6 +138,8 @@ void ReanalysisController::onWorkerFinished()
         // which case this removes it). Carrying the capture-time block forward is
         // what made a false ⚠ survive every re-analysis. See swing_doc.h.
         pinpoint::applyImuIntegrity(manifest, r.imuIntegrity ? &*r.imuIntegrity : nullptr);
+        pinpoint::applyCaptureIntegrity(manifest,
+                                        r.captureIntegrity ? &*r.captureIntegrity : nullptr);
 
         if (pinpoint::SwingDocWriter::writeSwingJson(dir, manifest,
                                                      r.analysis.detail.get(), &err)) {

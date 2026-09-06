@@ -60,8 +60,9 @@ public:
         MetricsRole,
         AnalysisDetailRole,
         SwingDirRole,
-        DataWarningRole,   // IMU re-fusion parity failed → shot not re-analysable
+        DataWarningRole,   // an integrity block warns (IMU re-fusion, or frames lost in capture)
         LmDeviceKindRole,  // launchMonitor.kind ("gcquad"); empty for a shot no device measured
+        DataWarningDetailRole,  // the facts behind dataWarning (swing_doc.h dataWarningDetailFrom)
     };
 
     explicit ShotListModel(QObject *parent = nullptr);   // starts empty
@@ -85,7 +86,8 @@ public:
     int addShot(const QString &swingDir, const QString &timestampLabel, const QString &club,
                 bool hasVideo, const QUrl &thumbnailSource, const QVariantList &tracePoints,
                 int score, const QVariantMap &metrics,
-                const QVariantMap &analysisDetail = {}, bool dataWarning = false);
+                const QVariantMap &analysisDetail = {}, bool dataWarning = false,
+                const QVariantMap &dataWarningDetail = {});
 
     // Reload a shot from disk (SwingDocReader): uses the stored ordinal and links the
     // row to its swingDir; rating/note are restored from the persisted "review" block.
@@ -93,7 +95,8 @@ public:
                           const QString &club, bool hasVideo, const QUrl &thumbnailSource,
                           int score, int rating, const QString &note,
                           const QVariantMap &metrics, const QVariantMap &analysisDetail,
-                          bool dataWarning = false, const QString &lmDeviceKind = {});
+                          bool dataWarning = false, const QString &lmDeviceKind = {},
+                          const QVariantMap &dataWarningDetail = {});
 
     // Re-read <swingDir>/swing.json (SwingDocReader) and update the matching row's
     // score / metrics / analysisDetail in place — emits dataChanged for just those
@@ -182,7 +185,8 @@ private:
         QVariantMap  metrics;         // key → { label, value }
         QVariantMap  analysisDetail;  // { tier, overall, series:[…], phases:[…] } for the graph
         QString      swingDir;        // on-disk folder, for reloaded shots (replay-from-MP4 later)
-        bool         dataWarning = false;  // IMU re-fusion parity failed → not re-analysable
+        bool         dataWarning = false;  // an integrity block warns (swing_doc.h dataWarningDetailFrom)
+        QVariantMap  dataWarningDetail;    // its facts: { capture, imu, framesLost, worstHoleMs, … }
         QString      lmDeviceKind;    // which device measured it; only reloaded shots carry it
     };
 

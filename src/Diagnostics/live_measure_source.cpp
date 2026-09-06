@@ -49,6 +49,7 @@ QString missingReasonText(MissingKind k)
     case MissingKind::LaunchMonitorFieldAbsent: return QStringLiteral("not reported by the launch monitor on this shot");
     case MissingKind::MetricNotProduced:        return QStringLiteral("metric not produced on this capture");
     case MissingKind::PhaseNotSegmented:        return QStringLiteral("the phase this reads at was not segmented");
+    case MissingKind::CaptureDataIssue:         return QStringLiteral("frames were lost during capture, so this shot is not assessed");
     }
     return QString();
 }

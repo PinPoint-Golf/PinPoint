@@ -6,6 +6,7 @@
 #include "../swing_paths.h"
 #include "../../LaunchMonitor/gcquad_csv_parser.h"
 #include "../../Analysis/imu_refusion_check.h"   // ImuRefusionVerdict (header-only)
+#include "../../Analysis/capture_integrity_check.h"   // CaptureIntegrityVerdict (header-only)
 #include "../../Analysis/swing_analysis.h"
 
 // Stub — avoids linking swing_paths.cpp (which pulls in the PpLogStream logging deps).
@@ -580,7 +581,7 @@ int main()
         if (!f.open(QIODevice::ReadOnly)) return 1;
         const QJsonObject s = QJsonDocument::fromJson(f.readAll()).object();
         f.close();
-        check(s[QStringLiteral("schema")].toString() == QStringLiteral("pinpoint.swingsummary/2"),
+        check(s[QStringLiteral("schema")].toString() == QStringLiteral("pinpoint.swingsummary/3"),
               "sidecar schema tag");
         const QFileInfo srcInfo(dir + QStringLiteral("/swing.json"));
         const QJsonObject src = s[QStringLiteral("source")].toObject();
@@ -1081,6 +1082,71 @@ int main()
         check(!m6.contains(QStringLiteral("imuIntegrity")), "removal on an absent key is a no-op");
 
         QDir(d6).removeRecursively();
+    }
+
+    // captureIntegrity: the same lifecycle for the frame-timestamp verdict, plus the
+    // one thing that is new — dataWarningDetail carries the facts of BOTH blocks and the
+    // summary sidecar carries the flag, because the session ledger judges from the
+    // sidecar and must never count a shot whose recording is known broken.
+    {
+        std::printf("\n-- captureIntegrity: verdict lifecycle + detail --\n");
+        const QString d7 = dir + QStringLiteral("/capture-integrity");
+        QDir().mkpath(d7);
+
+        pinpoint::CaptureIntegrityVerdict fail;
+        fail.ok = false; fail.camerasChecked = 1; fail.holes = 3; fail.framesLost = 117;
+        fail.worstHoleMs = 594.4; fail.postImpact = true;
+        pinpoint::CaptureIntegrityVerdict pass;
+        pass.camerasChecked = 1;
+        pinpoint::CaptureIntegrityVerdict notCheckable;   // camerasChecked stays 0
+
+        QJsonObject m1 = manifest;
+        applyCaptureIntegrity(m1, &fail);
+        check(m1.contains(QStringLiteral("captureIntegrity")), "a failing verdict writes the block");
+        QString e7;
+        check(SwingDocWriter::writeSwingJson(d7, m1, &a, &e7), "…and the document writes");
+        const PersistedShot p1 = SwingDocReader::readSwingJson(d7);
+        check(p1.dataWarning, "…and reads back as a data warning");
+        check(p1.dataWarningDetail.value(QStringLiteral("capture")).toBool()
+                  && !p1.dataWarningDetail.value(QStringLiteral("imu")).toBool()
+                  && p1.dataWarningDetail.value(QStringLiteral("framesLost")).toInt() == 117
+                  && p1.dataWarningDetail.value(QStringLiteral("postImpact")).toBool()
+                  && !p1.dataWarningDetail.value(QStringLiteral("preImpact")).toBool(),
+              "…with the capture facts in the detail");
+        check(SwingDocReader::readSwingSummary(d7).dataWarning,
+              "…and the summary sidecar carries the flag");
+        check(SwingDocReader::readSwingSummary(d7).fromSidecar
+                  && SwingDocReader::readSwingSummary(d7).dataWarning,
+              "…on the cheap sidecar path too");
+
+        // Both blocks failing: one warning, both facts.
+        QJsonObject mBoth = readManifest(d7);
+        ImuRefusionVerdict imuFail; imuFail.ok = false; imuFail.sourcesChecked = 1; imuFail.worstMaxDeg = 9.0;
+        applyImuIntegrity(mBoth, &imuFail);
+        check(SwingDocWriter::writeSwingJson(d7, mBoth, &a, &e7), "both blocks written");
+        const QVariantMap both = SwingDocReader::readSwingJson(d7).dataWarningDetail;
+        check(both.value(QStringLiteral("capture")).toBool() && both.value(QStringLiteral("imu")).toBool()
+                  && both.value(QStringLiteral("worstMaxDeg")).toDouble() == 9.0,
+              "…and the detail names both");
+
+        // Re-analysis reaches a pass on the capture check and withdraws the IMU claim.
+        QJsonObject m2 = readManifest(d7);
+        applyCaptureIntegrity(m2, &pass);
+        applyImuIntegrity(m2, nullptr);
+        check(SwingDocWriter::writeSwingJson(d7, m2, &a, &e7), "the re-analysis writes back");
+        const PersistedShot p2 = SwingDocReader::readSwingJson(d7);
+        check(!p2.dataWarning && p2.dataWarningDetail.isEmpty(), "…and the warning is gone");
+        check(!SwingDocReader::readSwingSummary(d7).dataWarning, "…from the sidecar as well");
+
+        QJsonObject m3 = readManifest(d7);
+        applyCaptureIntegrity(m3, &notCheckable);
+        check(!m3.contains(QStringLiteral("captureIntegrity")),
+              "a verdict with camerasChecked==0 removes the block (no claim, not a pass)");
+        QJsonObject m4 = readManifest(d7);
+        applyCaptureIntegrity(m4, nullptr);
+        check(!m4.contains(QStringLiteral("captureIntegrity")), "nullptr removes it too");
+
+        QDir(d7).removeRecursively();
     }
 
     // ── H-b: the `origin` block on a streams[] element ────────────────────

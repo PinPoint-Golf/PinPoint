@@ -812,6 +812,12 @@ ReanalyzeResult reanalyzeSwingDir(const QString& swingDir, const ReanalyzeOption
         && ls.hostOrientationFilter.compare(QStringLiteral("madgwick"), Qt::CaseInsensitive) == 0)
         out.imuIntegrity = pinpoint::checkImuRefusion(*ls.window);
 
+    // Capture data-integrity (frame-timestamp holes in the camera lanes). The
+    // loader's window is window-relative and so is ls.job.impactUs — the same
+    // domain contract the analyzer follows, so the pre/post-impact split is exact.
+    if (ls.window)
+        out.captureIntegrity = pinpoint::checkCaptureIntegrity(*ls.window, ls.job.impactUs);
+
     return out;
 }
 

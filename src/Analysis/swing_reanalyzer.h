@@ -25,6 +25,7 @@
 #include "swing_window.h"
 #include "shot_analyzer.h"
 #include "imu_refusion_check.h"
+#include "capture_integrity_check.h"
 
 // SwingReanalyzer — reconstruct a SwingWindow from an exported swing folder and
 // re-run the production analyzer OFFLINE, the same disk → SwingWindow → analyzer
@@ -102,6 +103,10 @@ struct ReanalyzeResult {
     // which removes the block on nullopt. Carrying the capture-time block forward
     // instead is what made a false ⚠ permanent; see swing_doc.h.
     std::optional<pinpoint::ImuRefusionVerdict> imuIntegrity;
+    // Frame-timestamp verdict for the camera lanes (capture_integrity_check.h),
+    // nullopt when the window could not be loaded. Same write-back contract as
+    // imuIntegrity: pinpoint::applyCaptureIntegrity, which removes on nullopt.
+    std::optional<pinpoint::CaptureIntegrityVerdict> captureIntegrity;
 };
 
 // Convenience for the app: load + run makeShotAnalyzer(sessionType)->analyze().

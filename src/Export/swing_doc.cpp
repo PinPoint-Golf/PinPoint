@@ -32,6 +32,7 @@
 
 #include "swing_paths.h"
 #include "../Analysis/imu_refusion_check.h"
+#include "../Analysis/capture_integrity_check.h"
 #include "../Analysis/lm_inferred_reads.h"
 #include "../Analysis/swing_analysis.h"
 #include "../Core/club_vocabulary.h"
@@ -61,6 +62,60 @@ void applyImuIntegrity(QJsonObject &manifest, const ImuRefusionVerdict *v)
         manifest[QStringLiteral("imuIntegrity")] = imuIntegrityJson(*v);
     else
         manifest.remove(QStringLiteral("imuIntegrity"));
+}
+
+QJsonObject captureIntegrityJson(const CaptureIntegrityVerdict &v)
+{
+    return QJsonObject{
+        { QStringLiteral("ok"),             v.ok },
+        { QStringLiteral("camerasChecked"), v.camerasChecked },
+        { QStringLiteral("holes"),          v.holes },
+        { QStringLiteral("framesLost"),     v.framesLost },
+        { QStringLiteral("worstHoleMs"),    v.worstHoleMs },
+        { QStringLiteral("firstHoleUs"),    v.firstHoleUs },
+        { QStringLiteral("preImpact"),      v.preImpact },
+        { QStringLiteral("postImpact"),     v.postImpact },
+        { QStringLiteral("holePeriods"),    v.holePeriods } };
+}
+
+void applyCaptureIntegrity(QJsonObject &manifest, const CaptureIntegrityVerdict *v)
+{
+    // camerasChecked == 0 (no camera lane, or none with enough frames to judge) is a
+    // no-claim outcome exactly as nullptr is — never persisted as "checked and passed".
+    if (v && v->camerasChecked > 0)
+        manifest[QStringLiteral("captureIntegrity")] = captureIntegrityJson(*v);
+    else
+        manifest.remove(QStringLiteral("captureIntegrity"));
+}
+
+QVariantMap dataWarningDetailFrom(const QJsonObject &manifest)
+{
+    QVariantMap d;
+    bool capture = false, imu = false;
+    if (manifest.contains(QStringLiteral("captureIntegrity"))) {
+        const QJsonObject ci = manifest[QStringLiteral("captureIntegrity")].toObject();
+        if (ci.value(QStringLiteral("camerasChecked")).toInt() > 0
+            && !ci.value(QStringLiteral("ok")).toBool(true)) {
+            capture = true;
+            d.insert(QStringLiteral("holes"),       ci.value(QStringLiteral("holes")).toInt());
+            d.insert(QStringLiteral("framesLost"),  ci.value(QStringLiteral("framesLost")).toInt());
+            d.insert(QStringLiteral("worstHoleMs"), ci.value(QStringLiteral("worstHoleMs")).toDouble());
+            d.insert(QStringLiteral("preImpact"),   ci.value(QStringLiteral("preImpact")).toBool());
+            d.insert(QStringLiteral("postImpact"),  ci.value(QStringLiteral("postImpact")).toBool());
+        }
+    }
+    if (manifest.contains(QStringLiteral("imuIntegrity"))) {
+        const QJsonObject ii = manifest[QStringLiteral("imuIntegrity")].toObject();
+        if (ii.value(QStringLiteral("sourcesChecked")).toInt() > 0
+            && !ii.value(QStringLiteral("refusionOk")).toBool(true)) {
+            imu = true;
+            d.insert(QStringLiteral("worstMaxDeg"), ii.value(QStringLiteral("worstMaxDeg")).toDouble());
+        }
+    }
+    if (!capture && !imu) return {};
+    d.insert(QStringLiteral("capture"), capture);
+    d.insert(QStringLiteral("imu"),     imu);
+    return d;
 }
 
 namespace {
@@ -587,7 +642,7 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
 // the stub. A /1 sidecar cached the review-or-stub answer, and its size+mtime guard still
 // matches (the fix changed no swing.json), so bumping the schema is the ONLY thing that
 // retires the stale "DRIVER" it holds for every camera swing that was never edited.
-constexpr auto kSummarySchema = "pinpoint.swingsummary/2";
+constexpr auto kSummarySchema = "pinpoint.swingsummary/3";   // /3: + dataWarning
 
 QString summaryPath(const QString &swingDir) { return swingDir + QStringLiteral("/swing_summary.json"); }
 QString sourcePath (const QString &swingDir) { return swingDir + QStringLiteral("/swing.json"); }
@@ -730,6 +785,9 @@ SwingSummary summaryFromRoot(const QJsonObject &root, const QString &swingDir)
                       ? scoreVal.toObject()[QStringLiteral("overall")].toInt()
                       : scoreVal.toInt();
     }
+    // The data warning is read from the same two blocks the full reader uses, so the
+    // ledger's cheap path and the carousel's fat path can never disagree about it.
+    s.dataWarning = !dataWarningDetailFrom(root).isEmpty();
 
     s.ok = true;
     return s;
@@ -747,6 +805,7 @@ SwingSummary summaryFromShot(const PersistedShot &ps)
     s.hasVideo       = ps.hasVideo;
     s.thumbnailPath  = ps.thumbnailPath;
     s.score          = ps.score;
+    s.dataWarning    = ps.dataWarning;
     return s;
 }
 
@@ -779,6 +838,7 @@ bool writeSummaryFile(const SwingSummary &s, QString *error)
         { QStringLiteral("hasVideo"),       s.hasVideo },
         { QStringLiteral("thumbnailFile"),  thumbFile },
         { QStringLiteral("score"),          s.score },
+        { QStringLiteral("dataWarning"),    s.dataWarning },
     };
 
     const QString path = summaryPath(s.swingDir);
@@ -1430,13 +1490,11 @@ PersistedShot SwingDocReader::readSwingJson(const QString &swingDir)
             ps.club = club;
     }
 
-    // IMU data-integrity verdict (additive top-level block from ShotProcessor's
-    // offline re-fusion parity check). Legacy swings lack it → no warning.
-    if (root.contains(QStringLiteral("imuIntegrity"))) {
-        const QJsonObject ii = root[QStringLiteral("imuIntegrity")].toObject();
-        if (ii.value(QStringLiteral("sourcesChecked")).toInt() > 0)
-            ps.dataWarning = !ii.value(QStringLiteral("refusionOk")).toBool(true);
-    }
+    // Data-integrity verdicts (additive top-level blocks: imuIntegrity from the
+    // re-fusion parity check, captureIntegrity from the frame-timestamp check).
+    // Legacy swings lack both → no warning.
+    ps.dataWarningDetail = dataWarningDetailFrom(root);
+    ps.dataWarning       = !ps.dataWarningDetail.isEmpty();
 
     ps.ok = true;
     return ps;
@@ -1484,6 +1542,7 @@ SwingSummary SwingDocReader::readSwingSummary(const QString &swingDir, bool writ
             const QString tf = root[QStringLiteral("thumbnailFile")].toString();
             s.thumbnailPath  = tf.isEmpty() ? QString() : swingDir + QStringLiteral("/") + tf;
             s.score          = root[QStringLiteral("score")].toInt();
+            s.dataWarning    = root[QStringLiteral("dataWarning")].toBool(false);
             s.fromSidecar    = true;
             s.ok             = true;
             return s;

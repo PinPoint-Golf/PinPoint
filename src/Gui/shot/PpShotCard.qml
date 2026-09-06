@@ -51,7 +51,29 @@ Rectangle {
     required property var    metrics
     required property var    analysisDetail
     required property string swingDir
-    required property bool   dataWarning   // IMU re-fusion parity failed → not re-analysable
+    required property bool   dataWarning   // an integrity block warns (frames lost in capture, or IMU re-fusion)
+    required property var    dataWarningDetail   // { capture, imu, framesLost, worstHoleMs, preImpact, … }
+
+    // The ⚠ tooltip, worded from the facts. Capture holes first: they mean the swing
+    // itself (or its follow-through) is missing frames, which is the more serious of
+    // the two and the one the session assessment excludes the shot for.
+    readonly property string dataWarningText: {
+        const d = dataWarningDetail || {}
+        const parts = []
+        if (d.capture) {
+            const where = d.preImpact ? qsTr("during the swing")
+                                      : qsTr("after impact, so the follow-through positions are unreliable")
+            parts.push(qsTr("Frames were lost during capture (%1 frames in %2 hole%3, worst %4 ms) %5.")
+                       .arg(d.framesLost).arg(d.holes).arg(d.holes === 1 ? "" : "s")
+                       .arg(Math.round(d.worstHoleMs)).arg(where))
+        }
+        if (d.imu)
+            parts.push(qsTr("IMU data integrity check failed — the recorded motion data is "
+                            + "inconsistent (orientation re-fusion mismatch), so this shot "
+                            + "cannot be re-analysed."))
+        parts.push(qsTr("This shot is not included in the session assessment."))
+        return parts.join(" ")
+    }
 
     // A shot only a launch monitor saw: no video AND every metric it carries is an lm.
     // reading. Derived rather than carried as a role, because it is already implied by
@@ -284,8 +306,9 @@ Rectangle {
         Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
     }
 
-    // IMU data-integrity warning (bottom-right): re-fusion parity failed, so the
-    // recorded motion is internally inconsistent and the shot can't be re-analysed.
+    // Data-integrity warning (bottom-right): frames were lost during capture, or the
+    // IMU re-fusion parity failed. Either way the recording is known broken, the
+    // tooltip says which, and the session assessment leaves the shot out.
     Rectangle {
         id: dataWarnBadge
         visible: card.dataWarning
@@ -308,9 +331,7 @@ Rectangle {
         HoverHandler { id: warnHover }
         ToolTip.visible: warnHover.hovered
         ToolTip.delay:   400
-        ToolTip.text:    qsTr("IMU data integrity check failed — the recorded motion data is "
-                            + "inconsistent (orientation re-fusion mismatch), so this shot "
-                            + "cannot be re-analysed.")
+        ToolTip.text:    card.dataWarningText
     }
 
     // Hover lives on a HoverHandler (not the click MouseArea) so the interactive

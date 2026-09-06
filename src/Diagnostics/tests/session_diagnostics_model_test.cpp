@@ -109,6 +109,37 @@ static bool stageShot(const QString &sessionDir, int shotId, const char *fixture
     return stamped;
 }
 
+// Mark a staged shot's recording as broken: a failing captureIntegrity block, as the live
+// join or a re-analysis would persist after a frame-timestamp hole. Rewrites swing.json in
+// place and re-pins the mtime to the staging rule, and removes any summary sidecar so the
+// ledger's cheap read regenerates it from the document.
+static bool injectCaptureHole(const QString &sessionDir, int shotId)
+{
+    const QString dst = QDir(sessionDir).filePath(
+        QStringLiteral("swing_%1").arg(shotId, 4, 10, QLatin1Char('0')));
+    const QString dstFile = QDir(dst).filePath(QStringLiteral("swing.json"));
+    QFile f(dstFile);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    f.close();
+    root[QStringLiteral("captureIntegrity")] = QJsonObject{
+        { QStringLiteral("ok"), false }, { QStringLiteral("camerasChecked"), 1 },
+        { QStringLiteral("holes"), 3 },  { QStringLiteral("framesLost"), 117 },
+        { QStringLiteral("worstHoleMs"), 594.4 }, { QStringLiteral("firstHoleUs"), 1623828.0 },
+        { QStringLiteral("preImpact"), false }, { QStringLiteral("postImpact"), true },
+        { QStringLiteral("holePeriods"), 3.0 } };
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    f.close();
+    QFile::remove(QDir(dst).filePath(QStringLiteral("swing_summary.json")));
+    if (!f.open(QIODevice::ReadWrite)) return false;
+    const bool stamped = f.setFileTime(
+        QDateTime::fromMSecsSinceEpoch(kStageEpochMs + qint64(shotId) * 1000, QTimeZone::UTC),
+        QFileDevice::FileModificationTime);
+    f.close();
+    return stamped;
+}
+
 static QString swingDirFor(const QString &sessionDir, int shotId)
 {
     return QDir(sessionDir).filePath(QStringLiteral("swing_%1").arg(shotId, 4, 10, QLatin1Char('0')));
@@ -1003,6 +1034,60 @@ int main(int argc, char **argv)
 
         check(canon(d) == canon(m->conditionDetail(outcomeId)),
               "…and it is deterministic on a sparse capture too");
+    }
+
+    {
+        // ── Data-integrity exclusion ─────────────────────────────────────────────────
+        // A shot whose recording is known broken (captureIntegrity failed: frames lost
+        // during capture) is ingested and drawn — but every row is NotAssessable with the
+        // capture reason, and the ledger's tiers are byte-identical to a session that
+        // never had the shot at all. The 2026-08-18 s3 case: the stall was invisible and
+        // the fabricated post-impact milestones counted like any other shot's.
+        std::printf("\n-- data-integrity exclusion (captureIntegrity) --\n");
+        const QString withDir = makeSession(tmp, "athlete_j", "session_with_hole");
+        const QString cleanDir = makeSession(tmp, "athlete_j", "session_clean");
+        check(stageShot(withDir, 1, "rich_7iron") && stageShot(withDir, 2, "rich_7iron")
+                  && stageShot(withDir, 3, "rich_7iron"),
+              "three rich swings staged");
+        check(injectCaptureHole(withDir, 2), "shot 2's recording marked broken");
+        check(stageShot(cleanDir, 1, "rich_7iron") && stageShot(cleanDir, 3, "rich_7iron"),
+              "the same session without shot 2");
+
+        auto mw = freshModel();
+        mw->activateSession(withDir);
+        check(mw->shotCount() == 3, "the broken shot is still ingested (drawn, not hidden)");
+
+        const QVariantList rows = mw->shotReadout(2).value(QStringLiteral("conditions")).toList();
+        check(!rows.isEmpty(), "…and has a readout");
+        bool allWithheld = true, reasonSaid = true;
+        for (const QVariant &cv : rows) {
+            const QVariantMap c = cv.toMap();
+            if (c.value(QStringLiteral("stateKind")).toString() != QLatin1String("notAssessable"))
+                allWithheld = false;
+            if (!c.value(QStringLiteral("corridorText")).toString()
+                     .contains(QLatin1String("frames were lost during capture")))
+                reasonSaid = false;
+        }
+        check(allWithheld, "every row on the broken shot is withheld");
+        check(reasonSaid,  "…and each says why, in the corridor slot");
+        check(mw->firedCountFor(2) == 0, "it fires nothing");
+
+        auto mc = freshModel();
+        mc->activateSession(cleanDir);
+        check(tiersOf(*mw) == tiersOf(*mc),
+              "shot 1's tier ledger is byte-identical with and without the broken shot");
+        check(mw->shotReadout(1) != mw->shotReadout(2), "the clean shot is not withheld");
+
+        // The verdict rides the ledger's persistence.
+        mw->closeSession();
+        auto mr = freshModel();
+        mr->activateSession(withDir);
+        const QVariantList again = mr->shotReadout(2).value(QStringLiteral("conditions")).toList();
+        bool stillWithheld = !again.isEmpty();
+        for (const QVariant &cv : again)
+            if (cv.toMap().value(QStringLiteral("stateKind")).toString() != QLatin1String("notAssessable"))
+                stillWithheld = false;
+        check(stillWithheld, "…and the exclusion survives a reload from the persisted ledger");
     }
 
     std::printf("\npatterns at close: %d\n", patternsAtClose);

@@ -34,6 +34,7 @@
 #include "shot_list_model.h"
 #include "../Analysis/club_length_fusion.h"
 #include "../Analysis/imu_refusion_check.h"
+#include "../Analysis/capture_integrity_check.h"
 #include "../Analysis/imu_vision_fuser.h"
 #include "../Analysis/phase_segmenter.h"
 #include "../Analysis/swing_analysis.h"
@@ -1876,6 +1877,26 @@ void ShotProcessor::maybeJoin()
                          << "source(s); shot flagged not re-analysable";
         }
     }
+    // Capture data-integrity (frame-timestamp holes in the camera lanes): the host
+    // stalled and frames are missing. m_impactUs is absolute buffer-clock, the live
+    // window's own domain, so the verdict knows whether the swing itself or only the
+    // follow-through lost frames. Persisted beside imuIntegrity; the carousel ⚠ and
+    // the session ledger's exclusion both read the two blocks through
+    // dataWarningDetailFrom, so the rule lives in one place.
+    if (m_swingWindow) {
+        const pinpoint::CaptureIntegrityVerdict cv =
+            pinpoint::checkCaptureIntegrity(*m_swingWindow, m_impactUs);
+        if (cv.camerasChecked > 0) {
+            m_exportManifest[QStringLiteral("captureIntegrity")] = pinpoint::captureIntegrityJson(cv);
+            if (cv.warns())
+                ppWarn() << "[ShotProcessor] capture lost" << cv.framesLost << "frame(s) in"
+                         << cv.holes << "hole(s), worst" << cv.worstHoleMs << "ms,"
+                         << (cv.preImpact ? "before impact" : "after impact")
+                         << "— shot flagged and excluded from the session assessment";
+        }
+    }
+    const QVariantMap dataWarningDetail = pinpoint::dataWarningDetailFrom(m_exportManifest);
+    const bool        dataWarning       = !dataWarningDetail.isEmpty();
 
     // The club this shot was hit with: the session's active club (Home CLUB chip →
     // SessionController.activeClub, seeded from the athlete's preferred club), else the
@@ -1913,6 +1934,8 @@ void ShotProcessor::maybeJoin()
         QJsonObject synthManifest = buildSynthManifest();
         if (m_exportManifest.contains(QStringLiteral("imuIntegrity")))
             synthManifest[QStringLiteral("imuIntegrity")] = m_exportManifest[QStringLiteral("imuIntegrity")];
+        if (m_exportManifest.contains(QStringLiteral("captureIntegrity")))
+            synthManifest[QStringLiteral("captureIntegrity")] = m_exportManifest[QStringLiteral("captureIntegrity")];
         if (pinpoint::SwingDocWriter::writeSwingJson(
                 m_swingDir, synthManifest, m_analysisResult.detail.get(), &werr, shotClub)) {
             savedSwingDir = m_swingDir;
@@ -1947,7 +1970,7 @@ void ShotProcessor::maybeJoin()
                              analysisOk ? m_analysisResult.score : 0,
                              analysisOk ? m_analysisResult.metrics : QVariantMap{},
                              m_replayAnalysisDetail,
-                             imuDataWarning);
+                             dataWarning, dataWarningDetail);
     }
 
     m_lastShotId = newShotId;

@@ -331,6 +331,7 @@ Item {
                     required property string timestampLabel
                     required property int    score
                     required property string swingDir
+                    required property bool   dataWarning   // the card's ⚠: recording known broken
 
                     width:  shotGrid.cellWidth
                     height: shotGrid.cellHeight
@@ -368,6 +369,20 @@ Item {
                             font.pixelSize: Theme.fontSzMicro
                             color:          cell.picked ? (Theme.dark ? Theme.colorBg : "#FFFFFF")
                                                         : Theme.qualityColor(cell.score)
+                        }
+
+                        // The card's data-integrity ⚠ at chip scale (top-right corner), so a
+                        // shot the session assessment leaves out reads as such from the
+                        // picker too — the strip is folded, so the card is not there to say it.
+                        Text {
+                            objectName:     "shotPickerWarn"
+                            visible:        cell.dataWarning
+                            anchors { right: parent.right; top: parent.top
+                                      rightMargin: Theme.sp(2); topMargin: -Theme.sp(1) }
+                            text:           "⚠"
+                            font.family:    Theme.fontSymbol
+                            font.pixelSize: Theme.sp(9)
+                            color:          Theme.colorWarn
                         }
 
                         PpPressable {
@@ -412,6 +427,7 @@ Item {
                         return "#" + c.ordinal
                              + (c.club ? " · " + c.club : "")
                              + (c.timestampLabel ? " · " + c.timestampLabel : "")
+                             + (c.dataWarning ? " · ⚠ " + qsTr("data issue") : "")
                     if (parent._onStage)
                         return "#" + parent._sum.ordinal
                              + (parent._sum.club ? " · " + parent._sum.club : "")

@@ -55,17 +55,17 @@ Item {
 
     readonly property var fixture: [
         { shotId: 106, ordinal: 6, club: "7 iron", timestampLabel: "14:31",
-          score: 82, swingDir: "/s/swing_0006" },
+          score: 82, swingDir: "/s/swing_0006", dataWarning: false },
         { shotId: 105, ordinal: 5, club: "7 iron", timestampLabel: "14:29",
-          score: 61, swingDir: "/s/swing_0005" },
+          score: 61, swingDir: "/s/swing_0005", dataWarning: true },
         { shotId: 104, ordinal: 4, club: "Driver", timestampLabel: "14:26",
-          score: 44, swingDir: "/s/swing_0004" },
+          score: 44, swingDir: "/s/swing_0004", dataWarning: false },
         { shotId: 103, ordinal: 3, club: "Driver", timestampLabel: "14:24",
-          score: 77, swingDir: "/s/swing_0003" },
+          score: 77, swingDir: "/s/swing_0003", dataWarning: false },
         { shotId: 102, ordinal: 2, club: "Driver", timestampLabel: "14:21",
-          score: 18, swingDir: "/s/swing_0002" },
+          score: 18, swingDir: "/s/swing_0002", dataWarning: false },
         { shotId: 101, ordinal: 1, club: "Driver", timestampLabel: "14:18",
-          score: 55, swingDir: "/s/swing_0001" }
+          score: 55, swingDir: "/s/swing_0001", dataWarning: false }
     ]
 
     ShotFilterProxyModel {
@@ -150,6 +150,18 @@ Item {
             compare(probe.pickCount, 1)
             compare(probe.lastShotId, 104)
             compare(probe.lastSwingDir, "/s/swing_0004")
+        }
+
+        // ── a broken recording says so from the picker too ───────────────────────
+        // The strip is folded, so the card's ⚠ is not on screen; the chip carries it.
+        function test_a_data_warning_shows_on_its_chip_and_only_there() {
+            reveal()
+            const warned = grid().itemAtIndex(1)   // ordinal 5, the broken recording
+            const clean  = grid().itemAtIndex(0)   // ordinal 6
+            verify(warned !== null && clean !== null)
+            compare(warned.ordinal, 5)
+            verify(findChild(warned, "shotPickerWarn").visible)
+            verify(!findChild(clean, "shotPickerWarn").visible)
         }
 
         // ── ...and one click on the swing already there takes it off ────────────
