@@ -466,6 +466,69 @@ int main()
               "gate 0.2: high-net m=3 chain survives (selection identical)");
     }
 
+    // ── (n) capture-hole clip: post-impact frame drop must not collapse top ───
+    std::printf("=== (n) capture-hole clip (2026-08-18 s3 shape) ===\n");
+    {
+        // Backswing (m=2 fragments), top dwell, downswing INTO a follow-through
+        // that climbs back toward the top (one continuous run, net low), then a
+        // capture hole after impact, then three sideways settle bursts (gap 5 <
+        // bridge 10) as the stalled host's backlog drains. Without the clip the
+        // bursts chain onto the downswing run (m=4), the gate rejects it (net/
+        // path ~0.03), the backswing is the only run left and its grip apex —
+        // the run END — becomes top. With the clip the downswing run stays a
+        // chain-1 candidate and the two-run rule finds the dwell.
+        Track t;
+        t.start(700, 650);
+        t.wander(700, 650, 50, 0.8, 0.0);
+        t.vel(9, 12.0, 12.0, 0, -1, 0.0);
+        t.vel(2, 2.0, 2.0, 0, -1, 0.0);
+        t.vel(9, 12.0, 12.0, 0, -1, 0.0);
+        const int bsEnd = t.frame();
+        t.wander(t.gx.back(), t.gy.back(), 20, 0.5, 0.0);   // top dwell (the truth)
+        const int downStart = t.frame() + 1;
+        t.vel(10, 1.0, 14.0, 0, +1, 0.0);
+        t.vel(30, 14.0, 14.0, 0, +1, 0.0);
+        const int impact = t.frame();
+        t.vel(28, 14.0, 14.0, 0, -1, 0.0);                  // follow-through climbs back
+        const int hole = t.frame() + 1;                     // first post-hole frame
+        for (int c = 0; c < 3; ++c) {
+            t.vel(9, 12.0, 12.0, (c % 2) ? +1 : -1, 0, 0.0);   // settle burst
+            t.vel(5, 1.0, 1.0, (c % 2) ? +1 : -1, 0, 0.0);     // lull (gap 5 < bridge 10)
+        }
+        t.wander(t.gx.back(), t.gy.back(), 20, 0.5, 0.0);
+        const int nf = int(t.gx.size());
+        std::vector<int64_t> uniform(nf), holed(nf);
+        for (int i = 0; i < nf; ++i) {
+            uniform[i] = int64_t(i) * 6667;
+            holed[i]   = (i < hole) ? uniform[i]
+                                    : uniform[hole - 1] + 600000 + int64_t(i - hole) * 1000;
+        }
+        ShaftV3Config cfg;   // shipping defaults (bridge 10, gate 0.2, clip 3.0)
+        const PhaseModel pNull = segmentPhases(t.gx, t.gy, nf, 150.0, impact, cfg, nullptr);
+        const PhaseModel pUni  = segmentPhases(t.gx, t.gy, nf, 150.0, impact, cfg, nullptr, &uniform);
+        const PhaseModel pHole = segmentPhases(t.gx, t.gy, nf, 150.0, impact, cfg, nullptr, &holed);
+        ShaftV3Config off = cfg; off.captureHolePeriods = 0.0;
+        const PhaseModel pOff  = segmentPhases(t.gx, t.gy, nf, 150.0, impact, off, nullptr, &holed);
+        const PhaseModel pNoImp = segmentPhases(t.gx, t.gy, nf, 150.0, -1, cfg, nullptr, &holed);
+        std::printf("    bsEnd=%d down=%d impact=%d hole=%d | null top=%d fin0=%d | holed top=%d fin0=%d hole=%d\n",
+                    bsEnd, downStart, impact, hole, pNull.top, pNull.fin0, pHole.top, pHole.fin0,
+                    pHole.captureHole);
+        check(pNull.top <= bsEnd && pNull.captureHole < 0,
+              "fixture sane: without the clip the top collapses onto the backswing run end");
+        check(pHole.captureHole == hole, "holed timestamps: clip fires at the first post-impact hole");
+        check(pHole.top > bsEnd && pHole.top < downStart,
+              "holed timestamps: top lands in the dwell (two-run rule restored)");
+        check(pHole.fin0 == hole - 1, "holed timestamps: fin0 = the frame before the hole");
+        auto same = [](const PhaseModel &a, const PhaseModel &b) {
+            return a.bs0 == b.bs0 && a.top == b.top && a.impact == b.impact && a.fin0 == b.fin0
+                && a.onsetFloor == b.onsetFloor && a.captureHole == b.captureHole && a.phase == b.phase;
+        };
+        check(same(pUni, pNull),   "uniform timestamps: byte-identical to no timestamps (inert)");
+        check(same(pOff, pNull),   "captureHolePeriods=0: byte-identical (dark idiom)");
+        check(same(pNoImp, segmentPhases(t.gx, t.gy, nf, 150.0, -1, cfg, nullptr)),
+              "no impact anchor: byte-identical (clip needs the anchor)");
+    }
+
     // ── fromOverrides: the four keys reach ShaftV3Config ──────────────────────
     std::printf("=== fromOverrides key plumbing ===\n");
     {
@@ -476,13 +539,16 @@ int main()
               && def.onsetRunBridgeFrames == 10 && def.emitTakeaway == true,
               "empty map → frozen ON defaults (box 7 / gap 15 / bridge 10 / Takeaway)");
         check(def.onsetBridgeMinNetFrac == 0.2, "empty map → m3gate frozen ON 0.2 (2026-07-18 freeze)");
+        check(def.captureHolePeriods == 3.0, "empty map → capture-hole clip ON at 3 periods");
         QVariantMap ov;
         ov["shaft.onsetReturnBoxPx"] = 0.0;
         ov["shaft.onsetReturnGapFrames"] = 20;
         ov["shaft.onsetRunBridgeFrames"] = 0;
         ov["shaft.onsetBridgeMinNetFrac"] = 0.0;   // dark-out
         ov["shaft.emitTakeaway"] = false;
+        ov["shaft.captureHolePeriods"] = 0.0;
         const ShaftV3Config c = ShaftV3Config::fromOverrides(ov);
+        check(c.captureHolePeriods == 0.0, "shaft.captureHolePeriods override reaches the config");
         check(c.onsetReturnBoxPx == 0.0 && c.onsetReturnGapFrames == 20
               && c.onsetRunBridgeFrames == 0 && c.onsetBridgeMinNetFrac == 0.0
               && c.emitTakeaway == false,

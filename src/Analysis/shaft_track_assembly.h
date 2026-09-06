@@ -240,6 +240,16 @@ struct ShaftV3Config {
     // coverage span — 0709_swing_0004 escalation). 0 disables; inert when no
     // impact frame is supplied (hands-derived impf must not filter its inputs).
     int64_t runMaxStartAfterImpactUs = 1000000;
+    // Capture-hole clip (0 = off; inert without frame timestamps or a supplied
+    // impact frame). A single inter-frame interval longer than this many median
+    // frame periods AFTER the impact anchor is a capture drop, not motion: the
+    // frames delivered after it carry a stalled host's ARRIVAL times (2026-08-18
+    // s3: a 594 ms hole 33 ms after impact, then ~50 frames stamped ~1 ms
+    // apart). Runs are clipped to the frame before the first such hole BEFORE
+    // bridging — a run straddling it ends there, runs starting at/after it are
+    // dropped — so post-hole fragments can never chain onto the downswing run
+    // and hand it to the m3gate. No hole ⇒ nothing clipped (byte-identical).
+    double  captureHolePeriods = 3.0;
     // Top-collapse repair (FROZEN ON 2026-08-10; false = byte-identical, the
     // dark idiom). On the phase-model-collapse swings the two-longest ranking
     // picks (downswing, follow-through) — or a single merged run whose grip
@@ -399,6 +409,9 @@ struct PhaseModel {
     // Pre-repair top frame when the top-collapse repair fired (-1 = dark /
     // not fired). Diagnostics only; rides into ShaftDecideTrace via phases.
     int  topPreRepair = -1;
+    // First frame after a post-impact capture hole when the clip fired (-1 =
+    // dark / no hole). Diagnostics only.
+    int  captureHole = -1;
     std::vector<double> spdSmoothed;    // smoothed grip speed (px/frame)
 };
 
@@ -412,9 +425,12 @@ struct PhaseModel {
 // first sustained |Δφ|/f above cfg.phiOnsetDegPerFrame (A2); onset = min of the
 // two. When impactFrame >= 0 the onset is clamped into [impact − bsMax, impact
 // − bsMin] frames (A3). cfg.swLow <= 0 disables A1+A2+A3 (legacy behaviour).
+// tUs (may be null): per-frame timestamps for the capture-hole clip
+// (cfg.captureHolePeriods); null ⇒ no clip, identical to the pre-clip model.
 PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double>& gy,
                          int nf, double fps, int impactFrame, const ShaftV3Config& cfg,
-                         const std::vector<double>* phiSmoothed = nullptr);
+                         const std::vector<double>* phiSmoothed = nullptr,
+                         const std::vector<int64_t>* tUs = nullptr);
 
 // Robust unit-vector smoothing of the lead-arm direction (deg), wrap-aware.
 // Hampel-rejects physically-impossible jumps (> armOutlierDeg) then median +

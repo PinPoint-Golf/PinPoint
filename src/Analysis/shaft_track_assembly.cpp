@@ -307,6 +307,7 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "shaft.onsetBridgeMinNetFrac", c.onsetBridgeMinNetFrac);
     apply(ov, "shaft.emitTakeaway", c.emitTakeaway);
     apply(ov, "shaft.runMaxStartAfterImpactUs", c.runMaxStartAfterImpactUs);
+    apply(ov, "shaft.captureHolePeriods", c.captureHolePeriods);
     apply(ov, "shaft.topRepair.enabled", c.topRepairEnabled);
     apply(ov, "shaft.topRepair.minDownswingUs", c.topRepairMinDownswingUs);
     apply(ov, "shaft.topRepair.maxDownswingUs", c.topRepairMaxDownswingUs);
@@ -438,7 +439,8 @@ std::vector<double> smoothPhi(const std::vector<double>& phiDeg, const ShaftV3Co
 // ── hands-only phase model (club_track_v3.segment_phases) ────────────────────
 PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double>& gy,
                          int nf, double fps, int impactFrame, const ShaftV3Config& cfg,
-                         const std::vector<double>* phiSmoothed)
+                         const std::vector<double>* phiSmoothed,
+                         const std::vector<int64_t>* tUs)
 {
     PhaseModel m;
     std::vector<double> spd(nf, 0.0);
@@ -457,6 +459,38 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
             if (g - f >= 6) runs.emplace_back(f, g);
             f = g + 1;
         } else ++f;
+    }
+    // Capture-hole clip (dark: captureHolePeriods <= 0, null tUs, or no impact
+    // anchor). Frames delivered after a timestamp hole that follows the impact
+    // anchor carry a stalled host's arrival times, not exposure times (2026-08-18
+    // s3: a 594 ms hole 33 ms after impact, then ~50 frames stamped ~1 ms apart).
+    // In frame-index space they fragment the finish settle into short >swSpd
+    // bursts a few quiet frames apart; bridging below chains them onto the
+    // downswing run (chain 3) and the m3gate then rejects the whole downswing as
+    // an oscillation cluster (net 97 px over a 1383 px path). That leaves the
+    // backswing run alone, whose single-run grip apex parks top at the run END,
+    // 166 ms before the real top — and the DP's downswing sign band can never
+    // follow the club back. The swing proper is over by the first post-impact
+    // hole, so run candidacy stops there: a run straddling the hole ends at the
+    // frame before it, runs starting at/after it are dropped. Applied BEFORE
+    // bridging so the chain count stays true; the >= 7-frame qualifier is
+    // re-applied to the clipped run. No hole ⇒ nothing changes (byte-identical);
+    // the unfiltered list is kept if the clip would empty it (degenerate).
+    if (tUs && cfg.captureHolePeriods > 0.0 && impactFrame >= 0 && fps > 0.0
+        && int(tUs->size()) == nf) {
+        const double holeUs = cfg.captureHolePeriods * 1e6 / fps;
+        int hole = -1;
+        for (int f = impactFrame + 1; f < nf; ++f)
+            if (double((*tUs)[size_t(f)] - (*tUs)[size_t(f) - 1]) > holeUs) { hole = f; break; }
+        if (hole >= 0) {
+            std::vector<std::pair<int, int>> kept;
+            for (std::pair<int, int> r : runs) {
+                if (r.first >= hole) continue;
+                r.second = std::min(r.second, hole - 1);
+                if (r.second - r.first >= 6) kept.push_back(r);
+            }
+            if (!kept.empty()) { runs = std::move(kept); m.captureHole = hole; }
+        }
     }
     // Run bridging (dark: 0 = off): merge min-length-QUALIFIED runs separated by
     // fewer than onsetRunBridgeFrames quiet frames, BEFORE the two-longest
@@ -1174,7 +1208,7 @@ SwingSpanEstimate estimateSwingSpanUs(const std::vector<double>& gx, const std::
         }
     }
 
-    const PhaseModel pm = segmentPhases(gx, gy, nf, fps, impactFrame, cfg, nullptr);
+    const PhaseModel pm = segmentPhases(gx, gy, nf, fps, impactFrame, cfg, nullptr, &tUs);
     // Degenerate whole-clip-address (no run): the span is the full window —
     // signal the caller to fall back rather than trust a phantom [onset, fin0].
     if (pm.bs0 == 0 && pm.fin0 == nf - 1) return est;   // ok = false
@@ -1253,7 +1287,7 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
     interpFillNan(phiRaw);
     const std::vector<double> phiS = smoothPhi(phiRaw, cfg);
 
-    const PhaseModel pm = segmentPhases(gx, gy, nf, fps, impactFrame, cfg, &phiS);
+    const PhaseModel pm = segmentPhases(gx, gy, nf, fps, impactFrame, cfg, &phiS, &tUs);
 
     // chirality from unwrapped φ over [bs0, top]
     int chir = 1;
