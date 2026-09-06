@@ -106,6 +106,11 @@ Item {
     }
     readonly property real _zoom: Math.max(0.2, Math.min(4.0, _fitScale * _userZoom))
 
+    // Where the pane is looking. Read-only, and here because the pan is a gesture whose whole
+    // effect is these two numbers — there is nothing else for a test to look at.
+    readonly property alias _panX: canvas.contentX
+    readonly property alias _panY: canvas.contentY
+
     // A new layout is a new picture: it opens fitted again rather than inheriting a zoom that was
     // chosen for something else.
     onLayoutDataChanged: _userZoom = 1.0
@@ -384,8 +389,12 @@ Item {
         contentHeight: content.height
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        // A drag on this canvas is a marquee, a nudge or a link — never a pan. The wheel and the
-        // scrollbars are how it is panned, which is what leaves the drag free to mean something.
+        // A bare drag on this canvas PANS it, because the graph is read far more often than it is
+        // edited and a picture larger than the pane has to be reachable by hand. The gestures that
+        // used to own the drag keep it where they are unambiguous: a drag that starts on a node
+        // still nudges that node, and a marquee is Shift+drag. The pan is driven from the input
+        // layer below rather than by the Flickable's own handler, because that one layer is the
+        // only thing on this canvas that accepts a press and it is what tells the two apart.
         interactive: false
 
         ScrollBar.vertical:   ScrollBar { policy: ScrollBar.AsNeeded; interactive: true }
@@ -1132,14 +1141,15 @@ Item {
             z: 60
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            cursorShape: root._dragging             ? Qt.CrossCursor
+            cursorShape: mode === "pan"             ? Qt.ClosedHandCursor
+                       : root._dragging             ? Qt.CrossCursor
                        : root._hotToggle !== ""     ? Qt.PointingHandCursor
                        : root._hotMeasure !== ""    ? Qt.PointingHandCursor
                        : root._hotReference !== ""  ? Qt.PointingHandCursor
                                                     : Qt.ArrowCursor
 
-            // "idle" | "pending" | "nudge" | "marquee" | "ring" | "armed" | "toggle" | "measure"
-            //        | "reference"
+            // "idle" | "pending" | "nudge" | "marquee" | "pan" | "ring" | "armed" | "toggle"
+            //        | "measure" | "reference"
             property string mode: "idle"
             property real   pressLX: 0     // press point, in LAYOUT coordinates
             property real   pressLY: 0
@@ -1151,6 +1161,19 @@ Item {
             property string pressedMeasure: ""
             property string pressedReference: ""
             property var    nudgeBase:   ({})
+            // The pan is held in VIEWPORT coordinates and applied absolutely from the press, never
+            // accumulated move by move. This layer is a child of the content the pan moves, so its
+            // own coordinates shift under a stationary hand; a delta taken in them would feed back
+            // into itself and run away.
+            property real   panPressVX: 0
+            property real   panPressVY: 0
+            property real   panBaseX:   0
+            property real   panBaseY:   0
+            // Taken at the PRESS, not read off the move. What a gesture means is settled when it
+            // starts — and a move event carries no modifier of its own to read anyway.
+            property bool   pressShift: false
+
+            function toViewport(mx, my) { return canvas.mapFromItem(input, mx, my) }
 
             function toLayout(mx, my) { return inner.mapFromItem(input, mx, my) }
 
@@ -1165,6 +1188,12 @@ Item {
 
                 pressLX = p.x; pressLY = p.y
                 moveLX  = p.x; moveLY  = p.y
+
+                pressShift = (mouse.modifiers & Qt.ShiftModifier) !== 0
+
+                var v = toViewport(mouse.x, mouse.y)
+                panPressVX = v.x;             panPressVY = v.y
+                panBaseX   = canvas.contentX; panBaseY   = canvas.contentY
 
                 // The open/close control sits OUTSIDE its node's box, so it is tested before the
                 // node and before anything else this press could mean. It is neither a selection
@@ -1245,11 +1274,23 @@ Item {
                         mode = "nudge"
                         nudgeBase = { dx: root._ndx(pressedNode.id, root._nudgeRev),
                                       dy: root._ndy(pressedNode.id, root._nudgeRev) }
-                    } else if (!pressedNode && !pressedEdge) {
+                    } else if (!pressedNode && !pressedEdge && pressShift) {
                         mode = "marquee"
                     } else {
-                        mode = "idle"
+                        // Everything else — empty canvas, a link, a node on a graph that cannot be
+                        // edited — moves the picture. A drag that did nothing at all was the worst
+                        // of the answers available here.
+                        mode = "pan"
                     }
+                }
+
+                if (mode === "pan") {
+                    var pv = toViewport(mouse.x, mouse.y)
+                    canvas.contentX = Math.max(0, Math.min(canvas.contentWidth  - canvas.width,
+                                                           panBaseX - (pv.x - panPressVX)))
+                    canvas.contentY = Math.max(0, Math.min(canvas.contentHeight - canvas.height,
+                                                           panBaseY - (pv.y - panPressVY)))
+                    return
                 }
 
                 if (mode === "nudge" && pressedNode) {
@@ -1298,6 +1339,9 @@ Item {
                 if (mode === "ring")  { ring.release(); mode = "idle"; return }
                 if (root._dragging)   { root._dropDrag(p.x, p.y); mode = "idle"; return }
                 if (mode === "marquee") { root._applyMarquee(); mode = "idle"; return }
+                // A pan is a way of LOOKING at the graph, so it leaves the selection alone — which
+                // is the whole of what it has to do on release.
+                if (mode === "pan")     { mode = "idle"; return }
                 if (mode === "nudge")   { mode = "idle"; return }
 
                 // A press that neither held nor travelled is a click.
@@ -1311,7 +1355,7 @@ Item {
 
             onCanceled: {
                 holdTimer.stop(); mode = "idle"
-                pressedToggle = ""; pressedMeasure = ""; pressedReference = ""
+                pressedToggle = ""; pressedMeasure = ""; pressedReference = ""; pressShift = false
             }
             onExited:   { root._hotToggle = ""; root._hotMeasure = ""; root._hotReference = "" }
 

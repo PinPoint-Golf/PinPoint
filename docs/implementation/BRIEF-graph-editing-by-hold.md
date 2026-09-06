@@ -185,15 +185,21 @@ anyone who does not think to hold the link. One gesture, two entrances — not t
 
 ### 5.5 · Marquee → bulk
 
-Drag on empty canvas draws a marquee (no mode, no modifier). **A marquee touching only edges selects
-edges; if it touches any node it is a node selection** and behaves as the table's does. Then hold inside
+**Shift**+drag on empty canvas draws a marquee. **A marquee touching only edges selects
+edges; if it touches any node it is a node selection** and behaves as the table's does. The bare drag
+is the pan (§6): the graph is read far more often than it is edited, so moving the picture is what the
+unmodified drag on empty canvas — or on a link, or on any node when the graph is not editable — does. Then hold inside
 the selection for the bulk ring (§4, column three), where every live spoke is the bulk form with the count
 in the label. Bulk strength and bulk delete are **one command each** over a list, so one `⌘Z` restores all
 of them. `#8b` right frame.
 
-## 6 · Nudge and Tidy
+## 6 · Pan, Nudge and Tidy
 
-Node-body drag moves a node within the canvas for this session. `Tidy layout` re-runs `dag()` and drops
+A drag that is not a nudge and not a marquee **pans the canvas** — the wheel and the scroll bars keep
+working, but a picture wider than the pane is now reachable by hand, which is what the reading case
+needs. A pan changes nothing but the view, so it leaves the selection standing.
+
+Node-body drag moves a node within the canvas for this session, when the graph is editable. `Tidy layout` re-runs `dag()` and drops
 every nudge. Nudges also drop on focus change, radius change and reload — none of which needs a warning,
 because rule 2.1 means nothing was at stake. If saved layouts are asked for later, that is a **view**
 feature (a named arrangement per user), not a pack feature. Do not let it in through this door.
